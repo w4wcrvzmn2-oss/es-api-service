@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сводный прайс - ES API Service</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <script src="auth.js"></script>
+    <script src="toast.js"></script>
+    <script src="loading.js"></script>
+    <script src="navigation.js"></script>
+    <script>
+        if (!AuthManager.isAuthenticated()) {
+            window.location.href = 'login.html';
+        }
+    </script>
+
+    <div class="dashboard">
+
+        <main class="main-content">
+            <div class="page-header">
+                <h1><span class="page-icon">📋</span> Сводный прайс</h1>
+                <p>Актуальные цены всех поставщиков с учетом наценок</p>
+            </div>
+
+            <div class="content-wrapper">
+            <!-- Toast контейнер для уведомлений -->
+            <div id="toastContainer"></div>
+            
+            <!-- Фильтры -->
+            <div class="section filters-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                        <h2 style="margin: 0;">🔍 Поиск</h2>
+                        <button id="loadSummaryBtn" class="btn btn-primary">🔄 Загрузить прайс</button>
+                        <button id="exportBtn" class="btn btn-info" style="display: none;">📥 Экспорт</button>
+                        <button id="exportExcelBtn" class="btn btn-success" style="display: none;">📊 Excel</button>
+                        <button id="clearFiltersBtn" class="btn btn-secondary">🗑️ Сброс</button>
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <button id="toggleFiltersBtn" class="btn btn-secondary" title="Показать/скрыть фильтры">
+                            <span id="filtersIcon">⚙️</span> <span id="filtersText">Фильтры</span>
+                        </button>
+                        <button id="toggleViewBtn" class="btn btn-secondary" title="Переключить вид">
+                            <span id="viewModeIcon">📋</span> <span id="viewModeText">Карточки</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Поиск -->
+                <div class="form-group">
+                    <label for="searchInput">🔎 Поиск по названию препарата:</label>
+                    <div style="position: relative;">
+                        <input type="text" id="searchInput" placeholder="Введите название препарата, МНН или код и нажмите Enter..." 
+                               style="width: 100%; padding: 12px 40px 12px 12px; font-size: 14px; border: 2px solid #e0e0e0; border-radius: 8px; transition: border-color 0.3s; box-sizing: border-box;"
+                               onfocus="this.style.borderColor='#667eea'; this.style.boxShadow='0 0 0 3px rgba(102, 126, 234, 0.1)'"
+                               onblur="this.style.borderColor='#e0e0e0'; this.style.boxShadow='none'">
+                        <span id="searchClearBtn" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); cursor: pointer; color: #999; font-size: 18px; display: none; font-weight: bold; line-height: 1;" onclick="clearSearch()" title="Очистить поиск">×</span>
+                    </div>
+                    <small style="color: #666; display: block; margin-top: 5px;">🔍 Нажмите Enter для применения фильтра. Поиск также выполняется в реальном времени</small>
+                    <div id="searchResultsInfo" style="margin-top: 8px; font-size: 0.9em; color: #667eea; font-weight: 500; display: none;"></div>
+                </div>
+                
+                <!-- Дополнительные фильтры (скрыты по умолчанию) -->
+                <div id="advancedFilters" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 2px solid #e0e0e0;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div class="form-group">
+                            <label for="supplierSelect">🏢 Поставщик:</label>
+                            <select id="supplierSelect" class="filter-select">
+                                <option value="">-- Все поставщики --</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Регионы не используются в сводном прайсе - все данные о препарате из ЕС -->
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                        <div class="form-group">
+                            <label for="priceMin">💰 Цена от:</label>
+                            <input type="number" id="priceMin" step="0.01" min="0" placeholder="0.00" 
+                                   class="filter-input" style="width: 100%;">
+                        </div>
+                        <div class="form-group">
+                            <label for="priceMax">💰 Цена до:</label>
+                            <input type="number" id="priceMax" step="0.01" min="0" placeholder="∞" 
+                                   class="filter-input" style="width: 100%;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Таблица сводного прайса -->
+            <div class="section" style="margin-top: 6px;">
+                <div id="summaryContainer">
+                    <!-- Контейнер для таблицы или карточек -->
+                    <div class="summary-table-container" style="width: 100%; max-width: 100%; overflow-x: auto; overflow-y: visible; -webkit-overflow-scrolling: touch;">
+                        <div id="summaryTableContainer" style="width: 100%; min-width: fit-content;"></div>
+                    </div>
+                    
+                    <!-- Пагинация -->
+                    <div id="paginationContainer" style="display: none; margin-top: 12px; padding: 10px; background: #f8f9fa; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                        <div id="paginationInfo" style="color: #666;"></div>
+                        <div id="paginationControls" style="display: flex; gap: 5px;"></div>
+                    </div>
+                    
+                    <!-- Статистика и управление (перемещено вниз) -->
+                    <div id="summaryHeader" style="display: none; margin-top: 12px; padding: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; color: white;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                            <div>
+                                <strong style="font-size: 1.1em;">📊 Статистика:</strong>
+                                <span id="statsText"></span>
+                            </div>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                                    <input type="checkbox" id="autoRefreshCheck" style="cursor: pointer;">
+                                    <span>Автообновление</span>
+                                </label>
+                                <select id="itemsPerPageSelect" style="padding: 5px 10px; border-radius: 6px; border: none; cursor: pointer;">
+                                    <option value="25">25 на странице</option>
+                                    <option value="50" selected>50 на странице</option>
+                                    <option value="100">100 на странице</option>
+                                    <option value="200">200 на странице</option>
+                                    <option value="0">Все</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="price-summary.js"></script>
+    <style>
+        .page-header {
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #3498db;
+        }
+        .page-header h1 {
+            color: #2c3e50;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .page-header h1 .page-icon {
+            display: inline-block;
+            font-size: 1em;
+            filter: none;
+            -webkit-text-fill-color: initial;
+            background: none;
+            opacity: 0.85;
+            flex-shrink: 0;
+        }
+        .page-header h1:not(:has(.page-icon)) {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .page-header p {
+            color: #7f8c8d;
+            font-size: 1.1em;
+        }
+        .content-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .nav-menu {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .nav-menu li {
+            margin-bottom: 10px;
+        }
+        .nav-menu a {
+            display: block;
+            padding: 12px 15px;
+            color: #2c3e50;
+            text-decoration: none;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        .nav-menu a:hover,
+        .nav-menu a.active {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+        }
+        .logout-btn {
+            width: 100%;
+            margin-top: 20px;
+        }
+        .filters-section {
+            background: #ffffff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .filter-select, .filter-input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        .filter-select:focus, .filter-input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        
+        /* Улучшенная таблица */
+        .summary-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            margin-top: 10px;
+            background: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .summary-table th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 8px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s;
+        }
+        .summary-table th:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        }
+        .summary-table th.sortable::after {
+            content: ' ↕️';
+            opacity: 0.5;
+            font-size: 0.8em;
+        }
+        .summary-table th.sort-asc::after {
+            content: ' ↑';
+            opacity: 1;
+        }
+        .summary-table th.sort-desc::after {
+            content: ' ↓';
+            opacity: 1;
+        }
+        .summary-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #f0f0f0;
+            vertical-align: middle;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            hyphens: auto;
+        }
+        .summary-table tbody tr {
+            transition: all 0.2s;
+        }
+        .summary-table tbody tr:nth-child(even) {
+            background: #fafbfc;
+        }
+        .summary-table tbody tr:hover {
+            background: #f0f4ff;
+            transform: scale(1.01);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .summary-table tbody tr.highlighted {
+            background: #fff3cd;
+            animation: highlight 3s ease-out;
+        }
+        @keyframes highlight {
+            0% { background: #fff3cd; }
+            100% { background: transparent; }
+        }
+        
+        /* Карточный вид */
+        .cards-view {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .price-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+            transition: all 0.3s;
+            border-left: 4px solid #3498db;
+        }
+        .price-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+        .price-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        .price-card-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #2c3e50;
+            margin: 0;
+            flex: 1;
+        }
+        .price-card-price {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #28a745;
+        }
+        .price-card-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
+        .price-card-info-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .price-final {
+            font-weight: bold;
+            color: #28a745;
+            font-size: 1.2em;
+        }
+        .price-base {
+            color: #6c757d;
+            font-size: 0.95em;
+        }
+        .markup-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #ffc107, #ff9800);
+            color: #000;
+            font-size: 0.85em;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .drug-card-button {
+            padding: 6px 12px;
+            background: linear-gradient(135deg, #17a2b8, #138496);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.3s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .drug-card-button:hover {
+            background: linear-gradient(135deg, #138496, #17a2b8);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        /* Пагинация */
+        .pagination-btn {
+            padding: 8px 15px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .pagination-btn:hover:not(:disabled) {
+            background: #3498db;
+            color: white;
+            border-color: #3498db;
+        }
+        .pagination-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .pagination-btn.active {
+            background: #3498db;
+            color: white;
+            border-color: #3498db;
+        }
+        
+        /* Компактный режим */
+        .compact-mode .summary-table td {
+            padding: 8px 10px;
+            font-size: 0.9em;
+        }
+        .compact-mode .summary-table th {
+            padding: 12px 10px;
+            font-size: 12px;
+        }
+        
+        /* Выделение позиции клавиатурой */
+        .keyboard-selected {
+            background-color: #e3f2fd !important;
+            outline: 2px solid #2196f3 !important;
+            outline-offset: -2px;
+            box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.2) !important;
+        }
+        
+        #summaryTable tbody tr.keyboard-selected {
+            background-color: #e3f2fd !important;
+        }
+        
+        #summaryTable tbody tr.keyboard-selected:hover {
+            background-color: #bbdefb !important;
+        }
+        
+        .price-card.keyboard-selected {
+            background-color: #e3f2fd !important;
+            border: 2px solid #2196f3 !important;
+            box-shadow: 0 4px 12px rgba(33, 150, 243, 0.3) !important;
+            transform: translateY(-2px);
+            transition: all 0.2s ease;
+        }
+        
+        /* Стили для карточки препарата */
+        .drug-card-wrapper {
+            position: relative;
+        }
+        
+        .drug-card-header-fixed {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .drug-card-content {
+            /* Кастомный скроллбар */
+        }
+        .drug-card-content::-webkit-scrollbar {
+            width: 12px;
+        }
+        .drug-card-content::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .drug-card-content::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 10px;
+            border: 2px solid #f1f1f1;
+        }
+        .drug-card-content::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(135deg, #764ba2, #667eea);
+        }
+        
+        .drug-card-field {
+            background: #f8f9fa;
+            padding: 12px 15px;
+            border-radius: 8px;
+            border-left: 3px solid #667eea;
+            transition: all 0.3s;
+        }
+        .drug-card-field:hover {
+            background: #e9ecef;
+            transform: translateX(3px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .drug-card-label {
+            font-size: 0.85em;
+            color: #6c757d;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+        
+        .drug-card-value {
+            font-size: 1em;
+            color: #2c3e50;
+            font-weight: 500;
+            line-height: 1.4;
+        }
+        
+        .drug-card-section {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 2px solid #e0e0e0;
+        }
+        
+        .drug-card-section-title {
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .drug-card-price-item {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            border: 2px solid #e0e0e0;
+            transition: all 0.3s;
+        }
+        .drug-card-price-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-color: #667eea;
+        }
+        
+        .drug-card-price-label {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        
+        .drug-card-price-value {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #28a745;
+        }
+        
+        .drug-card-price-value.markup-value {
+            color: #ffc107;
+        }
+        
+        /* Индикатор прокрутки */
+        .drug-card-content::before {
+            content: '';
+            position: sticky;
+            top: 0;
+            display: block;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, #667eea, transparent);
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        .drug-card-content.scrolling::before {
+            opacity: 1;
+        }
+        
+        /* Скроллбары для аналогов и синонимов */
+        .analogs-scroll-container::-webkit-scrollbar,
+        .synonyms-scroll-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        .analogs-scroll-container::-webkit-scrollbar-track,
+        .synonyms-scroll-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .analogs-scroll-container::-webkit-scrollbar-thumb,
+        .synonyms-scroll-container::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 10px;
+        }
+        .analogs-scroll-container::-webkit-scrollbar-thumb:hover,
+        .synonyms-scroll-container::-webkit-scrollbar-thumb:hover {
+            background: #764ba2;
+        }
+        
+        /* Адаптивность */
+        @media (max-width: 1024px) {
+            .dashboard {
+                grid-template-columns: 200px 1fr;
+                gap: 15px;
+                padding: 15px;
+            }
+            .filters-section .form-group > div[style*="grid-template-columns"] {
+                grid-template-columns: 1fr !important;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+                gap: 15px;
+                padding: 10px;
+            }
+            .page-header h1 {
+                font-size: 1.8em;
+            }
+            .page-header p {
+                font-size: 1em;
+            }
+            .cards-view {
+                grid-template-columns: 1fr;
+            }
+            .drug-card-wrapper {
+                max-height: 98vh;
+                margin: 10px;
+            }
+            .drug-card-content {
+                padding: 15px 20px;
+            }
+            .drug-card-content > div {
+                grid-template-columns: 1fr !important;
+            }
+            .filters-section {
+                padding: 15px;
+            }
+            .filters-section > div:first-child {
+                flex-direction: column;
+                gap: 10px;
+                align-items: flex-start !important;
+            }
+            .filters-section .button-group {
+                flex-direction: column;
+                width: 100%;
+            }
+            .filters-section .button-group button {
+                width: 100%;
+            }
+            .summary-table {
+                font-size: 0.85em;
+            }
+            .summary-table th {
+                padding: 8px 6px;
+                font-size: 11px;
+            }
+            .summary-table td {
+                padding: 8px 6px;
+            }
+            .summary-header {
+                flex-direction: column !important;
+                gap: 10px !important;
+                align-items: flex-start !important;
+            }
+            .pagination-container {
+                flex-direction: column !important;
+                gap: 10px !important;
+            }
+            .pagination-controls {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+            .pagination-btn {
+                padding: 6px 10px;
+                font-size: 0.85em;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .dashboard {
+                padding: 5px;
+            }
+            .page-header {
+                margin-bottom: 15px;
+                padding-bottom: 10px;
+            }
+            .page-header h1 {
+                font-size: 1.5em;
+            }
+            .section {
+                padding: 15px;
+            }
+            .filters-section .form-group label {
+                font-size: 0.9em;
+            }
+            .filter-select, .filter-input {
+                padding: 8px 10px;
+                font-size: 13px;
+            }
+            .summary-table {
+                font-size: 0.75em;
+            }
+            .summary-table th {
+                padding: 6px 4px;
+                font-size: 10px;
+            }
+            .summary-table td {
+                padding: 6px 4px;
+            }
+            .drug-card-button {
+                padding: 4px 8px;
+                font-size: 0.8em;
+            }
+            .cards-view {
+                gap: 10px;
+            }
+            .price-card {
+                padding: 15px;
+            }
+            .price-card-info {
+                grid-template-columns: 1fr !important;
+            }
+        }
+        
+        /* Улучшенный поиск для мобильных */
+        @media (max-width: 768px) {
+            #searchInput {
+                font-size: 16px; /* Предотвращает зум на iOS */
+            }
+        }
+        
+        /* Горизонтальная прокрутка для таблицы */
+        .summary-table-container {
+            width: 100%;
+            max-width: 100%;
+            overflow-x: auto;
+            overflow-y: visible;
+            -webkit-overflow-scrolling: touch;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            position: relative;
+        }
+        
+        /* Кастомный скроллбар для контейнера таблицы */
+        .summary-table-container::-webkit-scrollbar {
+            height: 12px;
+        }
+        .summary-table-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .summary-table-container::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 10px;
+            border: 2px solid #f1f1f1;
+        }
+        .summary-table-container::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(135deg, #764ba2, #667eea);
+        }
+        
+        #summaryTableContainer {
+            width: 100%;
+            min-width: fit-content;
+        }
+        
+        .summary-table {
+            width: 100%;
+            min-width: 1200px; /* Минимальная ширина для всех колонок */
+            table-layout: auto;
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+        
+        /* Оптимизация ширины колонок */
+        .summary-table th:nth-child(1),
+        .summary-table td:nth-child(1) {
+            min-width: 200px; /* Препарат */
+            max-width: 300px;
+        }
+        .summary-table th:nth-child(2),
+        .summary-table td:nth-child(2) {
+            min-width: 120px; /* Поставщик */
+            max-width: 150px;
+        }
+        .summary-table th:nth-child(3),
+        .summary-table td:nth-child(3) {
+            min-width: 120px; /* МНН */
+            max-width: 150px;
+        }
+        .summary-table th:nth-child(4),
+        .summary-table td:nth-child(4) {
+            min-width: 100px; /* Форма */
+            max-width: 200px;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            white-space: normal;
+        }
+        .summary-table th:nth-child(5),
+        .summary-table td:nth-child(5) {
+            min-width: 120px; /* Цена */
+            max-width: 150px;
+            text-align: right;
+        }
+        .summary-table th:nth-child(6),
+        .summary-table td:nth-child(6) {
+            min-width: 100px; /* Количество */
+            max-width: 120px;
+            text-align: right;
+        }
+        .summary-table th:nth-child(7),
+        .summary-table td:nth-child(7) {
+            min-width: 120px; /* Срок годности */
+            max-width: 150px;
+        }
+        .summary-table th:nth-child(8),
+        .summary-table td:nth-child(8) {
+            min-width: 100px; /* Страна */
+            max-width: 120px;
+        }
+        .summary-table th:nth-child(9),
+        .summary-table td:nth-child(9) {
+            min-width: 200px; /* Производитель */
+            max-width: 350px;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            white-space: normal;
+        }
+        .summary-table th:nth-child(10),
+        .summary-table td:nth-child(10) {
+            min-width: 120px; /* Цена реестра */
+            max-width: 150px;
+            text-align: right;
+        }
+        .summary-table th:nth-child(11),
+        .summary-table td:nth-child(11) {
+            min-width: 100px; /* Действия */
+            max-width: 120px;
+        }
+        
+        @media (max-width: 768px) {
+            .summary-table {
+                min-width: 1200px; /* Сохраняем минимальную ширину на мобильных */
+            }
+        }
+        
+        /* Улучшения для больших экранов */
+        @media (min-width: 1400px) {
+            .dashboard {
+                max-width: 1600px;
+                margin: 0 auto;
+            }
+            .drug-card-wrapper {
+                max-width: 1200px;
+            }
+        }
+        
+        /* Улучшения для планшетов */
+        @media (min-width: 769px) and (max-width: 1024px) {
+            .cards-view {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
+        /* Стили для кнопки очистки поиска */
+        #searchClearBtn {
+            transition: all 0.2s;
+        }
+        #searchClearBtn:hover {
+            color: #dc3545;
+            transform: scale(1.2);
+        }
+        
+        /* Информация о результатах поиска */
+        #searchResultsInfo {
+            padding: 8px 12px;
+            background: #e7f3ff;
+            border-left: 3px solid #667eea;
+            border-radius: 4px;
+            margin-top: 8px;
+        }
+    </style>
+</body>
+</html>
+

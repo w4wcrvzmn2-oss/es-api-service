@@ -1,0 +1,2465 @@
+/* ============================================
+   ОБЩИЕ СТИЛИ И СБРОС
+   ============================================ */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    /* Цветовая палитра */
+    --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    --success-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    --info-gradient: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+    --warning-gradient: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+    
+    /* Цвета */
+    --color-primary: #667eea;
+    --color-primary-dark: #5568d3;
+    --color-secondary: #764ba2;
+    --color-success: #10b981;
+    --color-info: #3b82f6;
+    --color-warning: #f59e0b;
+    --color-danger: #ef4444;
+    
+    /* Нейтральные цвета */
+    --color-text: #1f2937;
+    --color-text-light: #6b7280;
+    --color-bg: #ffffff;
+    --color-bg-light: #f9fafb;
+    --color-border: #e5e7eb;
+    --color-border-light: #f3f4f6;
+    
+    /* Тени */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    --shadow-colored: 0 10px 30px -5px rgba(102, 126, 234, 0.3);
+    
+    /* Радиусы */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+    
+    /* Переходы */
+    --transition-fast: 150ms ease;
+    --transition-base: 300ms ease;
+    --transition-slow: 500ms ease;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+    background: var(--primary-gradient);
+    background-attachment: fixed;
+    min-height: 100vh;
+    color: var(--color-text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-size: 16px;
+    overflow-x: hidden;
+    max-width: 100vw;
+}
+
+html {
+    overflow-x: hidden;
+    max-width: 100vw;
+}
+
+img, video, iframe {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Предотвращение переполнения для основных контейнеров */
+.container, .section, .main-content, .dashboard, .top-nav-content {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+/* ============================================
+   LAYOUT
+   ============================================ */
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 12px;
+}
+
+.dashboard {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    max-width: 1800px;
+    margin: 0 auto;
+    width: 100%;
+    overflow-x: hidden;
+}
+
+/* ============================================
+   ВЕРХНЯЯ НАВИГАЦИЯ
+   ============================================ */
+.top-nav {
+    background: rgba(255, 255, 255, 0.98);
+    backdrop-filter: blur(20px);
+    border-bottom: 2px solid rgba(102, 126, 234, 0.2);
+    box-shadow: var(--shadow-md);
+    padding: 0;
+    margin-bottom: 24px;
+    border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.top-nav-content {
+    max-width: 1800px;
+    margin: 0 auto;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+}
+
+.logo-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    white-space: nowrap;
+}
+
+.logo-icon {
+    font-size: 2rem;
+    display: inline-block;
+    animation: pulse 2s ease-in-out infinite;
+    filter: drop-shadow(0 2px 4px rgba(102, 126, 234, 0.3));
+}
+
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.05);
+    }
+}
+
+.logo-text {
+    background: var(--primary-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    font-size: 1.5rem;
+    font-weight: 800;
+    margin: 0;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.top-nav h3 {
+    color: var(--color-text);
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: -0.5px;
+    white-space: nowrap;
+}
+
+.top-nav-menu {
+    display: flex;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    gap: 8px;
+    flex: 1;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.top-nav-menu li {
+    margin: 0;
+}
+
+.top-nav-menu a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    color: var(--color-text);
+    text-decoration: none;
+    border-radius: var(--radius-md);
+    transition: all var(--transition-base);
+    font-weight: 500;
+    position: relative;
+    white-space: nowrap;
+}
+
+.top-nav-menu a::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%) scaleX(0);
+    width: 80%;
+    height: 3px;
+    background: var(--color-primary);
+    border-radius: 3px 3px 0 0;
+    transition: transform var(--transition-base);
+}
+
+.top-nav-menu a:hover {
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+    color: var(--color-primary);
+}
+
+.top-nav-menu a:hover::after {
+    transform: translateX(-50%) scaleX(1);
+}
+
+.top-nav-menu a.active {
+    background: var(--primary-gradient);
+    color: white;
+    box-shadow: var(--shadow-colored);
+}
+
+.top-nav-menu a.active::after {
+    background: white;
+    transform: translateX(-50%) scaleX(1);
+}
+
+.top-nav-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.top-nav .logout-btn {
+    margin: 0;
+    padding: 10px 20px;
+    white-space: nowrap;
+}
+
+/* ============================================
+   SIDEBAR OVERLAY
+   ============================================ */
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    z-index: 10000;
+    opacity: 0;
+    transition: opacity var(--transition-base);
+    pointer-events: none;
+}
+
+.sidebar-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* ============================================
+   САЙДБАР (для мобильных устройств)
+   ============================================ */
+.sidebar {
+    display: none !important;
+}
+
+.sidebar h3 {
+    color: var(--color-text);
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 3px solid var(--color-primary);
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+}
+
+.sidebar .logo-container {
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 3px solid var(--color-primary);
+}
+
+.sidebar .logo-icon {
+    font-size: 1.8rem;
+}
+
+.sidebar .logo-text {
+    font-size: 1.3rem;
+}
+
+.nav-menu {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.nav-menu li {
+    margin-bottom: 8px;
+}
+
+.nav-menu a {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    color: var(--color-text);
+    text-decoration: none;
+    border-radius: var(--radius-md);
+    transition: all var(--transition-base);
+    font-weight: 500;
+    position: relative;
+    overflow: hidden;
+}
+
+.nav-menu a::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: 4px;
+    background: var(--color-primary);
+    transform: scaleY(0);
+    transition: transform var(--transition-base);
+}
+
+.nav-menu a:hover {
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+    color: var(--color-primary);
+    transform: translateX(4px);
+}
+
+.nav-menu a:hover::before {
+    transform: scaleY(1);
+}
+
+.nav-menu a.active {
+    background: var(--primary-gradient);
+    color: white;
+    box-shadow: var(--shadow-colored);
+    transform: translateX(4px);
+}
+
+.nav-menu a.active::before {
+    transform: scaleY(1);
+    background: white;
+}
+
+.logout-btn {
+    width: 100%;
+    margin-top: 24px;
+}
+
+/* ============================================
+   ОСНОВНОЙ КОНТЕНТ
+   ============================================ */
+.main-content {
+    background: rgba(255, 255, 255, 0.98);
+    padding: 16px;
+    margin: 0 12px 12px 12px;
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-xl);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    animation: fadeInUp 0.6s ease-out;
+    flex: 1;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    box-sizing: border-box;
+}
+
+.page-header {
+    margin-bottom: 32px;
+    padding-bottom: 24px;
+    border-bottom: 2px solid var(--color-border-light);
+}
+
+.page-header h1 {
+    color: var(--color-text);
+    font-size: 2.25rem;
+    font-weight: 800;
+    margin-bottom: 8px;
+    letter-spacing: -1px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.page-header h1 .page-icon {
+    display: inline-block;
+    font-size: 1em;
+    filter: none;
+    -webkit-text-fill-color: initial;
+    background: none;
+    opacity: 0.85;
+    flex-shrink: 0;
+}
+
+.page-header h1:not(:has(.page-icon)) {
+    background: var(--primary-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.page-header p {
+    color: var(--color-text-light);
+    font-size: 1.05rem;
+    line-height: 1.6;
+}
+
+/* ============================================
+   СЕКЦИИ И ПАНЕЛИ
+   ============================================ */
+.section {
+    background: rgba(255, 255, 255, 0.98);
+    padding: 16px;
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(20px);
+    margin-bottom: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    transition: all var(--transition-base);
+}
+
+.section:hover {
+    box-shadow: var(--shadow-xl);
+    transform: translateY(-2px);
+}
+
+.section h2 {
+    color: var(--color-text);
+    margin-bottom: 12px;
+    font-size: 1.3rem;
+    font-weight: 700;
+    border-bottom: 3px solid var(--color-primary);
+    padding-bottom: 8px;
+    letter-spacing: -0.5px;
+}
+
+.section h3 {
+    color: var(--color-text);
+    margin-bottom: 10px;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.section h4 {
+    color: var(--color-text);
+    margin-bottom: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+/* ============================================
+   ФОРМЫ
+   ============================================ */
+.form-group {
+    margin-bottom: 12px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+label {
+    display: block;
+    margin-bottom: 4px;
+    font-weight: 600;
+    color: var(--color-text);
+    font-size: 0.9rem;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="datetime-local"],
+input[type="email"],
+input[type="url"],
+select,
+textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 2px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    transition: all var(--transition-base);
+    background: var(--color-bg);
+    font-family: inherit;
+    color: var(--color-text);
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="datetime-local"]:focus,
+input[type="email"]:focus,
+input[type="url"]:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+    transform: translateY(-1px);
+}
+
+input::placeholder {
+    color: var(--color-text-light);
+    opacity: 0.6;
+}
+
+textarea {
+    resize: vertical;
+    min-height: 100px;
+    font-family: inherit;
+}
+
+select {
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23667eea' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    padding-right: 40px;
+}
+
+/* ============================================
+   КНОПКИ
+   ============================================ */
+/* Стили для пагинации */
+.pagination-btn {
+    padding: 8px 15px;
+    border: 1px solid #ddd;
+    background: white;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.9em;
+}
+
+.pagination-btn:hover:not(:disabled) {
+    background: #3498db;
+    color: white;
+    border-color: #3498db;
+}
+
+.pagination-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.pagination-btn.active {
+    background: #3498db;
+    color: white;
+    border-color: #3498db;
+}
+
+.btn {
+    padding: 14px 28px;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-base);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-right: 12px;
+    margin-bottom: 12px;
+    position: relative;
+    overflow: hidden;
+    letter-spacing: 0.3px;
+}
+
+.btn::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+    transform: translate(-50%, -50%);
+    transition: width 0.6s, height 0.6s;
+}
+
+.btn:hover::before {
+    width: 300px;
+    height: 300px;
+}
+
+.btn-primary {
+    background: var(--primary-gradient);
+    color: white;
+    box-shadow: var(--shadow-md);
+}
+
+.btn-primary:hover {
+    box-shadow: var(--shadow-colored);
+    transform: translateY(-2px);
+}
+
+.btn-secondary {
+    background: linear-gradient(135deg, #6b7280, #4b5563);
+    color: white;
+    box-shadow: var(--shadow-md);
+}
+
+.btn-secondary:hover {
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
+}
+
+.btn-success {
+    background: var(--success-gradient);
+    color: white;
+    box-shadow: var(--shadow-md);
+}
+
+.btn-success:hover {
+    box-shadow: 0 10px 30px -5px rgba(16, 185, 129, 0.4);
+    transform: translateY(-2px);
+}
+
+.btn-info {
+    background: var(--info-gradient);
+    color: white;
+    box-shadow: var(--shadow-md);
+}
+
+.btn-info:hover {
+    box-shadow: 0 10px 30px -5px rgba(59, 130, 246, 0.4);
+    transform: translateY(-2px);
+}
+
+.btn:active {
+    transform: translateY(0);
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+.button-group {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* ============================================
+   ТАБЛИЦЫ
+   ============================================ */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-md);
+    margin-top: 12px;
+}
+
+thead {
+    background: var(--primary-gradient);
+    color: white;
+}
+
+thead th {
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.95rem;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+}
+
+tbody tr {
+    transition: all var(--transition-fast);
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+tbody tr:hover {
+    background: rgba(102, 126, 234, 0.05);
+    transform: scale(1.01);
+}
+
+tbody tr:last-child {
+    border-bottom: none;
+}
+
+tbody td {
+    padding: 10px 12px;
+    color: var(--color-text);
+    font-size: 0.9rem;
+}
+
+.price-final {
+    color: var(--color-success);
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+
+/* ============================================
+   КАРТОЧКИ
+   ============================================ */
+.cards-view {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 24px;
+    margin-top: 24px;
+}
+
+.price-card {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    box-shadow: var(--shadow-md);
+    transition: all var(--transition-base);
+    border: 1px solid var(--color-border-light);
+    position: relative;
+    overflow: hidden;
+}
+
+.price-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    background: var(--primary-gradient);
+}
+
+.price-card:hover {
+    box-shadow: var(--shadow-xl);
+    transform: translateY(-4px);
+}
+
+.price-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid var(--color-border-light);
+}
+
+.price-card-title {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--color-text);
+    flex: 1;
+}
+
+.price-card-price {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--color-success);
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05));
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+}
+
+.price-card-info {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.price-card-info-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--color-text-light);
+    font-size: 0.9rem;
+}
+
+.stat-card {
+    background: var(--secondary-gradient);
+    color: white;
+    padding: 28px;
+    border-radius: var(--radius-lg);
+    text-align: center;
+    box-shadow: var(--shadow-lg);
+    transition: all var(--transition-base);
+    position: relative;
+    overflow: hidden;
+}
+
+.stat-card::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
+    animation: pulse 3s ease-in-out infinite;
+}
+
+.stat-card:hover {
+    transform: translateY(-4px) scale(1.02);
+    box-shadow: var(--shadow-2xl);
+}
+
+.stat-card h3 {
+    margin: 0 0 8px 0;
+    font-size: 2.5rem;
+    font-weight: 800;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.stat-card p {
+    margin: 0;
+    opacity: 0.95;
+    font-size: 1rem;
+    font-weight: 500;
+}
+
+.info-card {
+    background: rgba(255, 255, 255, 0.25);
+    padding: 16px;
+    border-radius: var(--radius-md);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    transition: all var(--transition-base);
+}
+
+.info-card:hover {
+    background: rgba(255, 255, 255, 0.35);
+    transform: translateY(-2px);
+}
+
+.info-card strong {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 0.85rem;
+    opacity: 0.9;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.info-card span {
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+/* ============================================
+   TOAST УВЕДОМЛЕНИЯ
+   ============================================ */
+#toastContainer {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 420px;
+    pointer-events: none;
+}
+
+.toast {
+    background: white;
+    padding: 18px 20px;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xl);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    animation: slideInRight 0.3s ease-out;
+    pointer-events: auto;
+    border-left: 4px solid;
+    min-width: 300px;
+}
+
+.toast.hiding {
+    animation: slideOutRight 0.3s ease-out forwards;
+}
+
+.toast-error {
+    border-left-color: var(--color-danger);
+}
+
+.toast-success {
+    border-left-color: var(--color-success);
+}
+
+.toast-info {
+    border-left-color: var(--color-info);
+}
+
+.toast-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+}
+
+.toast-icon {
+    font-size: 1.3rem;
+}
+
+.toast-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--color-text-light);
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all var(--transition-fast);
+    line-height: 1;
+}
+
+.toast-close:hover {
+    background: var(--color-border-light);
+    color: var(--color-text);
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOutRight {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+}
+
+/* ============================================
+   СТАТУСЫ И СООБЩЕНИЯ
+   ============================================ */
+.status {
+    margin-top: 16px;
+    padding: 14px 18px;
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.status.success {
+    background: linear-gradient(135deg, #d4edda, #c3e6cb);
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.status.error {
+    background: linear-gradient(135deg, #f8d7da, #f5c6cb);
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+.status.info {
+    background: linear-gradient(135deg, #d1ecf1, #bee5eb);
+    color: #0c5460;
+    border: 1px solid #bee5eb;
+}
+
+.error {
+    background: linear-gradient(135deg, #f8d7da, #f5c6cb);
+    color: #721c24;
+    padding: 16px 20px;
+    border-radius: var(--radius-md);
+    border: 1px solid #f5c6cb;
+    margin-bottom: 16px;
+    display: none;
+    font-weight: 500;
+}
+
+.success {
+    background: linear-gradient(135deg, #d4edda, #c3e6cb);
+    color: #155724;
+    padding: 16px 20px;
+    border-radius: var(--radius-md);
+    border: 1px solid #c3e6cb;
+    margin-bottom: 16px;
+    display: none;
+    font-weight: 500;
+}
+
+/* ============================================
+   ЗАГРУЗКА
+   ============================================ */
+.loading {
+    text-align: center;
+    padding: 40px;
+    display: none;
+}
+
+.spinner {
+    border: 4px solid var(--color-border-light);
+    border-top: 4px solid var(--color-primary);
+    border-radius: 50%;
+    width: 48px;
+    height: 48px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 16px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Глобальный overlay загрузки */
+#globalLoadingOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+#globalLoadingOverlay.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.loading-overlay-content {
+    text-align: center;
+    color: white;
+}
+
+.loading-spinner-large {
+    width: 60px;
+    height: 60px;
+    border: 5px solid rgba(255, 255, 255, 0.3);
+    border-top: 5px solid white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+}
+
+.loading-text {
+    font-size: 18px;
+    font-weight: 500;
+    color: white;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Индикатор загрузки для элементов */
+.element-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 20px;
+    min-height: 100px;
+}
+
+.loading-spinner-small {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--color-border-light);
+    border-top: 3px solid var(--color-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.loading-text-small {
+    color: var(--color-text-light);
+    font-size: 14px;
+}
+
+.element.loading-state {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+/* Индикатор загрузки для кнопок */
+.button-loading-spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top: 2px solid white;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+
+.btn.loading {
+    pointer-events: none;
+    opacity: 0.8;
+    cursor: wait;
+}
+
+.btn.loading .button-loading-spinner {
+    display: inline-block;
+}
+
+/* ============================================
+   ИНСТРУКЦИЯ ПО ПРИМЕНЕНИЮ
+   ============================================ */
+.instruction-section {
+    margin-bottom: 30px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border-left: 4px solid #667eea;
+}
+
+.instruction-section-title {
+    font-size: 1.3em;
+    font-weight: 600;
+    color: #667eea;
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.instruction-section-content {
+    color: #333;
+    line-height: 1.8;
+    text-align: justify;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+@media print {
+    .instruction-section {
+        page-break-inside: avoid;
+        border: none;
+        background: white;
+        padding: 15px;
+    }
+    
+    .instruction-section-title {
+        color: #000;
+        border-bottom: 2px solid #000;
+        padding-bottom: 5px;
+    }
+    
+    #instructionModal > div > div:first-child {
+        position: static !important;
+    }
+}
+
+/* ============================================
+   МАРКИРОВКА И БЕДЖИ
+   ============================================ */
+.markup-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    box-shadow: var(--shadow-sm);
+}
+
+/* ============================================
+   АНИМАЦИИ
+   ============================================ */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 0.3;
+    }
+    50% {
+        opacity: 0.6;
+    }
+}
+
+.auth-panel,
+.data-panel,
+.monitoring-panel,
+.results-panel {
+    animation: fadeInUp 0.6s ease-out;
+}
+
+/* ============================================
+   SCROLLBAR
+   ============================================ */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--color-bg-light);
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    border-radius: 5px;
+    border: 2px solid var(--color-bg-light);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(135deg, #5568d3, #65498f);
+}
+
+.data-container {
+    max-height: 500px;
+    overflow-y: auto;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-bg-light);
+    padding: 20px;
+}
+
+/* ============================================
+   СПЕЦИАЛЬНЫЕ СТИЛИ
+   ============================================ */
+.user-info {
+    background: var(--primary-gradient);
+    color: white;
+    padding: 28px;
+    border-radius: var(--radius-xl);
+    margin-bottom: 32px;
+    box-shadow: var(--shadow-xl);
+}
+
+.user-info h2 {
+    margin: 0 0 16px 0;
+    font-size: 1.75rem;
+    font-weight: 700;
+}
+
+.user-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-top: 20px;
+}
+
+.quick-actions {
+    margin-top: 32px;
+}
+
+.quick-actions h3 {
+    margin-bottom: 20px;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--color-text);
+}
+
+.action-buttons {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 24px;
+    margin-top: 32px;
+}
+
+.content-wrapper {
+    position: relative;
+}
+
+/* ============================================
+   LOGIN PAGE
+   ============================================ */
+.login-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 24px;
+}
+
+.login-box {
+    background: rgba(255, 255, 255, 0.98);
+    padding: 48px;
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-2xl);
+    backdrop-filter: blur(20px);
+    width: 100%;
+    max-width: 420px;
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    animation: fadeInUp 0.6s ease-out;
+}
+
+.login-box h1 {
+    text-align: center;
+    color: var(--color-text);
+    margin-bottom: 32px;
+    font-size: 2rem;
+    font-weight: 800;
+    background: var(--primary-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.login-logo {
+    text-align: center;
+    font-size: 4rem;
+    margin-bottom: 24px;
+    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+}
+
+#loginError {
+    display: none;
+    margin-bottom: 20px;
+}
+
+/* ============================================
+   МОДАЛЬНОЕ ОКНО КАРТОЧКИ ПРЕПАРАТА
+   ============================================ */
+#drugCardModal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    max-width: 100vw;
+    max-height: 100vh;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(8px);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+    animation: fadeIn 0.3s ease-out;
+    overflow: hidden;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.drug-card-wrapper {
+    background: white;
+    border-radius: 24px;
+    max-width: min(1100px, calc(100vw - 48px));
+    width: 100%;
+    max-height: min(96vh, calc(100vh - 48px));
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+    position: relative;
+    animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    box-sizing: border-box;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(40px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.drug-card-wrapper::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 6px;
+    background: var(--primary-gradient);
+    z-index: 1;
+}
+
+.drug-card-header-fixed {
+    background: var(--primary-gradient);
+    color: white;
+    padding: 28px 32px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+    box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);
+    position: relative;
+    z-index: 10;
+}
+
+.drug-card-header-fixed::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.drug-card-header-fixed h2 {
+    margin: 0;
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.drug-card-header-fixed button {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    padding: 10px 18px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 20px;
+    font-weight: 700;
+    transition: all var(--transition-base);
+    backdrop-filter: blur(10px);
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+.drug-card-header-fixed button:hover {
+    background: rgba(255, 255, 255, 0.35);
+    border-color: rgba(255, 255, 255, 0.5);
+    transform: rotate(90deg) scale(1.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.drug-card-content {
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 32px 36px;
+    flex: 1;
+    min-height: 0;
+    scroll-behavior: smooth;
+    background: linear-gradient(180deg, #fafbfc 0%, #ffffff 100%);
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+}
+
+.drug-card-content::-webkit-scrollbar {
+    width: 12px;
+}
+
+.drug-card-content::-webkit-scrollbar-track {
+    background: #f1f3f5;
+    border-radius: 10px;
+}
+
+.drug-card-content::-webkit-scrollbar-thumb {
+    background: var(--primary-gradient);
+    border-radius: 10px;
+    border: 3px solid #f1f3f5;
+}
+
+.drug-card-content::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(135deg, #764ba2, #667eea);
+}
+
+.drug-card-field {
+    background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+    padding: 18px 22px;
+    border-radius: 14px;
+    border: 2px solid transparent;
+    border-left: 4px solid var(--color-primary);
+    transition: all var(--transition-base);
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.drug-card-field::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: var(--primary-gradient);
+    transform: scaleY(0);
+    transition: transform var(--transition-base);
+}
+
+.drug-card-field:hover {
+    background: linear-gradient(135deg, #ffffff 0%, #f0f4ff 100%);
+    transform: translateX(4px) translateY(-2px);
+    box-shadow: 0 8px 24px rgba(102, 126, 234, 0.15);
+    border-color: rgba(102, 126, 234, 0.3);
+}
+
+.drug-card-field:hover::before {
+    transform: scaleY(1);
+}
+
+.drug-card-label {
+    font-size: 0.8rem;
+    color: var(--color-text-light);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.drug-card-label::before {
+    content: '';
+    width: 3px;
+    height: 12px;
+    background: var(--primary-gradient);
+    border-radius: 2px;
+}
+
+.drug-card-value {
+    font-size: 1.05rem;
+    color: var(--color-text);
+    font-weight: 600;
+    line-height: 1.6;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    hyphens: auto;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.drug-card-section {
+    margin-top: 32px;
+    padding-top: 28px;
+    border-top: 2px solid var(--color-border-light);
+    position: relative;
+}
+
+.drug-card-section::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: 0;
+    width: 60px;
+    height: 2px;
+    background: var(--primary-gradient);
+    border-radius: 2px;
+}
+
+.drug-card-section-title {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--color-text);
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--color-border-light);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    letter-spacing: -0.3px;
+}
+
+.drug-card-section-title::after {
+    content: '';
+    flex: 1;
+    height: 2px;
+    background: linear-gradient(90deg, var(--color-primary), transparent);
+    margin-left: 10px;
+}
+
+.drug-card-price-item {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: white;
+    padding: 24px 28px;
+    border-radius: 16px;
+    text-align: center;
+    border: none;
+    transition: all var(--transition-base);
+    box-shadow: 0 8px 24px rgba(16, 185, 129, 0.3);
+    position: relative;
+    overflow: hidden;
+}
+
+.drug-card-price-item::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.2) 0%, transparent 70%);
+    animation: pulse 3s ease-in-out infinite;
+}
+
+.drug-card-price-item:hover {
+    transform: translateY(-4px) scale(1.02);
+    box-shadow: 0 12px 32px rgba(16, 185, 129, 0.4);
+}
+
+.drug-card-price-label {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+}
+
+.drug-card-price-value {
+    font-size: 2rem;
+    font-weight: 800;
+    color: white;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    letter-spacing: -1px;
+}
+
+.drug-card-button {
+    background: var(--primary-gradient);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 600;
+    transition: all var(--transition-base);
+    box-shadow: var(--shadow-md);
+    letter-spacing: 0.3px;
+}
+
+.drug-card-button:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-colored);
+}
+
+/* ============================================
+   ТАБЫ В КАРТОЧКЕ ПРЕПАРАТА
+   ============================================ */
+.drug-card-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+    border-bottom: 2px solid var(--color-border-light);
+    overflow-x: auto;
+    padding-bottom: 0;
+}
+
+.drug-card-tab {
+    padding: 12px 20px;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: var(--color-text-light);
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all var(--transition-base);
+    white-space: nowrap;
+    position: relative;
+    bottom: -2px;
+}
+
+.drug-card-tab:hover {
+    color: var(--color-primary);
+    background: rgba(102, 126, 234, 0.05);
+}
+
+.drug-card-tab.active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+    background: rgba(102, 126, 234, 0.08);
+}
+
+.drug-card-tab-content {
+    display: none;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.drug-card-tab-content.active {
+    display: block;
+}
+
+/* ============================================
+   СЕТКА ИНФОРМАЦИИ О ПРЕПАРАТЕ
+   ============================================ */
+.drug-info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.drug-info-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+    border-radius: 12px;
+    border: 2px solid transparent;
+    border-left: 4px solid var(--color-primary);
+    transition: all var(--transition-base);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    min-width: 0;
+    box-sizing: border-box;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.drug-info-item.full-width {
+    grid-column: 1 / -1;
+}
+
+.drug-info-item:hover {
+    background: linear-gradient(135deg, #ffffff 0%, #f0f4ff 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.12);
+    border-color: rgba(102, 126, 234, 0.3);
+}
+
+.drug-info-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+    border-radius: 10px;
+}
+
+.drug-info-content {
+    flex: 1;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.drug-info-label {
+    font-size: 0.75rem;
+    color: var(--color-text-light);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+.drug-info-value {
+    font-size: 1rem;
+    color: var(--color-text);
+    font-weight: 600;
+    line-height: 1.5;
+    word-wrap: break-word;
+}
+
+.drug-price-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+}
+
+.drug-empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--color-text-light);
+    font-size: 1.1rem;
+    background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+    border-radius: 16px;
+    border: 2px dashed var(--color-border);
+}
+
+.drug-related-section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.drug-related-item {
+    background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+    border-radius: 16px;
+    padding: 24px;
+    border: 2px solid var(--color-border-light);
+    transition: all var(--transition-base);
+}
+
+.drug-related-item:hover {
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.1);
+    transform: translateY(-2px);
+}
+
+.drug-related-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--color-border-light);
+    font-size: 1.1rem;
+}
+
+.drug-related-icon {
+    font-size: 1.3rem;
+}
+
+/* ============================================
+   АДАПТИВНОСТЬ
+   ============================================ */
+@media (max-width: 1024px) {
+    .dashboard {
+        grid-template-columns: 240px 1fr;
+        gap: 20px;
+        padding: 20px;
+    }
+    
+    .cards-view {
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 20px;
+    }
+}
+
+@media (max-width: 768px) {
+    /* Убираем закрепление навигации на мобильных */
+    .top-nav {
+        position: relative;
+        top: auto;
+        margin-bottom: 12px;
+    }
+    
+    .top-nav-content {
+        padding: 12px 16px;
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+    
+    .top-nav-menu {
+        order: 3;
+        width: 100%;
+        justify-content: flex-start;
+        margin-top: 8px;
+    }
+    
+    .top-nav-menu a {
+        padding: 8px 12px;
+        font-size: 0.9rem;
+    }
+    
+    .logo-container {
+        gap: 8px;
+    }
+    
+    .logo-icon {
+        font-size: 1.5rem;
+    }
+    
+    .logo-text {
+        font-size: 1.2rem;
+    }
+    
+    #drugCardModal {
+        padding: 12px;
+    }
+    
+    .drug-card-wrapper {
+        max-width: calc(100vw - 24px);
+        max-height: calc(100vh - 24px);
+        border-radius: 20px;
+    }
+    
+    .drug-card-content {
+        padding: 20px 24px;
+    }
+    
+    .drug-info-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .drug-price-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+    
+    .main-content {
+        margin: 8px;
+        padding: 12px;
+        font-size: 0.9rem;
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+    
+    .container {
+        padding: 8px;
+        max-width: 100%;
+    }
+    
+    .section {
+        padding: 12px;
+        font-size: 0.9rem;
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+    
+    .section h2 {
+        font-size: 1.1rem;
+    }
+    
+    .section h3 {
+        font-size: 1rem;
+    }
+    
+    .form-row {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .page-header h1 {
+        font-size: 1.5rem;
+    }
+    
+    .page-header p {
+        font-size: 0.9rem;
+    }
+    
+    .btn {
+        width: 100%;
+        margin-right: 0;
+        padding: 10px 16px;
+        font-size: 0.9rem;
+    }
+    
+    .action-buttons {
+        grid-template-columns: 1fr;
+    }
+    
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .cards-view {
+        grid-template-columns: 1fr;
+    }
+    
+    table {
+        font-size: 0.8rem;
+    }
+    
+    thead th,
+    tbody td {
+        padding: 8px 6px;
+        font-size: 0.8rem;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 6px 8px;
+        font-size: 0.8rem;
+    }
+    
+    input, select, textarea {
+        font-size: 0.9rem;
+        padding: 8px 10px;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+    
+    label {
+        font-size: 0.85rem;
+    }
+    
+    #toastContainer {
+        top: 16px;
+        right: 16px;
+        left: 16px;
+        max-width: none;
+    }
+    
+    .toast {
+        min-width: auto;
+    }
+}
+
+@media (max-width: 480px) {
+    html {
+        font-size: 14px;
+    }
+    
+    body {
+        font-size: 14px;
+    }
+    
+    .container,
+    .main-content {
+        padding: 8px;
+        font-size: 0.85rem;
+    }
+    
+    .section {
+        padding: 10px;
+        font-size: 0.85rem;
+    }
+    
+    .section h2 {
+        font-size: 1rem;
+    }
+    
+    .section h3 {
+        font-size: 0.9rem;
+    }
+    
+    .section h4 {
+        font-size: 0.85rem;
+    }
+    
+    .page-header h1 {
+        font-size: 1.3rem;
+    }
+    
+    .page-header p {
+        font-size: 0.85rem;
+    }
+    
+    .logo-container {
+        gap: 6px;
+    }
+    
+    .logo-icon {
+        font-size: 1.3rem;
+    }
+    
+    .logo-text {
+        font-size: 1rem;
+    }
+    
+    .top-nav h3 {
+        font-size: 1rem;
+    }
+    
+    .top-nav-menu a {
+        font-size: 0.8rem;
+        padding: 6px 10px;
+    }
+    
+    .sidebar .logo-icon {
+        font-size: 1.5rem;
+    }
+    
+    .sidebar .logo-text {
+        font-size: 1.1rem;
+    }
+    
+    .btn {
+        font-size: 0.85rem;
+        padding: 8px 12px;
+    }
+    
+    table {
+        font-size: 0.75rem;
+    }
+    
+    thead th,
+    tbody td {
+        padding: 6px 4px;
+        font-size: 0.75rem;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 5px 6px;
+        font-size: 0.75rem;
+    }
+    
+    input, select, textarea {
+        font-size: 0.85rem;
+        padding: 6px 8px;
+    }
+    
+    label {
+        font-size: 0.8rem;
+    }
+    
+    .login-box {
+        padding: 32px 24px;
+    }
+    
+    #drugCardModal {
+        padding: 8px;
+    }
+    
+    .drug-card-wrapper {
+        max-width: calc(100vw - 16px);
+        max-height: calc(100vh - 16px);
+        border-radius: 16px;
+    }
+    
+    .drug-card-header-fixed {
+        padding: 16px 20px;
+    }
+    
+    .drug-card-header-fixed h2 {
+        font-size: 1.2rem;
+    }
+    
+    .drug-card-content {
+        padding: 16px 20px;
+    }
+    
+    .drug-card-content > div {
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
+    }
+    
+    .drug-info-item {
+        padding: 12px 16px;
+    }
+    
+    .drug-info-icon {
+        width: 32px;
+        height: 32px;
+        font-size: 1.2rem;
+    }
+    
+    .drug-card-field {
+        padding: 16px 18px;
+    }
+    
+    .drug-card-price-item {
+        padding: 20px 24px;
+    }
+    
+    .drug-card-price-value {
+        font-size: 1.5rem;
+    }
+    
+    .drug-card-tabs {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+    
+    .drug-card-tabs::-webkit-scrollbar {
+        display: none;
+    }
+}
+
+/* ============================================
+   ОБЩИЕ СТИЛИ ДЛЯ ТАБЛИЦ
+   ============================================ */
+.table-container {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    border-radius: 8px;
+    position: relative;
+}
+
+/* Кастомный скроллбар для контейнеров таблиц */
+.table-container::-webkit-scrollbar {
+    height: 12px;
+}
+
+.table-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+
+.table-container::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    border-radius: 10px;
+    border: 2px solid #f1f1f1;
+}
+
+.table-container::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(135deg, #764ba2, #667eea);
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: white;
+}
+
+.data-table th,
+.data-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #f0f0f0;
+    vertical-align: middle;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    hyphens: auto;
+    white-space: normal;
+}
+
+.data-table th {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-weight: 600;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.data-table tbody tr {
+    transition: all 0.2s;
+}
+
+.data-table tbody tr:nth-child(even) {
+    background: #fafbfc;
+}
+
+.data-table tbody tr:hover {
+    background: #f0f4ff;
+}
+
+/* Адаптивность для мобильных */
+@media (max-width: 768px) {
+    .table-container {
+        border-radius: 4px;
+        max-width: 100%;
+        overflow-x: auto;
+    }
+    
+    .data-table {
+        font-size: 0.85em;
+        min-width: 100%;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 8px 6px;
+        font-size: 0.8rem;
+    }
+    
+    .summary-table th,
+    .summary-table td {
+        padding: 8px 6px;
+        font-size: 0.8rem;
+    }
+    
+    .data-table th {
+        font-size: 11px;
+    }
+    
+    .drug-card-tab {
+        padding: 10px 16px;
+        font-size: 0.85rem;
+    }
+    
+    .drug-info-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .drug-info-item {
+        padding: 14px 18px;
+    }
+    
+    .drug-price-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ============================================
+   СТИЛИ ДЛЯ АУДИТ-ЛОГОВ
+   ============================================ */
+.log-level-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.log-level-error {
+    background: #fee2e2;
+    color: #dc2626;
+}
+
+.log-level-warn {
+    background: #fef3c7;
+    color: #d97706;
+}
+
+.log-level-info {
+    background: #dbeafe;
+    color: #2563eb;
+}
+
+.log-level-debug {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-weight: bold;
+}
+
+.status-success {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.status-redirect {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.status-client-error {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.status-server-error {
+    background: #fecaca;
+    color: #7f1d1d;
+}
+
+.status-unknown {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+#logsTable tbody tr:hover {
+    background: #f9fafb;
+    cursor: pointer;
+}
+
+#logsTable tbody tr:active {
+    background: #f3f4f6;
+}
+
+/* Очень маленькие экраны */
+@media (max-width: 360px) {
+    html {
+        font-size: 13px;
+    }
+    
+    body {
+        font-size: 13px;
+    }
+    
+    .container,
+    .main-content {
+        padding: 6px;
+    }
+    
+    .section {
+        padding: 8px;
+    }
+    
+    .page-header h1 {
+        font-size: 1.2rem;
+    }
+    
+    .btn {
+        font-size: 0.8rem;
+        padding: 6px 10px;
+    }
+    
+    table {
+        font-size: 0.7rem;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 4px 5px;
+        font-size: 0.7rem;
+    }
+    
+    .summary-table th,
+    .summary-table td {
+        padding: 4px 5px;
+        font-size: 0.7rem;
+    }
+    
+    input, select, textarea {
+        font-size: 0.8rem;
+        padding: 5px 6px;
+    }
+    
+    label {
+        font-size: 0.75rem;
+    }
+}

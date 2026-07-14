@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сопоставление прайсов - ES API Service</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="auth.js"></script>
+    <script src="toast.js"></script>
+    <script src="loading.js"></script>
+</head>
+<body>
+    <div class="dashboard">
+        <script src="navigation.js"></script>
+        
+        <main class="main-content">
+            <div class="section">
+                <h1><span class="page-icon">🔗</span> Сопоставление прайсов</h1>
+                
+                <!-- Фильтры -->
+                <div class="card" style="margin-bottom: 6px;">
+                    <h3>Фильтры</h3>
+                    <div class="form-row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+                        <div class="form-group">
+                            <label for="filterSupplier">Поставщик:</label>
+                            <select id="filterSupplier" style="width: 100%; padding: 8px;">
+                                <option value="">Все поставщики</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="filterMatchStatus">Статус сопоставления:</label>
+                            <select id="filterMatchStatus" style="width: 100%; padding: 8px;">
+                                <option value="">Все</option>
+                                <option value="matched">Сопоставлено</option>
+                                <option value="unmatched">Не сопоставлено</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="filterSearch">Поиск по товару:</label>
+                            <input type="text" id="filterSearch" placeholder="Название или код товара" style="width: 100%; padding: 8px;">
+                        </div>
+                    </div>
+                    <div class="button-group" style="margin-top: 15px;">
+                        <button id="applyFiltersBtn" class="btn btn-primary">Применить фильтры</button>
+                        <button id="clearFiltersBtn" class="btn btn-secondary">Очистить</button>
+                        <button id="refreshBtn" class="btn btn-info">🔄 Обновить</button>
+                    </div>
+                </div>
+                
+                <!-- Таблица прайсов -->
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+                        <h3 style="margin: 0;">Прайсы поставщиков</h3>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <select id="itemsPerPageSelect" style="padding: 5px 10px; border-radius: 6px; border: 1px solid #ddd; cursor: pointer;">
+                                <option value="25">25 на странице</option>
+                                <option value="50" selected>50 на странице</option>
+                                <option value="100">100 на странице</option>
+                                <option value="200">200 на странице</option>
+                                <option value="0">Все</option>
+                            </select>
+                        </div>
+                        <div id="pricesInfo"></div>
+                    </div>
+                    <div id="pricesTableContainer" class="table-container" style="overflow-x: auto; overflow-y: visible; -webkit-overflow-scrolling: touch; width: 100%; max-width: 100%;">
+                        <table id="pricesTable" class="data-table" style="width: 100%; min-width: 1000px; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: #f0f0f0;">
+                                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Товар поставщика</th>
+                                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Код</th>
+                                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Штрихкод</th>
+                                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Цена</th>
+                                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Сопоставление</th>
+                                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Препарат из справочника</th>
+                                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Метод</th>
+                                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Уверенность</th>
+                                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pricesTableBody">
+                                <tr>
+                                    <td colspan="9" style="padding: 20px; text-align: center; color: #666;">
+                                        Загрузка...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <!-- Пагинация -->
+                    <div id="paginationContainer" style="display: none; margin-top: 12px; padding: 10px; background: #f8f9fa; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                        <div id="paginationInfo" style="color: #666;"></div>
+                        <div id="paginationControls" style="display: flex; gap: 5px; flex-wrap: wrap;"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Модальное окно для редактирования сопоставления -->
+    <div id="matchModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; overflow-y: auto;">
+        <div style="max-width: 800px; margin: 50px auto; background: white; border-radius: 10px; padding: 30px; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h2 style="margin: 0;">Редактирование сопоставления</h2>
+                <button onclick="closeMatchModal()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">&times;</button>
+            </div>
+            
+            <div id="matchModalContent">
+                <div class="form-group">
+                    <label>Товар поставщика:</label>
+                    <div id="modalSupplierItem" style="padding: 8px; background: #f9f9f9; border-radius: 5px; margin-bottom: 10px;"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="modalDrugSearch">Поиск препарата в справочнике:</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="modalDrugSearch" placeholder="Введите название, МНН или штрихкод" style="flex: 1; padding: 10px;">
+                        <button id="searchDrugBtn" class="btn btn-primary">🔍 Поиск</button>
+                    </div>
+                </div>
+                
+                <div id="drugSearchResults" style="margin-top: 15px; max-height: 300px; overflow-y: auto; border: 1px solid #ddd; border-radius: 5px; display: none;">
+                    <div id="drugSearchResultsList"></div>
+                </div>
+                
+                <div id="currentMatchInfo" style="margin-top: 12px; padding: 10px; background: #e9ecef; border-radius: 5px; display: none;">
+                    <h4>Текущее сопоставление:</h4>
+                    <div id="currentMatchDetails"></div>
+                </div>
+                
+                <div class="form-group" style="margin-top: 20px;">
+                    <label for="modalMatchMethod">Метод сопоставления:</label>
+                    <select id="modalMatchMethod" style="width: 100%; padding: 10px;">
+                        <option value="BARCODE">По штрихкоду</option>
+                        <option value="CODE">По коду</option>
+                        <option value="NAME">По наименованию</option>
+                        <option value="MANUAL">Ручное</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="modalMatchConfidence">Уверенность сопоставления (%):</label>
+                    <input type="number" id="modalMatchConfidence" min="0" max="100" step="0.1" value="100" style="width: 100%; padding: 10px;">
+                </div>
+                
+                <div class="button-group" style="margin-top: 25px; display: flex; gap: 10px;">
+                    <button id="saveMatchBtn" class="btn btn-success" style="flex: 1;">Сохранить</button>
+                    <button id="clearMatchBtn" class="btn btn-warning" style="flex: 1;">Очистить сопоставление</button>
+                    <button onclick="closeMatchModal()" class="btn btn-secondary" style="flex: 1;">Отмена</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="toastContainer"></div>
+    
+    <script src="matching.js"></script>
+</body>
+</html>

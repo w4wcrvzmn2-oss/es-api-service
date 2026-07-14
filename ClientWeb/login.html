@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Авторизация - ES API Service</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .login-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .login-box {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            width: 100%;
+            max-width: 400px;
+        }
+        .login-box h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 30px;
+            font-size: 2em;
+        }
+        .login-logo {
+            text-align: center;
+            font-size: 3em;
+            margin-bottom: 20px;
+        }
+        #loginError {
+            display: none;
+            margin-bottom: 15px;
+            white-space: pre-line;
+            word-wrap: break-word;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-box">
+            <div class="login-logo">🔐</div>
+            <h1>ЭльФиСА</h1>
+            
+            <div id="loginError" class="error"></div>
+            
+            <div id="protocolWarning" style="display: none; background: #fff3cd; color: #856404; padding: 12px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #ffc107;">
+                <strong>⚠️ Внимание:</strong> Страница должна открываться через HTTP сервер.<br>
+                Откройте: <code>http://localhost:8080/login.html</code>
+            </div>
+            
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">Имя пользователя</label>
+                    <input type="text" id="username" required autocomplete="username" placeholder="admin">
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Пароль</label>
+                    <input type="password" id="password" required autocomplete="current-password" placeholder="••••••••">
+                </div>
+                
+                <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">
+                    Войти
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script src="auth.js"></script>
+    <script>
+        // Проверяем, авторизован ли пользователь
+        if (AuthManager.isAuthenticated()) {
+            window.location.href = 'index.html';
+        }
+
+        // Проверяем, что страница открыта через HTTP/HTTPS, а не file://
+        if (window.location.protocol === 'file:') {
+            const warningDiv = document.getElementById('protocolWarning');
+            const errorDiv = document.getElementById('loginError');
+            warningDiv.style.display = 'block';
+            errorDiv.innerHTML = '❌ <strong>Ошибка протокола:</strong> Страница открыта через <code>file://</code> протокол.\n\n' +
+                '<strong>Решение:</strong>\n' +
+                '1. Убедитесь, что сервер запущен\n' +
+                '2. Откройте в браузере: <a href="http://localhost:8080/login.html" style="color: #007bff;">http://localhost:8080/login.html</a>\n\n' +
+                'Текущий адрес: <code>' + window.location.href + '</code>';
+            errorDiv.style.display = 'block';
+            document.getElementById('loginForm').style.opacity = '0.5';
+            document.getElementById('loginForm').style.pointerEvents = 'none';
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // Проверяем протокол еще раз перед отправкой
+            if (window.location.protocol === 'file:') {
+                const errorDiv = document.getElementById('loginError');
+                errorDiv.innerHTML = '❌ <strong>Ошибка:</strong> Страница открыта через file:// протокол.\n\nОткройте страницу через HTTP сервер: <strong>http://localhost:8080/login.html</strong>';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            // Автоматически определяем URL API из текущего адреса страницы
+            let apiUrl = window.location.origin;
+            
+            // Если origin пустой или file://, используем localhost:8080 по умолчанию
+            if (!apiUrl || apiUrl === 'null' || apiUrl.startsWith('file://')) {
+                apiUrl = 'http://localhost:8080';
+                console.warn('Используется URL по умолчанию:', apiUrl);
+            }
+            
+            console.log('Определен URL API:', apiUrl);
+            
+            const errorDiv = document.getElementById('loginError');
+            errorDiv.style.display = 'none';
+            
+            try {
+                const result = await AuthManager.login(username, password, apiUrl);
+                if (result.success && result.token) {
+                    // Проверяем, что токен сохранен
+                    const savedToken = AuthManager.getToken();
+                    if (!savedToken || savedToken !== result.token) {
+                        console.error('Токен не сохранился правильно');
+                        errorDiv.textContent = 'Ошибка сохранения токена. Попробуйте еще раз.';
+                        errorDiv.style.display = 'block';
+                        return;
+                    }
+                    // Покупатели работают через десктоп-приложение, не через веб
+                    if (result.role === 'buyer') {
+                        errorDiv.textContent = 'Это учётная запись покупателя — вход через десктоп-приложение, не через сайт.';
+                        errorDiv.style.display = 'block';
+                        return;
+                    }
+                    // Сервер сам определил роль и вернул, куда вести:
+                    // admin -> index.html, supplier -> /supplier/index.html
+                    const dest = result.redirectUrl || 'index.html';
+                    console.log('Авторизация успешна, роль:', result.role, '-> переход:', dest);
+                    window.location.href = dest;
+                } else {
+                    errorDiv.textContent = result.error || 'Ошибка авторизации';
+                    errorDiv.style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Ошибка при авторизации:', error);
+                let errorMessage = error.message || 'Неизвестная ошибка';
+                
+                // Улучшаем сообщение об ошибке
+                if (errorMessage.includes('Failed to fetch') || 
+                    errorMessage.includes('NetworkError') ||
+                    errorMessage.includes('ERR_CONNECTION_REFUSED')) {
+                    errorMessage = `Не удалось подключиться к серверу ${apiUrl}\n\nВозможные причины:\n• Сервер не запущен\n• Неправильный адрес сервера\n• Проблемы с сетью\n\nУбедитесь, что сервер запущен и доступен.`;
+                }
+                
+                // Заменяем переносы строк на HTML
+                errorMessage = errorMessage.replace(/\n/g, '<br>');
+                errorDiv.innerHTML = errorMessage;
+                errorDiv.style.display = 'block';
+                errorDiv.style.whiteSpace = 'pre-line';
+            }
+        });
+        
+        // Загружаем сохраненное имя пользователя
+        const savedUsername = localStorage.getItem('es_api_username');
+        if (savedUsername) {
+            document.getElementById('username').value = savedUsername;
+        }
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Доставка заказов - Кабинет поставщика</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏢</text></svg>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/supplier.css">
+</head>
+<body class="bg-light">
+    <script src="../js/auth.js"></script>
+    <script>if (!AuthManager.isAuthenticated()) window.location.href = AuthManager.getLoginPath();</script>
+    <script src="../js/nav-supplier.js"></script>
+
+    <div class="container-fluid py-4 px-3 px-lg-5">
+        <h1 class="mb-4"><i class="bi bi-truck"></i> Настройки доставки заказов</h1>
+
+        <div class="card shadow-sm" style="max-width: 700px;">
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Формат заказа</label>
+                    <select class="form-select" id="fldFormat">
+                        <option value="XML">XML</option>
+                        <option value="DBF">DBF</option>
+                        <option value="Excel">Excel</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Способ доставки</label>
+                    <select class="form-select" id="fldMethod" onchange="toggleDeliveryFields()">
+                        <option value="Email">Email</option>
+                        <option value="FTP">FTP</option>
+                        <option value="FTP_ELFISA">FTP ЭльФиСА</option>
+                    </select>
+                </div>
+
+                <div id="ftpFields" class="d-none">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">FTP Хост</label>
+                        <input type="text" class="form-control" id="fldFtpHost" placeholder="ftp.example.com">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">FTP Путь</label>
+                        <input type="text" class="form-control" id="fldFtpPath" placeholder="/orders/">
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col">
+                            <label class="form-label fw-semibold">Логин</label>
+                            <input type="text" class="form-control" id="fldFtpUser">
+                        </div>
+                        <div class="col">
+                            <label class="form-label fw-semibold">Пароль</label>
+                            <input type="password" class="form-control" id="fldFtpPassword">
+                        </div>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="fldFtpPassive" checked>
+                        <label class="form-check-label" for="fldFtpPassive">Пассивный режим</label>
+                    </div>
+                </div>
+
+                <div id="emailFields">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Email адреса</label>
+                        <input type="text" class="form-control" id="fldEmail" placeholder="orders@company.com, backup@company.com">
+                        <div class="form-text">Несколько адресов через запятую</div>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary" id="btnSave" onclick="saveSettings()">
+                    <i class="bi bi-check-lg"></i> Сохранить
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="../js/api.js"></script>
+    <script src="../js/toast.js"></script>
+    <script>
+    function toggleDeliveryFields() {
+        const method = document.getElementById('fldMethod').value;
+        document.getElementById('ftpFields').classList.toggle('d-none', method === 'Email');
+        document.getElementById('emailFields').classList.toggle('d-none', method !== 'Email');
+    }
+
+    async function loadSettings() {
+        const data = await API.get('/api/sc/order-delivery');
+        if (!data) return;
+        document.getElementById('fldFormat').value = data.format || 'XML';
+        document.getElementById('fldMethod').value = data.method || 'Email';
+        document.getElementById('fldFtpHost').value = data.ftp_host || '';
+        document.getElementById('fldFtpPath').value = data.ftp_path || '';
+        document.getElementById('fldFtpUser').value = data.ftp_user || '';
+        document.getElementById('fldFtpPassword').value = data.ftp_password || '';
+        document.getElementById('fldFtpPassive').checked = data.ftp_passive !== false;
+        document.getElementById('fldEmail').value = data.email || '';
+        toggleDeliveryFields();
+    }
+
+    async function saveSettings() {
+        const btn = document.getElementById('btnSave');
+        btn.disabled = true;
+        try {
+            await API.put('/api/sc/order-delivery', {
+                format: document.getElementById('fldFormat').value,
+                method: document.getElementById('fldMethod').value,
+                ftp_host: document.getElementById('fldFtpHost').value,
+                ftp_path: document.getElementById('fldFtpPath').value,
+                ftp_user: document.getElementById('fldFtpUser').value,
+                ftp_password: document.getElementById('fldFtpPassword').value,
+                ftp_passive: document.getElementById('fldFtpPassive').checked,
+                email: document.getElementById('fldEmail').value
+            });
+            Toast.success('Сохранено', 'Настройки доставки обновлены');
+        } catch(e) {
+            Toast.error('Ошибка', e.message);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    loadSettings();
+    </script>
+</body>
+</html>

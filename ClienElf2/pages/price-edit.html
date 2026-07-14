@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Редактирование прайса - ЭльФиСА</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💊</text></svg>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/simple-datatables@10/dist/style.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/custom.css">
+</head>
+<body class="bg-light">
+    <script src="../js/auth.js"></script>
+    <script>if (!AuthManager.isAuthenticated()) window.location.href = '../login.html';</script>
+    <script src="../js/nav-component.js"></script>
+
+    <div class="container-fluid py-4 px-3 px-lg-5">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="mb-0" id="pageTitle">Редактирование прайса</h1>
+            <button class="btn btn-outline-secondary" onclick="location.href='price-lists.html'"><i class="bi bi-arrow-left"></i> Назад</button>
+        </div>
+
+        <!-- Основная форма -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <form id="priceForm">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="name" class="form-label">Наименование прайса *</label>
+                            <input type="text" class="form-control" id="name" name="name" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="supplier" class="form-label">Поставщик *</label>
+                            <select class="form-select" id="supplier" name="supplier" required>
+                                <option value="">Выберите поставщика</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row g-3 mt-0">
+                        <div class="col-md-6">
+                            <label for="accessPoint" class="form-label">Точка доступа</label>
+                            <select class="form-select" id="accessPoint" name="accessPoint">
+                                <option value="">Выберите точку доступа</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="markup" class="form-label">Наценка (%)</label>
+                            <input type="number" class="form-control" id="markup" name="markup" step="0.01" min="0" placeholder="0.00">
+                        </div>
+                    </div>
+
+                    <div class="mb-3 mt-3">
+                        <label class="form-label">Расписание забора прайса</label>
+                        <input type="hidden" id="updateSchedule" name="updateSchedule">
+                        <div class="schedule-builder">
+                            <div class="schedule-row">
+                                <select id="schedFrequency" class="schedule-select">
+                                    <option value="">Не обновлять</option>
+                                    <option value="daily">Ежедневно</option>
+                                    <option value="weekdays">Пн — Пт</option>
+                                    <option value="custom_days">Выбрать дни</option>
+                                    <option value="interval">Каждые N часов</option>
+                                </select>
+                                <div id="schedTimeBlock" class="schedule-time" style="display:none">
+                                    <span>в</span>
+                                    <select id="schedHour" class="schedule-select schedule-select-sm"></select>
+                                    <span>:</span>
+                                    <select id="schedMinute" class="schedule-select schedule-select-sm"></select>
+                                </div>
+                                <div id="schedIntervalBlock" class="schedule-time" style="display:none">
+                                    <span>каждые</span>
+                                    <select id="schedInterval" class="schedule-select schedule-select-sm">
+                                        <option value="2">2</option><option value="3">3</option><option value="4">4</option>
+                                        <option value="6">6</option><option value="8">8</option><option value="12">12</option>
+                                    </select>
+                                    <span>ч.</span>
+                                </div>
+                            </div>
+                            <div id="schedDaysBlock" class="schedule-days" style="display:none">
+                                <label class="schedule-day-label"><input type="checkbox" value="1"> Пн</label>
+                                <label class="schedule-day-label"><input type="checkbox" value="2"> Вт</label>
+                                <label class="schedule-day-label"><input type="checkbox" value="3"> Ср</label>
+                                <label class="schedule-day-label"><input type="checkbox" value="4"> Чт</label>
+                                <label class="schedule-day-label"><input type="checkbox" value="5"> Пт</label>
+                                <label class="schedule-day-label"><input type="checkbox" value="6"> Сб</label>
+                                <label class="schedule-day-label"><input type="checkbox" value="0"> Вс</label>
+                            </div>
+                            <div id="schedPreview" class="form-text mt-2"></div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-success"><i class="bi bi-check-lg"></i> Сохранить</button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="location.href='price-lists.html'">Отмена</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Маппинг полей -->
+        <div id="mappingSection" class="card shadow-sm mb-4" style="display:none">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Маппинг полей</h5>
+                <div class="d-flex gap-2">
+                    <input type="file" id="dbfFileInput" accept=".dbf,.DBF" style="display:none" onchange="uploadAndAnalyze(this)">
+                    <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('dbfFileInput').click()" id="btnUpload"><i class="bi bi-upload"></i> Загрузить образец</button>
+                    <input type="file" id="importFileInput" accept=".dbf,.DBF" style="display:none" onchange="uploadAndImport(this)">
+                    <button class="btn btn-success btn-sm" onclick="runImportNow()" id="btnImportNow"><i class="bi bi-play-fill"></i> Импортировать сейчас</button>
+                    <button class="btn btn-primary btn-sm" onclick="saveAllMappings()"><i class="bi bi-save"></i> Сохранить маппинг</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">Укажите соответствие полей файла поставщика полям системы.</p>
+                <div id="mappingContent">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-striped align-middle mb-0">
+                            <thead><tr><th style="min-width:160px">Поле файла (DBF)</th><th style="min-width:200px">Поле системы</th><th style="width:130px">Тип данных</th><th style="width:70px">Обяз.</th><th style="width:50px"></th></tr></thead>
+                            <tbody id="mappingTableBody">
+                                <tr><td colspan="5" class="empty-row">Нажмите «Считать поля из файла» или добавьте строки вручную</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <button class="btn btn-outline-secondary btn-sm mt-2" onclick="addMappingRow()">+ Добавить строку</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Импорт (скрыт) -->
+        <div id="importSection" style="display:none"></div>
+
+        <!-- Регионы -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Регионы доступные для поставщика</h5>
+                <button class="btn btn-primary btn-sm" onclick="selectAllRegions()">Выбрать ВСЕ</button>
+            </div>
+            <div class="card-body">
+                <div id="regionsCheckboxes" class="checkbox-grid"></div>
+            </div>
+        </div>
+
+        <!-- Связки -->
+        <div class="card shadow-sm" id="linksSection" style="display:none">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Связки (сопоставление)</h5>
+                <div class="d-flex gap-2">
+                    <a id="btnViewPrice" href="#" class="btn btn-outline-info btn-sm"><i class="bi bi-eye"></i> Просмотр прайса</a>
+                    <a id="btnGoLinks" href="#" class="btn btn-primary btn-sm"><i class="bi bi-link-45deg"></i> Перейти к связкам</a>
+                </div>
+            </div>
+            <div class="card-body" id="linksStats">
+                <div class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm me-2"></span>Загрузка...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/simple-datatables@10/dist/umd/simple-datatables.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+    <script src="../js/elf-table.js"></script>
+    <script src="../js/api.js"></script>
+    <script src="../js/toast.js"></script>
+    <script src="../js/price-edit.js"></script>
+</body>
+</html>

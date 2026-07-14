@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Прайс-листы - Кабинет поставщика</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏢</text></svg>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/simple-datatables@10/dist/style.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/supplier.css">
+</head>
+<body class="bg-light">
+    <script src="../js/auth.js"></script>
+    <script>if (!AuthManager.isAuthenticated()) window.location.href = AuthManager.getLoginPath();</script>
+    <script src="../js/nav-supplier.js"></script>
+
+    <div class="container-fluid py-4 px-3 px-lg-5">
+        <h1 class="mb-4"><i class="bi bi-tags"></i> Прайс-листы</h1>
+        <div class="card shadow-sm">
+            <div class="card-body p-0">
+                <table id="tblPriceLists" class="table table-hover table-striped align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Наименование</th>
+                            <th class="text-center">Актуальность, суток</th>
+                            <th class="text-center">Наценка, %</th>
+                            <th>Дата прайс-листа</th>
+                            <th class="text-end">Всего</th>
+                            <th class="text-end">Формализовано</th>
+                            <th class="text-end">Не формализовано</th>
+                            <th class="text-center">Регионов</th>
+                            <th class="text-center">Статус</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="9" class="loading">Загрузка...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Region settings modal -->
+    <div class="modal fade" id="regionModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-geo-alt"></i> Региональная настройка прайс-листа <span id="rmPriceName" class="text-muted"></span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead><tr><th>Регион</th><th class="text-center">В работе</th><th class="text-center">Наценка, %</th><th class="text-center">Базовая цена</th></tr></thead>
+                        <tbody id="regionModalBody"></tbody>
+                    </table>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button class="btn btn-success" id="btnSaveRegions"><i class="bi bi-check-lg"></i> Сохранить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/simple-datatables@10/dist/umd/simple-datatables.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+    <script src="../js/elf-table.js"></script>
+    <script src="../js/api.js"></script>
+    <script src="../js/toast.js"></script>
+    <script>
+    async function loadPriceLists() {
+        const tbody = document.querySelector('#tblPriceLists tbody');
+        tbody.innerHTML = '<tr><td colspan="9" class="loading">Загрузка...</td></tr>';
+        const data = await API.get('/api/sc/price-lists');
+        if (!data || data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" class="empty-row">Нет прайс-листов</td></tr>';
+            return;
+        }
+        tbody.innerHTML = '';
+        data.forEach(pl => {
+            const tr = document.createElement('tr');
+
+            // Name (link to positions)
+            const tdName = document.createElement('td');
+            const a = document.createElement('a');
+            a.href = 'price-positions.html?price_list_id=' + pl.price_list_id + '&name=' + encodeURIComponent(pl.name);
+            a.textContent = pl.name;
+            tdName.appendChild(a);
+            tr.appendChild(tdName);
+
+            // ValidDays (editable)
+            const tdDays = document.createElement('td');
+            tdDays.className = 'text-center';
+            tdDays.innerHTML = `<span class="editable-cell" onclick="makeEditable(this,'valid_days','${pl.price_list_id}','int')">${pl.valid_days}</span>`;
+            tr.appendChild(tdDays);
+
+            // Markup (editable)
+            const tdMarkup = document.createElement('td');
+            tdMarkup.className = 'text-center';
+            tdMarkup.innerHTML = `<span class="editable-cell" onclick="makeEditable(this,'default_markup_pct','${pl.price_list_id}','float')">${formatNumber(pl.default_markup_pct, 2)}</span>`;
+            tr.appendChild(tdMarkup);
+
+            // Updated date
+            const tdDate = document.createElement('td');
+            tdDate.textContent = pl.updated_at || '—';
+            tr.appendChild(tdDate);
+
+            // Total / Formalized / Unformalized
+            [pl.total_items, pl.formalized_items, pl.unformalized_items].forEach(v => {
+                const td = document.createElement('td');
+                td.className = 'text-end';
+                td.textContent = v;
+                tr.appendChild(td);
+            });
+
+            // Regions count (clickable)
+            const tdReg = document.createElement('td');
+            tdReg.className = 'text-center';
+            tdReg.innerHTML = `<span class="badge bg-info" style="cursor:pointer">${pl.regions_count}</span>`;
+            tdReg.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openRegionModal(pl.price_list_id, pl.name);
+            });
+            tr.appendChild(tdReg);
+
+            // Status (toggle)
+            const tdSt = document.createElement('td');
+            tdSt.className = 'text-center';
+            const cls = pl.is_active ? 'bg-success' : 'bg-secondary';
+            const txt = pl.is_active ? 'Активен' : 'Неактивен';
+            tdSt.innerHTML = `<span class="badge ${cls}" style="cursor:pointer" onclick="toggleActive('${pl.price_list_id}', ${!pl.is_active}, this)">${txt}</span>`;
+            tr.appendChild(tdSt);
+
+            tbody.appendChild(tr);
+        });
+    }
+
+    function makeEditable(el, field, plId, type) {
+        const cur = el.textContent;
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.className = 'form-control form-control-sm text-center';
+        input.style.width = '80px';
+        input.style.display = 'inline-block';
+        if (type === 'float') input.step = '0.01';
+        else input.step = '1';
+        input.value = cur;
+        el.replaceWith(input);
+        input.focus();
+        input.select();
+        const save = async () => {
+            const val = type === 'float' ? parseFloat(input.value) : parseInt(input.value);
+            if (isNaN(val)) { input.replaceWith(el); return; }
+            const body = {};
+            body[field] = val;
+            const res = await API.patch('/api/sc/price-list-update?id=' + plId, body);
+            el.textContent = type === 'float' ? val.toFixed(2) : val;
+            input.replaceWith(el);
+            if (res && res.status === 'ok') el.classList.add('save-ok');
+            setTimeout(() => el.classList.remove('save-ok'), 600);
+        };
+        input.addEventListener('blur', save);
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') input.replaceWith(el); });
+    }
+
+    async function toggleActive(plId, newState, el) {
+        const res = await API.patch('/api/sc/price-list-update?id=' + plId, { is_active: newState });
+        if (res && res.status === 'ok') {
+            el.className = 'badge ' + (newState ? 'bg-success' : 'bg-secondary');
+            el.textContent = newState ? 'Активен' : 'Неактивен';
+            el.setAttribute('onclick', `toggleActive('${plId}', ${!newState}, this)`);
+        }
+    }
+
+    // Region modal
+    let currentPriceListId = '';
+
+    async function openRegionModal(plId, plName) {
+        currentPriceListId = plId;
+        document.getElementById('rmPriceName').textContent = plName;
+        const body = document.getElementById('regionModalBody');
+        body.innerHTML = '<tr><td colspan="4" class="text-center">Загрузка...</td></tr>';
+        new bootstrap.Modal(document.getElementById('regionModal')).show();
+
+        const data = await API.get('/api/sc/price-list-regions?price_list_id=' + plId);
+        if (!data || data.length === 0) {
+            body.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Нет регионов</td></tr>';
+            return;
+        }
+        body.innerHTML = data.map(reg => `
+            <tr>
+                <td>${escapeHtml(reg.region_name)}</td>
+                <td class="text-center">
+                    <input type="checkbox" class="form-check-input" data-rid="${reg.region_id}" ${reg.in_work ? 'checked' : ''}>
+                </td>
+                <td class="text-center">
+                    <input type="number" class="form-control form-control-sm text-center" style="width:80px;margin:0 auto"
+                           step="0.01" value="${formatNumber(reg.markup_pct, 2)}" data-rid="${reg.region_id}">
+                </td>
+                <td class="text-center">
+                    <select class="form-select form-select-sm" style="width:120px;margin:0 auto" data-rid="${reg.region_id}">
+                        <option ${reg.base_price_type === 'Базовая' ? 'selected' : ''}>Базовая</option>
+                        <option ${reg.base_price_type === 'Оптовая' ? 'selected' : ''}>Оптовая</option>
+                        <option ${reg.base_price_type === 'Розничная' ? 'selected' : ''}>Розничная</option>
+                    </select>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    document.getElementById('btnSaveRegions').addEventListener('click', async () => {
+        const rows = document.querySelectorAll('#regionModalBody tr');
+        const items = [];
+        rows.forEach(tr => {
+            const cb = tr.querySelector('input[type="checkbox"]');
+            const numInput = tr.querySelector('input[type="number"]');
+            const sel = tr.querySelector('select');
+            if (!cb) return;
+            items.push({
+                region_id: cb.dataset.rid,
+                in_work: cb.checked,
+                markup_pct: parseFloat(numInput.value) || 0,
+                base_price_type: sel.value
+            });
+        });
+        try {
+            await API.put('/api/sc/price-list-regions?price_list_id=' + currentPriceListId, items);
+            Toast.success('Сохранено', 'Региональные настройки обновлены');
+            bootstrap.Modal.getInstance(document.getElementById('regionModal')).hide();
+            loadPriceLists();
+        } catch(e) {
+            Toast.error('Ошибка', e.message);
+        }
+    });
+
+    loadPriceLists();
+
+    function formatNumber(value, digits) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n.toFixed(digits) : (0).toFixed(digits);
+    }
+    </script>
+</body>
+</html>

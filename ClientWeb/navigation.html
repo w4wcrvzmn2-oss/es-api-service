@@ -1,0 +1,40 @@
+<nav class="top-nav">
+    <div class="top-nav-content">
+        <div class="logo-container">
+            <span class="logo-icon">💊</span>
+            <h3 class="logo-text">ЭльФиСА</h3>
+        </div>
+        <ul class="top-nav-menu">
+            <li><a href="index.html" data-page="index">🏠 Главная</a></li>
+            <li><a href="api-test.html" data-page="api-test">🔍 Проверка API</a></li>
+            <li><a href="price-lists.html" data-page="price-lists">📋 Управление прайсами</a></li>
+            <li><a href="price-summary.html" data-page="price-summary">📊 Сводный прайс</a></li>
+            <li><a href="matching.html" data-page="matching">🔗 Сопоставление</a></li>
+            <li><a href="audit-logs.html" data-page="audit-logs">📋 Логирование</a></li>
+        </ul>
+        <div class="top-nav-actions">
+            <button onclick="AuthManager.logout()" class="btn btn-secondary logout-btn">
+                Выйти
+            </button>
+        </div>
+    </div>
+</nav>
+
+<aside class="sidebar" id="sidebar">
+    <div class="logo-container">
+        <span class="logo-icon">💊</span>
+        <h3 class="logo-text">ЭльФиСА</h3>
+    </div>
+    <ul class="nav-menu">
+        <li><a href="index.html" data-page="index" onclick="closeSidebar()">🏠 Главная</a></li>
+        <li><a href="api-test.html" data-page="api-test" onclick="closeSidebar()">🔍 Проверка API</a></li>
+        <li><a href="price-lists.html" data-page="price-lists" onclick="closeSidebar()">📋 Управление прайсами</a></li>
+        <li><a href="price-summary.html" data-page="price-summary" onclick="closeSidebar()">📊 Сводный прайс</a></li>
+        <li><a href="matching.html" data-page="matching" onclick="closeSidebar()">🔗 Сопоставление</a></li>
+        <li><a href="audit-logs.html" data-page="audit-logs" onclick="closeSidebar()">📋 Логирование</a></li>
+    </ul>
+    <button onclick="AuthManager.logout()" class="btn btn-secondary logout-btn">
+        Выйти
+    </button>
+</aside>
+

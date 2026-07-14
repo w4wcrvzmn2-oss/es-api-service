@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Управление прайсами - ES API Service</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <script src="auth.js"></script>
+    <script src="toast.js"></script>
+    <script src="loading.js"></script>
+    <script src="navigation.js"></script>
+    <script>
+        if (!AuthManager.isAuthenticated()) {
+            window.location.href = 'login.html';
+        }
+    </script>
+
+    <div class="dashboard">
+
+        <main class="main-content">
+            <div class="page-header">
+                <h1><span class="page-icon">📋</span> Управление прайсами</h1>
+                <p>Создание и настройка прайсов поставщиков с указанием регионов действия, наценок и расписания обновления</p>
+            </div>
+
+            <div class="content-wrapper">
+            <!-- Toast контейнер для уведомлений -->
+            <div id="toastContainer" style="position: fixed; top: 20px; right: 20px; z-index: 10000; display: flex; flex-direction: column; gap: 10px; max-width: 400px;"></div>
+            
+            <!-- Фильтры и кнопки -->
+            <div class="section">
+                <div class="form-row" style="display: flex; gap: 10px; align-items: flex-end;">
+                    <div class="form-group" style="flex: 1;">
+                        <label for="supplierFilter">Фильтр по поставщику:</label>
+                        <select id="supplierFilter" style="width: 100%; padding: 10px;">
+                            <option value="">-- Все поставщики --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <button id="loadPriceListsBtn" class="btn btn-info">🔄 Загрузить прайсы</button>
+                    </div>
+                    <div class="form-group">
+                        <button id="addPriceListBtn" class="btn btn-success">➕ Создать прайс</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Управление поставщиками и точками импорта -->
+            <div class="section" style="margin-top: 6px;">
+                <h2>Управление данными для импорта</h2>
+                
+                <!-- Управление поставщиками -->
+                <div style="margin-bottom: 12px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: #f9f9f9;">
+                    <h3 style="margin-top: 0;">Поставщики</h3>
+                    <div class="form-row" style="display: flex; gap: 10px; align-items: flex-end;">
+                        <button id="addSupplierBtn" class="btn btn-primary">➕ Добавить поставщика</button>
+                        <button id="refreshSuppliersBtn" class="btn btn-secondary">🔄 Обновить список</button>
+                    </div>
+                    
+                    <!-- Форма добавления поставщика -->
+                    <div id="supplierForm" style="display: none; margin-top: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: white;">
+                        <h4>Новый поставщик</h4>
+                        <div class="form-group">
+                            <label for="supplierName">Название <span style="color: red;">*</span>:</label>
+                            <input type="text" id="supplierName" required style="width: 100%; padding: 8px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="supplierINN">ИНН:</label>
+                            <input type="text" id="supplierINN" style="width: 100%; padding: 8px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="supplierAddress">Адрес:</label>
+                            <input type="text" id="supplierAddress" style="width: 100%; padding: 8px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="supplierContacts">Контакты:</label>
+                            <input type="text" id="supplierContacts" style="width: 100%; padding: 8px;">
+                        </div>
+                        <div class="button-group">
+                            <button id="saveSupplierBtn" class="btn btn-success">Сохранить</button>
+                            <button id="cancelSupplierBtn" class="btn btn-secondary">Отмена</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Настройки наценок по регионам -->
+                    <div id="supplierMarkupSection" style="display: none; margin-top: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: white;">
+                        <h4>💰 Настройки наценок по регионам</h4>
+                        <p style="color: #666; font-size: 0.9em; margin-bottom: 10px;">
+                            Укажите наценку для каждого региона. Если для региона не указана наценка, будет использоваться общая наценка поставщика.
+                        </p>
+                        
+                        <!-- Общая наценка -->
+                        <div class="form-group" style="margin-bottom: 12px; padding: 8px; background: #f0f0f0; border-radius: 5px;">
+                            <label for="defaultMarkupPct"><strong>Общая наценка (по умолчанию):</strong></label>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <input type="number" id="defaultMarkupPct" step="0.01" min="-100" max="1000" placeholder="0.00" style="width: 150px; padding: 8px;">
+                                <span>%</span>
+                                <button id="saveDefaultMarkupBtn" class="btn btn-success" style="padding: 8px 15px;">💾 Сохранить общую наценку</button>
+                            </div>
+                            <small style="color: #666; display: block; margin-top: 5px;">
+                                Используется для всех регионов, где не указана индивидуальная наценка
+                            </small>
+                        </div>
+                        
+                        <!-- Список региональных наценок -->
+                        <div style="margin-bottom: 10px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <h5 style="margin: 0;">Наценки по регионам:</h5>
+                                <button id="addRegionMarkupBtn" class="btn btn-primary" style="padding: 6px 12px;">➕ Добавить регион</button>
+                            </div>
+                            <div id="regionMarkupList" style="max-height: 400px; overflow-y: auto;">
+                                <!-- Список региональных наценок будет загружаться динамически -->
+                            </div>
+                        </div>
+                        
+                        <!-- Форма добавления региональной наценки -->
+                        <div id="addRegionMarkupForm" style="display: none; margin-top: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: #f0f0f0;">
+                            <h5 style="margin-top: 0;">Добавить наценку для региона</h5>
+                            <div class="form-group">
+                                <label for="newRegionMarkupRegion">Регион:</label>
+                                <select id="newRegionMarkupRegion" style="width: 100%; padding: 8px;">
+                                    <option value="">-- Выберите регион --</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="newRegionMarkupPct">Наценка (%):</label>
+                                <input type="number" id="newRegionMarkupPct" step="0.01" min="-100" max="1000" placeholder="0.00" style="width: 100%; padding: 8px;">
+                            </div>
+                            <div class="form-group">
+                                <label for="newRegionMarkupRounding">Шаг округления (опционально):</label>
+                                <input type="number" id="newRegionMarkupRounding" step="0.01" min="0" placeholder="0.00" style="width: 100%; padding: 8px;">
+                            </div>
+                            <div class="button-group">
+                                <button id="saveNewRegionMarkupBtn" class="btn btn-success">💾 Сохранить</button>
+                                <button id="cancelNewRegionMarkupBtn" class="btn btn-secondary">Отмена</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Управление точками импорта -->
+                <div style="margin-bottom: 12px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: #f9f9f9;">
+                    <h3 style="margin-top: 0;">Точки импорта</h3>
+                    <div class="form-row" style="display: flex; gap: 10px; align-items: flex-end;">
+                        <div class="form-group" style="flex: 1;">
+                            <label for="importPointSelectForImport">Выбрать точку импорта:</label>
+                            <select id="importPointSelectForImport" style="width: 100%; padding: 10px;">
+                                <option value="">-- Сначала выберите поставщика в фильтре выше --</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <button id="addImportPointBtn" class="btn btn-primary">➕ Добавить точку импорта</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Форма добавления точки импорта -->
+                    <div id="importPointForm" style="display: none; margin-top: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: white;">
+                        <h4>Новая точка импорта</h4>
+                        <div class="form-group">
+                            <label for="importPointName">Название <span style="color: red;">*</span>:</label>
+                            <input type="text" id="importPointName" required style="width: 100%; padding: 8px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="importPointDescription">Описание:</label>
+                            <textarea id="importPointDescription" rows="3" style="width: 100%; padding: 8px;"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="importPointSourceFilePath">Путь к файлу для автоматического обновления (CRON):</label>
+                            <input type="text" id="importPointSourceFilePath" placeholder="C:\path\to\file.dbf или C:\path\to\file.zip" style="width: 100%; padding: 8px;">
+                            <small style="color: #666; display: block; margin-top: 5px;">
+                                Укажите полный путь к файлу (DBF или архив ZIP). Этот файл будет использоваться для автоматического обновления по расписанию CRON.
+                                <br>Например: C:\9\priceK.dbf или C:\9\priceK.zip
+                            </small>
+                        </div>
+                        <div class="button-group">
+                            <button id="saveImportPointBtn" class="btn btn-success">Сохранить</button>
+                            <button id="cancelImportPointBtn" class="btn btn-secondary">Отмена</button>
+                        </div>
+                        <div style="margin-top: 15px; padding: 10px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px;">
+                            <strong>⚠️ Важно:</strong> Поле "Путь к файлу для автоматического обновления" предназначено для указания пути к файлу, который будет обновляться по расписанию CRON. 
+                            <br>Не используйте путь к загруженному файлу (uploads/...), так как эти файлы не обновляются автоматически.
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Маппинг полей DBF -->
+                <div id="mappingSection" style="display: none; margin-bottom: 12px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: #f9f9f9;">
+                    <h3 style="margin-top: 0;">Маппинг полей DBF</h3>
+                    <div class="form-group">
+                        <label for="dbfFileInput">Выбрать DBF файл для анализа:</label>
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                            <input type="file" id="dbfFileInput" accept=".dbf" style="display: none;">
+                            <button id="selectDBFFileBtn" class="btn btn-secondary">📁 Выбрать файл</button>
+                            <span id="dbfFileName" style="margin-left: 10px; color: #666; font-style: italic;"></span>
+                        </div>
+                        <label for="dbfFilePathInput" style="margin-top: 10px; display: block;">Или укажите путь к файлу:</label>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <input type="text" id="dbfFilePathInput" placeholder="C:\path\to\file.dbf" style="flex: 1; padding: 8px;">
+                            <button id="analyzeDBFBtn" class="btn btn-info">Проанализировать файл</button>
+                        </div>
+                        <small style="color: #666; display: block; margin-top: 5px;">Вы можете выбрать файл с локального компьютера или указать путь к файлу</small>
+                    </div>
+                    <div id="dbfAnalysisResult" style="margin-top: 15px; display: none;">
+                        <div id="dbfFileInfo" style="padding: 10px; background: #e9ecef; border-radius: 5px; margin-bottom: 10px;"></div>
+                        <div id="mappingTableContainer" class="table-container" style="overflow-x: auto; overflow-y: visible; -webkit-overflow-scrolling: touch; width: 100%; max-width: 100%;">
+                            <table id="mappingTable" class="data-table" style="width: 100%; min-width: 800px; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="background: #e0e0e0;">
+                                        <th style="padding: 10px; border: 1px solid #ddd;">Поле DBF</th>
+                                        <th style="padding: 10px; border: 1px solid #ddd;">Тип</th>
+                                        <th style="padding: 10px; border: 1px solid #ddd;">→</th>
+                                        <th style="padding: 10px; border: 1px solid #ddd;">Целевое поле</th>
+                                        <th style="padding: 10px; border: 1px solid #ddd;">Тип данных</th>
+                                        <th style="padding: 10px; border: 1px solid #ddd;">Обязательное</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="mappingTableBody"></tbody>
+                            </table>
+                        </div>
+                        <button id="saveMappingBtn" class="btn btn-success" style="margin-top: 15px;">Сохранить маппинг</button>
+                    </div>
+                </div>
+                
+                <!-- Импорт файла -->
+                <div id="importSection" style="display: none; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: #f9f9f9;">
+                    <h3 style="margin-top: 0;">Импорт прайса</h3>
+                    <div class="form-group">
+                        <label for="importFileInput">Выбрать DBF файл для импорта:</label>
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                            <input type="file" id="importFileInput" accept=".dbf" style="display: none;">
+                            <button id="selectImportFileBtn" class="btn btn-secondary">📁 Выбрать файл</button>
+                            <span id="importFileName" style="margin-left: 10px; color: #666; font-style: italic;"></span>
+                        </div>
+                        <label for="importFilePath" style="margin-top: 10px; display: block;">Или укажите путь к файлу:</label>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <input type="text" id="importFilePath" placeholder="C:\path\to\file.dbf" style="flex: 1; padding: 8px;">
+                            <button id="importFileBtn" class="btn btn-primary">Запустить импорт</button>
+                        </div>
+                        <small style="color: #666; display: block; margin-top: 5px;">Вы можете выбрать файл с локального компьютера или указать путь к файлу</small>
+                    </div>
+                    <div id="importStatus" style="margin-top: 15px;"></div>
+                </div>
+            </div>
+            
+            <!-- Форма создания/редактирования прайса -->
+            <div class="section" id="priceListFormSection" style="display: none; margin-top: 20px;">
+                <h2 id="priceListFormTitle">Создание прайса</h2>
+                <form id="priceListForm">
+                    <input type="hidden" id="priceListId" value="">
+                    
+                    <div class="form-group">
+                        <label for="formSupplierId">Поставщик <span style="color: red;">*</span>:</label>
+                        <select id="formSupplierId" required style="width: 100%; padding: 10px;">
+                            <option value="">-- Выберите поставщика --</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="formName">Название прайса <span style="color: red;">*</span>:</label>
+                        <input type="text" id="formName" required placeholder="Например: Основной прайс 2024" style="width: 100%; padding: 10px;">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="formDescription">Описание:</label>
+                        <textarea id="formDescription" rows="2" placeholder="Описание прайса" style="width: 100%; padding: 10px;"></textarea>
+                    </div>
+                    
+                    <div class="form-row" style="display: flex; gap: 10px;">
+                        <div class="form-group" style="flex: 1;">
+                            <label for="formImportPointId">Точка импорта:</label>
+                            <select id="formImportPointId" style="width: 100%; padding: 10px;">
+                                <option value="">-- Не указана --</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="formDefaultMarkupPct">Наценка по умолчанию (%):</label>
+                            <input type="number" id="formDefaultMarkupPct" step="0.01" min="-999.99" max="999.99" value="0" placeholder="0.00" style="width: 100%; padding: 10px;">
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="formSchedulePreset">Расписание обновления:</label>
+                        <select id="formSchedulePreset" style="width: 100%; padding: 10px; margin-bottom: 10px;" onchange="updateScheduleCron()">
+                            <option value="">-- Выберите расписание --</option>
+                            <option value="0 0 * * *">Ежедневно в полночь (00:00)</option>
+                            <option value="0 6 * * *">Ежедневно в 6:00 утра</option>
+                            <option value="0 9 * * *">Ежедневно в 9:00 утра</option>
+                            <option value="0 12 * * *">Ежедневно в 12:00 дня</option>
+                            <option value="0 18 * * *">Ежедневно в 18:00 вечера</option>
+                            <option value="0 */6 * * *">Каждые 6 часов</option>
+                            <option value="0 */12 * * *">Каждые 12 часов</option>
+                            <option value="0 0 * * 1">Каждый понедельник в полночь</option>
+                            <option value="0 0 1 * *">1-го числа каждого месяца</option>
+                            <option value="custom">⚙️ Настроить вручную (CRON формат)</option>
+                        </select>
+                        <div id="cronInputContainer" style="display: none; margin-top: 10px; padding: 10px; background: #f8f9fa; border: 1px solid #ddd; border-radius: 4px;">
+                            <label for="formScheduleCron" style="display: block; margin-bottom: 5px; font-weight: bold; color: #2c3e50;">CRON выражение:</label>
+                            <input type="text" id="formScheduleCron" placeholder="Например: 0 0 * * * (каждый день в полночь)" style="width: 100%; padding: 10px; font-family: 'Courier New', monospace; background: white; border: 2px solid #3498db; border-radius: 4px; font-size: 14px;">
+                            <small style="color: #666; display: block; margin-top: 8px; line-height: 1.5;">
+                                <strong>Формат:</strong> <code style="background: #e9ecef; padding: 2px 6px; border-radius: 3px;">минута час день месяц день_недели</code><br>
+                                <strong>Примеры:</strong><br>
+                                • <code style="background: #e9ecef; padding: 2px 6px; border-radius: 3px;">0 0 * * *</code> - каждый день в полночь<br>
+                                • <code style="background: #e9ecef; padding: 2px 6px; border-radius: 3px;">0 */6 * * *</code> - каждые 6 часов<br>
+                                • <code style="background: #e9ecef; padding: 2px 6px; border-radius: 3px;">0 9 * * 1-5</code> - будние дни в 9:00<br>
+                                • <code style="background: #e9ecef; padding: 2px 6px; border-radius: 3px;">30 14 * * *</code> - каждый день в 14:30
+                            </small>
+                        </div>
+                        <small id="scheduleDescription" style="color: #666; display: block; margin-top: 5px;">
+                            Выберите готовое расписание из списка выше или настройте вручную
+                        </small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Регионы действия:</label>
+                        <div id="regionsCheckboxContainer" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                            <div style="color: #666; font-style: italic;">Загрузка регионов...</div>
+                        </div>
+                        <small style="color: #666;">Выберите регионы, в которых действует этот прайс. Если не выбрано - прайс действует во всех регионах.</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="formIsActive" checked> Прайс активен
+                        </label>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button type="submit" class="btn btn-success">Сохранить</button>
+                        <button type="button" id="cancelPriceListFormBtn" class="btn btn-secondary">Отмена</button>
+                    </div>
+                </form>
+            </div>
+            
+            <!-- Таблица прайсов -->
+            <div class="section" style="margin-top: 30px;">
+                <div id="priceListsContainer">
+                    <div class="table-container" style="overflow-x: auto; overflow-y: visible; -webkit-overflow-scrolling: touch; width: 100%; max-width: 100%;">
+                        <table id="priceListsTable" class="data-table" style="width: 100%; min-width: 1000px; border-collapse: collapse; display: none;">
+                        <thead>
+                            <tr style="background: #e0e0e0;">
+                                <th style="padding: 10px; border: 1px solid #ddd;">Поставщик</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Название</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Точка импорта</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Наценка</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Регионов</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Цен</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Расписание</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Статус</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="priceListsTableBody"></tbody>
+                    </table>
+                    </div>
+                </div>
+            </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="price-lists.js"></script>
+    <style>
+        .page-header {
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #3498db;
+        }
+        .page-header h1 {
+            color: #2c3e50;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        .page-header p {
+            color: #7f8c8d;
+            font-size: 1.1em;
+        }
+        .content-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .logout-btn {
+            width: 100%;
+            margin-top: 20px;
+        }
+        .region-checkbox {
+            margin: 5px 0;
+        }
+        .region-checkbox label {
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            padding: 5px;
+        }
+        .region-checkbox label:hover {
+            background: #f0f0f0;
+        }
+        
+        /* Toast уведомления */
+        .toast {
+            position: relative;
+            padding: 15px 20px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-width: 300px;
+            max-width: 400px;
+            animation: slideInRight 0.3s ease-out;
+            backdrop-filter: blur(10px);
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        
+        .toast-error {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a52);
+            color: white;
+            border-left: 4px solid #c0392b;
+        }
+        
+        .toast-success {
+            background: linear-gradient(135deg, #51cf66, #40c057);
+            color: white;
+            border-left: 4px solid #27ae60;
+        }
+        
+        .toast-info {
+            background: linear-gradient(135deg, #4dabf7, #339af0);
+            color: white;
+            border-left: 4px solid #1971c2;
+        }
+        
+        .toast-content {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .toast-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+        
+        .toast-close {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            font-size: 16px;
+            line-height: 1;
+            padding: 0;
+            transition: background 0.2s;
+        }
+        
+        .toast-close:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes slideOutRight {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+        
+        .toast.hiding {
+            animation: slideOutRight 0.3s ease-out forwards;
+        }
+    </style>
+</body>
+</html>
+

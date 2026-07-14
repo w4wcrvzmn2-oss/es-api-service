@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Главная - ES API Service</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <script src="auth.js"></script>
+    <script src="toast.js"></script>
+    <script src="loading.js"></script>
+    <script src="navigation.js"></script>
+    <script>
+        // Проверка авторизации
+        if (!AuthManager.isAuthenticated()) {
+            window.location.href = 'login.html';
+        }
+    </script>
+
+    <div class="dashboard">
+
+        <main class="main-content">
+            <div class="user-info">
+                <h2>👤 Информация об аккаунте</h2>
+                <div class="user-details" id="userDetails">
+                    <div class="info-card">
+                        <strong>Пользователь:</strong>
+                        <span id="username">Загрузка...</span>
+                    </div>
+                    <div class="info-card">
+                        <strong>Время входа:</strong>
+                        <span id="loginTime">Загрузка...</span>
+                    </div>
+                    <div class="info-card">
+                        <strong>Статус сервиса:</strong>
+                        <span id="serviceStatus">Проверка...</span>
+                    </div>
+                    </div>
+                </div>
+
+            <div class="quick-actions">
+                <h3>⚡ Быстрые действия</h3>
+                <div class="action-buttons">
+                    <a href="api-test.html" class="btn btn-primary">🔍 Проверка API</a>
+                    <a href="price-lists.html" class="btn btn-success">📋 Управление прайсами</a>
+                    <a href="price-summary.html" class="btn btn-info">📊 Сводный прайс</a>
+                </div>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3 id="suppliersCount">-</h3>
+                    <p>Поставщиков</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="importsCount">-</h3>
+                    <p>Импортов</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="pricesCount">-</h3>
+                    <p>Позиций в прайсе</p>
+                </div>
+            </div>
+
+            <div style="margin-top: 20px; text-align: center;">
+                <button onclick="loadStats()" class="btn btn-secondary">🔄 Обновить статистику</button>
+                <div id="statsUpdateTime" style="margin-top: 10px; color: #666; font-size: 0.9em; font-style: italic;"></div>
+            </div>
+        </main>
+                    </div>
+                    
+    <script>
+        // Загрузка информации о пользователе
+        const userInfo = AuthManager.getUserInfo();
+        document.getElementById('username').textContent = userInfo.username || AuthManager.getUsername();
+        
+        if (userInfo.loginTime) {
+            const loginDate = new Date(userInfo.loginTime);
+            document.getElementById('loginTime').textContent = loginDate.toLocaleString('ru-RU');
+        }
+
+        // Проверка состояния сервиса
+        AuthManager.healthCheck(AuthManager.getApiUrl()).then(result => {
+            const statusEl = document.getElementById('serviceStatus');
+            if (result.success) {
+                statusEl.textContent = '✅ Работает';
+                statusEl.style.color = '#27ae60';
+            } else {
+                statusEl.textContent = '❌ Недоступен';
+                statusEl.style.color = '#e74c3c';
+            }
+        });
+
+        // Загрузка статистики
+        async function loadStats() {
+            const updateBtn = document.querySelector('button[onclick="loadStats()"]');
+            const statsCards = document.querySelectorAll('.stat-card h3');
+            
+            // Показываем индикаторы загрузки
+            if (updateBtn) showButtonLoading(updateBtn, 'Обновление...');
+            statsCards.forEach(card => {
+                if (card) showElementLoading(card.parentElement, 'Загрузка...');
+            });
+            
+            // Показываем время начала обновления
+            const updateTimeEl = document.getElementById('statsUpdateTime');
+            if (updateTimeEl) {
+                updateTimeEl.textContent = '⏳ Обновление...';
+                updateTimeEl.style.color = '#007bff';
+            }
+            
+            const startTime = Date.now();
+            // Загрузка поставщиков
+            try {
+                const suppliersRes = await AuthManager.authenticatedFetch('/api/suppliers');
+                if (suppliersRes.ok) {
+                    const suppliers = await suppliersRes.json();
+                    const count = Array.isArray(suppliers) ? suppliers.length : 0;
+                    document.getElementById('suppliersCount').textContent = count;
+                    console.log('Поставщиков загружено:', count);
+                } else {
+                    document.getElementById('suppliersCount').textContent = '-';
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки поставщиков:', error);
+                document.getElementById('suppliersCount').textContent = '-';
+            }
+
+            // Загрузка количества импортов (получаем для всех поставщиков)
+            try {
+                // Получаем всех поставщиков и считаем их импорты
+                const suppliersRes = await AuthManager.authenticatedFetch('/api/suppliers');
+                if (suppliersRes.ok) {
+                    const suppliers = await suppliersRes.json();
+                    let totalImports = 0;
+                    
+                    if (Array.isArray(suppliers) && suppliers.length > 0) {
+                        // Для каждого поставщика получаем импорты (параллельно)
+                        const importPromises = suppliers.map(async (supplier) => {
+                            try {
+                                const importsRes = await AuthManager.authenticatedFetch(`/api/invoice-imports?supplier_id=${supplier.supplier_id}`);
+                                if (importsRes.ok) {
+                                    const data = await importsRes.json();
+                                    return data.imports && Array.isArray(data.imports) ? data.imports.length : 0;
+                                }
+                                return 0;
+                            } catch (e) {
+                                console.warn(`Ошибка загрузки импортов для поставщика ${supplier.supplier_id}:`, e);
+                                return 0;
+                            }
+                        });
+                        
+                        const counts = await Promise.all(importPromises);
+                        totalImports = counts.reduce((sum, count) => sum + count, 0);
+                    }
+                    
+                    document.getElementById('importsCount').textContent = totalImports;
+                    console.log('Импортов найдено:', totalImports);
+                } else {
+                    document.getElementById('importsCount').textContent = '-';
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки импортов:', error);
+                document.getElementById('importsCount').textContent = '-';
+            }
+
+            // Загрузка количества позиций в прайсе (сводный прайс всех поставщиков)
+            try {
+                const pricesRes = await AuthManager.authenticatedFetch('/api/supplier-prices/summary');
+                if (pricesRes.ok) {
+                    const data = await pricesRes.json();
+                    const count = data.summary && Array.isArray(data.summary) ? data.summary.length : 0;
+                    document.getElementById('pricesCount').textContent = count;
+                    console.log('Позиций в прайсе:', count);
+                } else {
+                    document.getElementById('pricesCount').textContent = '-';
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки прайсов:', error);
+                document.getElementById('pricesCount').textContent = '-';
+            }
+            
+            // Обновляем время завершения обновления
+            const endTime = Date.now();
+            const duration = ((endTime - startTime) / 1000).toFixed(2);
+            const updateTime = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            
+            if (updateTimeEl) {
+                updateTimeEl.textContent = `✅ Обновлено: ${updateTime} (за ${duration} сек)`;
+                updateTimeEl.style.color = '#28a745';
+            }
+            
+            // Скрываем индикаторы загрузки
+            if (updateBtn) hideButtonLoading(updateBtn);
+            statsCards.forEach(card => {
+                if (card) hideElementLoading(card.parentElement);
+            });
+        }
+
+        // Загружаем статистику после загрузки страницы
+        // Делаем небольшую задержку, чтобы убедиться что все элементы загружены
+        setTimeout(() => {
+            loadStats();
+        }, 500);
+        
+        // Экспорт функции для использования в onclick
+        window.loadStats = loadStats;
+    </script>
+</body>
+</html>

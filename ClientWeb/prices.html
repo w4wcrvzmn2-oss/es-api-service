@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Прайсы - ES API Service</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <script src="auth.js"></script>
+    <script src="toast.js"></script>
+    <script src="loading.js"></script>
+    <script src="navigation.js"></script>
+    <script>
+        if (!AuthManager.isAuthenticated()) {
+            window.location.href = 'login.html';
+        }
+    </script>
+
+    <div class="dashboard">
+
+        <main class="main-content">
+            <div class="page-header">
+                <h1><span class="page-icon">💰</span> Прайсы поставщиков</h1>
+                <p>Просмотр прайсов и сводного прайса</p>
+            </div>
+
+            <div class="content-wrapper">
+            <!-- Toast контейнер для уведомлений -->
+            <div id="toastContainer"></div>
+            
+            <!-- Выбор поставщика -->
+            <div class="section">
+                <h2>Выбор прайса</h2>
+                
+                <div class="form-group">
+                    <label for="supplierSelect">Поставщик:</label>
+                    <select id="supplierSelect" style="width: 100%; padding: 10px;">
+                        <option value="">-- Выберите поставщика --</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="regionSelect">Регион (опционально):</label>
+                    <select id="regionSelect" style="width: 100%; padding: 10px;">
+                        <option value="">-- Все регионы --</option>
+                    </select>
+                </div>
+                
+                <div class="button-group">
+                    <button id="loadPricesBtn" class="btn btn-info">Загрузить прайсы</button>
+                    <button id="addPriceBtn" class="btn btn-success">➕ Добавить прайс</button>
+                </div>
+            </div>
+            
+            <!-- Форма создания/редактирования прайса -->
+            <div class="section" id="priceFormSection" style="display: none; margin-top: 6px;">
+                <h2 id="priceFormTitle">Добавление прайса</h2>
+                <form id="priceForm">
+                    <input type="hidden" id="priceId" value="">
+                    
+                    <div class="form-group">
+                        <label for="formSupplierId">Поставщик <span style="color: red;">*</span>:</label>
+                        <select id="formSupplierId" required style="width: 100%; padding: 10px;">
+                            <option value="">-- Выберите поставщика --</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="formGuidES">GUID препарата (опционально):</label>
+                        <input type="text" id="formGuidES" placeholder="GUID из справочника es_ef2 (если товар - препарат)" style="width: 100%; padding: 10px;">
+                    </div>
+                    
+                    <div class="form-row" style="display: flex; gap: 15px;">
+                        <div class="form-group" style="flex: 1;">
+                            <label for="formItemCode">Код товара <span style="color: red;">*</span>:</label>
+                            <input type="text" id="formItemCode" required placeholder="Код товара от поставщика" style="width: 100%; padding: 10px;">
+                        </div>
+                        <div class="form-group" style="flex: 2;">
+                            <label for="formItemName">Наименование товара <span style="color: red;">*</span>:</label>
+                            <input type="text" id="formItemName" required placeholder="Наименование товара от поставщика" style="width: 100%; padding: 10px;">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row" style="display: flex; gap: 15px;">
+                        <div class="form-group" style="flex: 1;">
+                            <label for="formPrice">Базовая цена <span style="color: red;">*</span>:</label>
+                            <input type="number" id="formPrice" step="0.01" required placeholder="0.00" style="width: 100%; padding: 10px;">
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="formMarkupPct">Наценка (%):</label>
+                            <input type="number" id="formMarkupPct" step="0.01" value="0" placeholder="0.00" style="width: 100%; padding: 10px;">
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label>Финальная цена:</label>
+                            <input type="text" id="formFinalPrice" readonly style="width: 100%; padding: 10px; background: #f0f0f0;">
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="formRegionId">Регион:</label>
+                        <select id="formRegionId" style="width: 100%; padding: 10px;">
+                            <option value="">-- Не указан (все регионы) --</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Настройки наценок по регионам -->
+                    <div id="priceFormMarkupSection" style="margin-top: 12px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: #f9f9f9;">
+                        <h4 style="margin-top: 0; margin-bottom: 10px;">💰 Настройки наценок по регионам</h4>
+                        <p style="color: #666; font-size: 0.9em; margin-bottom: 10px;">
+                            Укажите наценку для каждого региона. Если для региона не указана наценка, будет использоваться общая наценка выше.
+                        </p>
+                        
+                        <!-- Список региональных наценок -->
+                        <div style="margin-bottom: 10px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <h5 style="margin: 0;">Наценки по регионам:</h5>
+                                <button type="button" id="addRegionMarkupBtn" class="btn btn-primary" style="padding: 6px 12px;">➕ Добавить регион</button>
+                            </div>
+                            <div id="regionMarkupList" style="max-height: 300px; overflow-y: auto;">
+                                <!-- Список региональных наценок будет загружаться динамически -->
+                            </div>
+                        </div>
+                        
+                        <!-- Форма добавления региональной наценки -->
+                        <div id="addRegionMarkupForm" style="display: none; margin-top: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: #f0f0f0;">
+                            <h5 style="margin-top: 0;">Добавить наценку для региона</h5>
+                            <div class="form-group">
+                                <label for="newRegionMarkupRegion">Регион:</label>
+                                <select id="newRegionMarkupRegion" style="width: 100%; padding: 8px;">
+                                    <option value="">-- Выберите регион --</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="newRegionMarkupPct">Наценка (%):</label>
+                                <input type="number" id="newRegionMarkupPct" step="0.01" min="-100" max="1000" placeholder="0.00" style="width: 100%; padding: 8px;">
+                            </div>
+                            <div class="form-group">
+                                <label for="newRegionMarkupRounding">Шаг округления (опционально):</label>
+                                <input type="number" id="newRegionMarkupRounding" step="0.01" min="0" placeholder="0.00" style="width: 100%; padding: 8px;">
+                            </div>
+                            <div class="button-group">
+                                <button type="button" id="saveNewRegionMarkupBtn" class="btn btn-success">💾 Сохранить</button>
+                                <button type="button" id="cancelNewRegionMarkupBtn" class="btn btn-secondary">Отмена</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="formIsActive" checked> Прайс активен
+                        </label>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button type="submit" class="btn btn-success">Сохранить</button>
+                        <button type="button" id="cancelPriceFormBtn" class="btn btn-secondary">Отмена</button>
+                    </div>
+                </form>
+            </div>
+            
+            <!-- Таблица прайсов -->
+            <div class="section" style="margin-top: 30px;">
+                <div id="pricesContainer">
+                    <div class="table-container" style="overflow-x: auto; overflow-y: visible; -webkit-overflow-scrolling: touch; width: 100%; max-width: 100%;">
+                        <table id="pricesTable" class="data-table" style="width: 100%; min-width: 1200px; border-collapse: collapse; display: none;">
+                        <thead>
+                            <tr style="background: #e0e0e0;">
+                                <th style="padding: 10px; border: 1px solid #ddd;">Товар</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Код</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">ИНН</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Форма</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Базовая цена</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Наценка</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Финальная цена</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Регион</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Дата</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Статус</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pricesTableBody"></tbody>
+                    </table>
+                    </div>
+                </div>
+                <div id="pricesSummary" style="margin-top: 15px; display: none;"></div>
+            </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="prices.js"></script>
+    <style>
+        .page-header {
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #3498db;
+        }
+        .page-header h1 {
+            color: #2c3e50;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        .page-header p {
+            color: #7f8c8d;
+            font-size: 1.1em;
+        }
+        .content-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .logout-btn {
+            width: 100%;
+            margin-top: 20px;
+        }
+    </style>
+</body>
+</html>
+

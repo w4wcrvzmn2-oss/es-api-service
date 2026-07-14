@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Главная - Кабинет поставщика</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏢</text></svg>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/supplier.css">
+</head>
+<body class="bg-light">
+    <script src="js/auth.js"></script>
+    <script>if (!AuthManager.isAuthenticated()) window.location.href = AuthManager.getLoginPath();</script>
+    <script src="js/nav-supplier.js"></script>
+
+    <div class="container-fluid py-4 px-3 px-lg-5">
+        <h1 class="mb-4"><i class="bi bi-speedometer2"></i> Панель управления</h1>
+
+        <div class="row g-3 mb-4">
+            <div class="col-sm-6 col-lg-3">
+                <div class="card text-center border shadow-sm">
+                    <div class="card-body py-3">
+                        <div class="stat-label">Прайс-листов</div>
+                        <div class="stat-value" id="statPriceLists">-</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-sm-6 col-lg-3">
+                <div class="card text-center border shadow-sm">
+                    <div class="card-body py-3">
+                        <div class="stat-label">Всего позиций</div>
+                        <div class="stat-value" id="statPositions">-</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-sm-6 col-lg-3">
+                <div class="card text-center border shadow-sm">
+                    <div class="card-body py-3">
+                        <div class="stat-label">Заказов сегодня</div>
+                        <div class="stat-value text-success" id="statTodayOrders">-</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-sm-6 col-lg-3">
+                <div class="card text-center border shadow-sm">
+                    <div class="card-body py-3">
+                        <div class="stat-label">Сумма заказов</div>
+                        <div class="stat-value text-success" id="statTodaySum">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title mb-3"><i class="bi bi-lightning-charge"></i> Быстрые действия</h5>
+                <div class="row g-2">
+                    <div class="col-6 col-md-4 col-lg-3"><a href="pages/price-lists.html" class="btn btn-primary w-100"><i class="bi bi-list-check"></i> Прайс-листы</a></div>
+                    <div class="col-6 col-md-4 col-lg-3"><a href="pages/orders.html" class="btn btn-primary w-100"><i class="bi bi-cart3"></i> Заказы</a></div>
+                    <div class="col-6 col-md-4 col-lg-3"><a href="pages/regions.html" class="btn btn-primary w-100"><i class="bi bi-geo-alt"></i> Регионы</a></div>
+                    <div class="col-6 col-md-4 col-lg-3"><a href="pages/clients.html" class="btn btn-primary w-100"><i class="bi bi-people"></i> Клиенты</a></div>
+                    <div class="col-6 col-md-4 col-lg-3"><a href="pages/profile.html" class="btn btn-outline-secondary w-100"><i class="bi bi-person"></i> Профиль</a></div>
+                    <div class="col-6 col-md-4 col-lg-3"><a href="pages/price-upload-log.html" class="btn btn-outline-secondary w-100"><i class="bi bi-clock-history"></i> Статистика загрузок</a></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/toast.js"></script>
+    <script>
+    (async function() {
+        try {
+            const data = await API.get('/api/sc/dashboard');
+            if (data) {
+                document.getElementById('statPriceLists').textContent = data.price_list_count || 0;
+                document.getElementById('statPositions').textContent = data.total_positions || 0;
+                document.getElementById('statTodayOrders').textContent = data.today_order_count || 0;
+                const sum = data.today_order_sum || 0;
+                document.getElementById('statTodaySum').textContent = sum.toLocaleString('ru-RU', {minimumFractionDigits: 2}) + ' ₽';
+            }
+        } catch(e) {
+            console.error('Dashboard load error:', e);
+        }
+    })();
+    </script>
+</body>
+</html>

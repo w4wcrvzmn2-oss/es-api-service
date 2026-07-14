@@ -1,0 +1,235 @@
+basePath: /
+definitions:
+  httpserver.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  httpserver.LoginRequest:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    type: object
+  httpserver.LoginResponse:
+    properties:
+      redirect_url:
+        type: string
+      role:
+        type: string
+      token:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: API сервис для экспорта данных из MS SQL Server
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: ES API Service
+  version: "1.0"
+paths:
+  /api/{tableName}:
+    get:
+      consumes:
+      - application/json
+      description: Возвращает данные из указанной таблицы с поддержкой пагинации и
+        фильтрации
+      parameters:
+      - description: Имя таблицы
+        enum:
+        - Region
+        in: path
+        name: tableName
+        required: true
+        type: string
+      - default: 100
+        description: Количество записей (по умолчанию 100)
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Смещение (по умолчанию 0)
+        in: query
+        name: offset
+        type: integer
+      - description: Фильтр по дате обновления (RFC3339)
+        in: query
+        name: updated_after
+        type: string
+      - description: Фильтр по ID больше указанного
+        in: query
+        name: id_gt
+        type: integer
+      - description: Список колонок через запятую
+        in: query
+        name: columns
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Массив записей из таблицы
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "400":
+          description: Некорректный запрос
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Не авторизован
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Внутренняя ошибка сервера
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Получение данных из таблицы
+      tags:
+      - data
+  /api/fields/{tableName}:
+    get:
+      consumes:
+      - application/json
+      description: Возвращает информацию о доступных полях для указанной таблицы
+      parameters:
+      - description: Имя таблицы
+        in: path
+        name: tableName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Информация о полях таблицы
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Некорректный запрос
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+        "401":
+          description: Не авторизован
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+        "404":
+          description: Таблица не найдена
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Информация о полях таблицы
+      tags:
+      - fields
+  /api/sync/drugs:
+    post:
+      consumes:
+      - application/json
+      description: Запускает синхронизацию всех таблиц, начинающихся с es_, из базы
+        eplus_work
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Синхронизация запущена
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Некорректный запрос
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+        "401":
+          description: Не авторизован
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+        "500":
+          description: Внутренняя ошибка сервера
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Синхронизация всех таблиц es_*
+      tags:
+      - sync
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Выполняет авторизацию пользователя и возвращает JWT токен
+      parameters:
+      - description: Данные для авторизации
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/httpserver.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Успешная авторизация
+          schema:
+            $ref: '#/definitions/httpserver.LoginResponse'
+        "400":
+          description: Некорректный запрос
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+        "401":
+          description: Неверные учетные данные
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+        "500":
+          description: Внутренняя ошибка сервера
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+      summary: Авторизация пользователя
+      tags:
+      - auth
+  /health:
+    get:
+      consumes:
+      - application/json
+      description: Возвращает статус работы сервиса и подключения к БД
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Сервис работает нормально
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Ошибка сервиса
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Проверка состояния сервиса
+      tags:
+      - system
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

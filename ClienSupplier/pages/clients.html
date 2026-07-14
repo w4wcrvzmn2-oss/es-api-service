@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Клиенты - Кабинет поставщика</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏢</text></svg>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/simple-datatables@10/dist/style.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/supplier.css">
+</head>
+<body class="bg-light">
+    <script src="../js/auth.js"></script>
+    <script>if (!AuthManager.isAuthenticated()) window.location.href = AuthManager.getLoginPath();</script>
+    <script src="../js/nav-supplier.js"></script>
+
+    <div class="container-fluid py-4 px-3 px-lg-5">
+        <h1 class="mb-4"><i class="bi bi-people"></i> Клиенты (аптеки)</h1>
+
+        <div class="card shadow-sm mb-3">
+            <div class="card-body py-2">
+                <select class="form-select form-select-sm" id="regionSelect" style="max-width:250px" onchange="loadClients()">
+                    <option value="">Все регионы</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                <table id="tblClients" class="table table-hover table-striped align-middle mb-0" style="font-size:.85rem">
+                    <thead>
+                        <tr>
+                            <th>Клиент</th>
+                            <th class="text-center">В работе</th>
+                            <th class="text-center">Цен. колонка</th>
+                            <th class="text-center">Наценка&nbsp;(%)</th>
+                            <th class="text-center">Код клиента</th>
+                            <th class="text-center">Код оплаты</th>
+                            <th class="text-center">Код доставки</th>
+                            <th class="text-center">Обновлено</th>
+                            <th class="text-center">Контр. мин.</th>
+                            <th class="text-end">Мин. заказ</th>
+                            <th class="text-end">Мин. дозаказ</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="11" class="loading">Загрузка...</td></tr>
+                    </tbody>
+                </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/simple-datatables@10/dist/umd/simple-datatables.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+    <script src="../js/elf-table.js"></script>
+    <script src="../js/api.js"></script>
+    <script src="../js/toast.js"></script>
+    <script>
+    let dt = null;
+
+    (async function() {
+        const regions = await API.get('/api/sc/regions');
+        const sel = document.getElementById('regionSelect');
+        if (regions) {
+            regions.filter(r => r.is_active).forEach(r => {
+                const opt = document.createElement('option');
+                opt.value = r.region_id;
+                opt.textContent = r.name;
+                sel.appendChild(opt);
+            });
+        }
+        loadClients();
+    })();
+
+    async function loadClients() {
+        if (dt) { ElfTable.destroy(dt); dt = null; }
+        const tbody = document.querySelector('#tblClients tbody');
+        tbody.innerHTML = '<tr><td colspan="11" class="loading">Загрузка...</td></tr>';
+        const regionId = document.getElementById('regionSelect').value;
+        let q = '/api/sc/clients';
+        if (regionId) q += '?region_id=' + regionId;
+        const data = await API.get(q);
+        if (!data || data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="11" class="empty-row">Нет клиентов</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.map(c => {
+            const activeCls = c.is_active ? 'bg-success' : 'bg-secondary';
+            const activeTxt = c.is_active ? 'Да' : 'Нет';
+            const ctrlCls = c.control_min_order ? 'bg-success' : 'bg-secondary';
+            const ctrlTxt = c.control_min_order ? 'Да' : 'Нет';
+            return `<tr>
+                <td>
+                    <div class="fw-semibold">${escapeHtml(c.name)}</div>
+                    <small class="text-muted">${escapeHtml(c.region || '')}${c.address ? ', ' + escapeHtml(c.address) : ''}${c.inn ? ' | ИНН: ' + escapeHtml(c.inn) : ''}</small>
+                </td>
+                <td class="text-center">
+                    <span class="badge ${activeCls}" style="cursor:pointer"
+                          onclick="toggleField('${c.buyer_id}','is_active',${!c.is_active},this)">${activeTxt}</span>
+                </td>
+                <td class="text-center">
+                    <select class="form-select form-select-sm" style="width:100px;margin:0 auto"
+                            onchange="saveField('${c.buyer_id}','price_column',this.value,this)">
+                        <option ${c.price_column==='Базовая'?'selected':''}>Базовая</option>
+                        <option ${c.price_column==='Оптовая'?'selected':''}>Оптовая</option>
+                        <option ${c.price_column==='Розничная'?'selected':''}>Розничная</option>
+                    </select>
+                </td>
+                <td class="text-center">
+                    <span class="editable-cell" onclick="makeEdit(this,'markup_pct','${c.buyer_id}','float')">${c.markup_pct}</span>
+                </td>
+                <td class="text-center">
+                    <span class="editable-cell" onclick="makeEdit(this,'client_code','${c.buyer_id}','text')">${escapeHtml(c.client_code || '') || '—'}</span>
+                </td>
+                <td class="text-center">
+                    <span class="editable-cell" onclick="makeEdit(this,'payment_code','${c.buyer_id}','text')">${escapeHtml(c.payment_code || '') || '—'}</span>
+                </td>
+                <td class="text-center">
+                    <span class="editable-cell" onclick="makeEdit(this,'delivery_code','${c.buyer_id}','text')">${escapeHtml(c.delivery_code || '') || '—'}</span>
+                </td>
+                <td class="text-center"><small>${c.updated_at || '—'}</small></td>
+                <td class="text-center">
+                    <span class="badge ${ctrlCls}" style="cursor:pointer"
+                          onclick="toggleField('${c.buyer_id}','control_min_order',${!c.control_min_order},this)">${ctrlTxt}</span>
+                </td>
+                <td class="text-end">
+                    <span class="editable-cell" onclick="makeEdit(this,'min_order_amount','${c.buyer_id}','float')">${formatNumber(c.min_order_amount, 0)}</span>
+                </td>
+                <td class="text-end">
+                    <span class="editable-cell" onclick="makeEdit(this,'min_reorder_amount','${c.buyer_id}','float')">${formatNumber(c.min_reorder_amount, 0)}</span>
+                </td>
+            </tr>`;
+        }).join('');
+        dt = ElfTable.init('tblClients', { exportName: 'Клиенты', unsortable: [1,2,3,4,5,6,8,9,10] });
+    }
+
+    async function toggleField(buyerId, field, newVal, el) {
+        const body = {}; body[field] = newVal;
+        const res = await API.patch('/api/sc/clients?buyer_id=' + buyerId, body);
+        if (res && res.status === 'ok') {
+            const isOn = newVal;
+            el.className = 'badge ' + (isOn ? 'bg-success' : 'bg-secondary');
+            el.textContent = isOn ? 'Да' : 'Нет';
+            el.setAttribute('onclick', `toggleField('${buyerId}','${field}',${!isOn},this)`);
+        }
+    }
+
+    async function saveField(buyerId, field, val, el) {
+        const body = {}; body[field] = val;
+        const res = await API.patch('/api/sc/clients?buyer_id=' + buyerId, body);
+        if (res && res.status === 'ok') {
+            el.classList.add('save-ok');
+            setTimeout(() => el.classList.remove('save-ok'), 600);
+        }
+    }
+
+    function makeEdit(el, field, buyerId, type) {
+        const cur = el.textContent === '—' ? '' : el.textContent;
+        const input = document.createElement('input');
+        input.type = type === 'float' ? 'number' : 'text';
+        input.className = 'form-control form-control-sm text-center';
+        input.style.width = type === 'text' ? '90px' : '70px';
+        input.style.display = 'inline-block';
+        if (type === 'float') input.step = '0.01';
+        input.value = cur;
+        el.replaceWith(input);
+        input.focus();
+        input.select();
+        let saved = false;
+        const save = async () => {
+            if (saved) return;
+            saved = true;
+            let val = type === 'float' ? parseFloat(input.value) || 0 : input.value;
+            const body = {}; body[field] = val;
+            try {
+                const res = await API.patch('/api/sc/clients?buyer_id=' + buyerId, body);
+                const display = type === 'float' ? val : (val || '—');
+                el.textContent = display;
+                input.replaceWith(el);
+                if (res && res.status === 'ok') { el.classList.add('save-ok'); setTimeout(() => el.classList.remove('save-ok'), 600); }
+            } catch(e) {
+                console.error('Save error:', e);
+                el.textContent = cur || '—';
+                input.replaceWith(el);
+            }
+        };
+        input.addEventListener('blur', save);
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); save(); }
+            if (e.key === 'Escape') { el.textContent = cur || '—'; input.replaceWith(el); saved = true; }
+        });
+    }
+
+    function formatNumber(value, digits) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n.toFixed(digits) : (0).toFixed(digits);
+    }
+    </script>
+</body>
+</html>
