@@ -2635,3 +2635,19 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent) !importan
     border-bottom:1px solid #e4e7ec !important; padding:8px 12px !important; text-align:left; }
 .data-table tbody td { border-bottom:1px solid #eef0f3 !important; font-size:13px !important; padding:9px 12px !important; color:#1b2430; }
 .data-table tbody tr:hover { background:#f8f9fb !important; }
+
+/* ── Убрать «подпрыгивание»/масштаб при наведении ── */
+.btn:hover, .btn-primary:hover, .btn-secondary:hover, .btn-success:hover, .btn-info:hover, .btn-danger:hover,
+.section:hover, .card:hover, .stat-card:hover, .info-card:hover, .quick-actions:hover, .user-info:hover,
+.nav-menu a:hover, .top-nav-menu a:hover, .action-buttons a:hover, .action-buttons .btn:hover,
+.stat-card:hover, .cards-view > *:hover { transform: none !important; scale: none !important; }
+
+/* ── Текст не вылезает за рамки карточек; уважение к сетке ── */
+.stat-card, .info-card, .card, .quick-actions, .user-info, .section { min-width: 0; overflow-wrap: anywhere; }
+.stat-card > *, .info-card > *, .card > *, .quick-actions > *, .user-info > * { min-width: 0; max-width: 100%; }
+.info-card, .info-card span, .info-card strong { overflow-wrap: anywhere; word-break: break-word; }
+.stats-grid { display: grid !important; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) !important;
+    gap: 14px !important; align-items: stretch !important; }
+.stats-grid > *, .cards-view > * { min-width: 0; }
+/* элементы любой inline-сетки не должны выпирать содержимым */
+.main-content [style*="grid"] > * { min-width: 0; }
