@@ -22,6 +22,10 @@ async function loadBuyer(id) {
         if (data) {
             document.getElementById('name').value = data.name || '';
             document.getElementById('inn').value = data.inn || '';
+            document.getElementById('code').value = data.code || '';
+            document.getElementById('phone').value = data.phone || '';
+            document.getElementById('address').value = data.address || '';
+            document.getElementById('email').value = data.email || '';
             document.getElementById('isActive').checked = data.is_active !== false;
             
             if (data.region_id) {
@@ -64,6 +68,10 @@ async function handleSubmit(e) {
         name: document.getElementById('name').value,
         inn: document.getElementById('inn').value || null,
         region_id: regionId || null,
+        code: document.getElementById('code').value || null,
+        phone: document.getElementById('phone').value || null,
+        address: document.getElementById('address').value || null,
+        email: document.getElementById('email').value || null,
         is_active: document.getElementById('isActive').checked
     };
     

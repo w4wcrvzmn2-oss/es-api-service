@@ -83,6 +83,7 @@ func (s *Server) handleGetBuyers(w http.ResponseWriter, r *http.Request) {
 		Select(`CAST(b.BuyerID AS NVARCHAR(50)) AS BuyerID,
 			b.Name, b.INN,
 			CAST(b.RegionID AS NVARCHAR(50)) AS RegionID,
+			b.Code, b.Phone, b.Address, b.Email,
 			b.IsActive, b.CreatedAt,
 			r.Name AS RegionName`).
 		Joins("LEFT JOIN Region r ON b.RegionID = r.RegionID").
@@ -116,6 +117,7 @@ func (s *Server) handleGetBuyerByID(w http.ResponseWriter, r *http.Request, buye
 		Select(`CAST(b.BuyerID AS NVARCHAR(50)) AS BuyerID,
 			b.Name, b.INN,
 			CAST(b.RegionID AS NVARCHAR(50)) AS RegionID,
+			b.Code, b.Phone, b.Address, b.Email,
 			b.IsActive, b.CreatedAt,
 			r.Name AS RegionName`).
 		Joins("LEFT JOIN Region r ON b.RegionID = r.RegionID").
@@ -161,6 +163,10 @@ func (s *Server) handleCreateBuyer(w http.ResponseWriter, r *http.Request) {
 		Name:      req.Name,
 		INN:       req.INN,
 		RegionID:  nilIfEmpty(req.RegionID),
+		Code:      nilIfEmpty(req.Code),
+		Phone:     nilIfEmpty(req.Phone),
+		Address:   nilIfEmpty(req.Address),
+		Email:     nilIfEmpty(req.Email),
 		IsActive:  req.IsActive,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -203,6 +209,10 @@ func (s *Server) handleUpdateBuyer(w http.ResponseWriter, r *http.Request, buyer
 			"Name":     req.Name,
 			"INN":      req.INN,
 			"RegionID": nilIfEmpty(req.RegionID),
+			"Code":     nilIfEmpty(req.Code),
+			"Phone":    nilIfEmpty(req.Phone),
+			"Address":  nilIfEmpty(req.Address),
+			"Email":    nilIfEmpty(req.Email),
 			"IsActive": req.IsActive,
 		})
 	if res.Error != nil {

@@ -151,6 +151,10 @@ type Buyer struct {
 	Name      string    `json:"name"`
 	INN       *string   `json:"inn,omitempty"`
 	RegionID  *string   `json:"region_id,omitempty" gorm:"type:uniqueidentifier"`
+	Code      *string   `json:"code,omitempty"`
+	Phone     *string   `json:"phone,omitempty"`
+	Address   *string   `json:"address,omitempty"`
+	Email     *string   `json:"email,omitempty"`
 	IsActive  bool      `json:"is_active"`
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
 }
@@ -183,6 +187,10 @@ type BuyerRequest struct {
 	Name     string  `json:"name"`
 	INN      *string `json:"inn,omitempty"`
 	RegionID *string `json:"region_id,omitempty"`
+	Code     *string `json:"code,omitempty"`
+	Phone    *string `json:"phone,omitempty"`
+	Address  *string `json:"address,omitempty"`
+	Email    *string `json:"email,omitempty"`
 	IsActive bool    `json:"is_active"`
 }
 
