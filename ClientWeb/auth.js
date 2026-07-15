@@ -103,7 +103,12 @@ class AuthManager {
                         username: username,
                         loginTime: new Date().toISOString()
                     }));
-                    
+
+                    // Кросс-кабинетная сессия: кабинеты поставщика и управления
+                    // читают токен из общих ключей authToken/userInfo.
+                    localStorage.setItem('authToken', token);
+                    localStorage.setItem('userInfo', JSON.stringify({ username: username }));
+
                     // Проверяем, что токен действительно сохранился
                     const savedToken = localStorage.getItem(this.STORAGE_TOKEN_KEY);
                     if (!savedToken || savedToken !== token) {
@@ -132,6 +137,10 @@ class AuthManager {
         localStorage.removeItem(this.STORAGE_TOKEN_KEY);
         localStorage.removeItem(this.STORAGE_USERNAME_KEY);
         localStorage.removeItem(this.STORAGE_USER_INFO_KEY);
+        // чистим и общие кросс-кабинетные ключи, иначе после выхода
+        // /login.html увидит сессию и снова уведёт в панель.
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('userInfo');
         window.location.href = 'login.html';
     }
 
