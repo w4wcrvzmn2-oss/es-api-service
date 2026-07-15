@@ -13,7 +13,7 @@ async function loadRegions() {
     tbody.innerHTML = '<tr><td colspan="4" class="loading">Загрузка данных...</td></tr>';
 
     try {
-        const data = await API.get('/api/region');
+        const data = await API.get('/api/region?columns=RegionID,Code,Name');
         if (data && data.length > 0) {
             regionsData = data;
             tbody.innerHTML = data.map(region => {

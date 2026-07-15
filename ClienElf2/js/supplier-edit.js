@@ -91,7 +91,7 @@ async function loadRegionsCheckboxes() {
     if (!container) return;
     
     try {
-        const data = await API.get('/api/region');
+        const data = await API.get('/api/region?columns=RegionID,Name');
         if (data && data.length > 0) {
             const sorted = data.sort((a, b) => 
                 (a.Name || a.name || '').localeCompare(b.Name || b.name || '', 'ru')
