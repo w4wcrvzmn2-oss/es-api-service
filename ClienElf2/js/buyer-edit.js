@@ -64,7 +64,7 @@ async function loadRegions() {
     if (!select) return;
     
     try {
-        const data = await API.get('/api/region');
+        const data = await API.get('/api/region?columns=RegionID,Name');
         if (data && data.length > 0) {
             select.innerHTML = '<option value="">Выберите регион</option>' +
                 data.map(region => `<option value="${(region.RegionID || region.region_id || '').toLowerCase()}">${escapeHtml(region.Name || region.name || '-')}</option>`).join('');
