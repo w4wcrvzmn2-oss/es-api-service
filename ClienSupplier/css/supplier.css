@@ -1,144 +1,152 @@
+/* ============================================================
+   Кабинет поставщика — дизайн-система «Электронная Фармация».
+   Роль-акцент: зелёный. Поверх локального Bootstrap (без CDN).
+   ============================================================ */
 :root {
-    --supplier-primary: #2e7d32;
-    --supplier-accent: #43a047;
+    --accent: #2e8a57;
+    --accent-dark: #256f46;
+    --accent-soft: #eaf5ef;
+    --supplier-primary: #2e8a57;   /* совместимость со старыми селекторами */
+    --supplier-accent: #256f46;
+    --ef-border: #e4e7ec;
+    --ef-border-soft: #eef0f3;
+    --ef-field: #d0d5dd;
+    --ef-muted: #667085;
+    --ef-thead: #f8f9fb;
+    --ef-mono: ui-monospace, Menlo, Consolas, "Roboto Mono", monospace;
 }
 
 html, body { height: 100%; margin: 0; }
+body {
+    background: #f4f5f7; color: #1b2430; font-size: 14px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
 
+/* ── Верхняя панель: белая, тонкая, зелёный акцент ── */
 .supplier-navbar {
-    background: linear-gradient(135deg, #2e7d32 0%, #388e3c 100%) !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,.12);
+    background: #fff !important;
+    border-bottom: 1px solid var(--ef-border);
+    box-shadow: none !important;
+}
+.supplier-navbar .navbar-brand,
+.supplier-navbar .nav-link,
+.supplier-navbar .navbar-text { color: #1b2430 !important; }
+.supplier-navbar .nav-link:hover { color: var(--accent-dark) !important; }
+.supplier-navbar .nav-link.active {
+    color: var(--accent-dark) !important; font-weight: 600;
+    background: var(--accent-soft); border-radius: 8px;
 }
 
-.btn-success {
-    --bs-btn-bg: #43a047;
-    --bs-btn-border-color: #43a047;
-    --bs-btn-hover-bg: #388e3c;
-    --bs-btn-hover-border-color: #388e3c;
-    --bs-btn-active-bg: #2e7d32;
-    --bs-btn-active-border-color: #2e7d32;
+/* ── Заголовки ── */
+h1, h2, h3, .h1, .h2, .h3 { color: #1b2430; font-weight: 700; letter-spacing: -.01em; }
+
+/* ── Кнопки (Bootstrap) под зелёный акцент ── */
+.btn { border-radius: 8px; font-weight: 600; }
+.btn-success, .btn-primary {
+    --bs-btn-bg: var(--accent); --bs-btn-border-color: var(--accent);
+    --bs-btn-hover-bg: var(--accent-dark); --bs-btn-hover-border-color: var(--accent-dark);
+    --bs-btn-active-bg: var(--accent-dark); --bs-btn-active-border-color: var(--accent-dark);
+    --bs-btn-disabled-bg: var(--accent); --bs-btn-disabled-border-color: var(--accent);
+}
+.btn-outline-primary, .btn-outline-success {
+    --bs-btn-color: var(--accent-dark); --bs-btn-border-color: var(--accent);
+    --bs-btn-hover-bg: var(--accent); --bs-btn-hover-border-color: var(--accent);
+}
+.btn-secondary, .btn-outline-secondary { --bs-btn-color: #475467; }
+.btn:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft) !important; }
+
+/* ── Карточки ── */
+.card { border: 1px solid var(--ef-border); border-radius: 10px; box-shadow: 0 1px 2px rgba(16,24,40,.06); }
+.card-header { background: #fff; border-bottom: 1px solid var(--ef-border-soft); font-weight: 700; }
+
+/* ── Поля ── */
+.form-control, .form-select {
+    border: 1px solid var(--ef-field); border-radius: 8px; font-size: 13px; color: #1b2430;
+}
+.form-control:focus, .form-select:focus {
+    border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-h1, h2, h3 { color: var(--supplier-primary); }
-
+/* ── Таблицы: светлая шапка капсом (без цветного градиента) ── */
 .table > thead,
-.datatable-table > thead {
-    background: linear-gradient(135deg, #2e7d32 0%, #388e3c 100%) !important;
-}
+.datatable-table > thead { background: var(--ef-thead) !important; }
 .table > thead th,
 .table > thead > tr > th,
 .table > :not(caption) > thead > tr > th,
 .datatable-table > thead th,
 .datatable-table > thead > tr > th {
-    color: #fff !important;
-    background-color: transparent !important;
+    color: var(--ef-muted) !important;
+    background-color: var(--ef-thead) !important;
     --bs-table-bg: transparent !important;
     --bs-table-accent-bg: transparent !important;
-    font-weight: 600;
+    --bs-table-color: var(--ef-muted) !important;
+    font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
     vertical-align: middle;
-    border-bottom-color: #1b5e20 !important;
-    padding: .6rem .75rem;
+    border-bottom: 1px solid var(--ef-border) !important;
+    padding: .55rem .75rem;
 }
+.table > tbody td { border-bottom: 1px solid var(--ef-border-soft); font-size: 13px; padding: .55rem .75rem; }
+.table > tbody tr:hover { background: var(--ef-thead); }
 
-.empty-row {
-    text-align: center;
-    color: #999;
-    font-style: italic;
-}
+/* ── KPI ── */
+.stat-label { font-size: 12px; color: var(--ef-muted); font-weight: 600; }
+.stat-value { font-size: 1.7rem; font-weight: 700; color: var(--accent-dark); font-family: var(--ef-mono); }
 
-.loading {
-    text-align: center;
-    color: #888;
-    padding: 2rem !important;
-}
-
-.loading::before {
-    content: '';
-    display: inline-block;
-    width: 1rem;
-    height: 1rem;
-    border: .2em solid currentColor;
-    border-right-color: transparent;
-    border-radius: 50%;
-    animation: spinner-border .75s linear infinite;
-    margin-right: .5rem;
-    vertical-align: middle;
-}
-
-.stat-label { font-size: .88rem; color: #666; }
-.stat-value { font-size: 1.8rem; font-weight: 700; color: var(--supplier-primary); }
-
-/* Editable cells */
+/* ── Редактируемые ячейки ── */
 .editable-cell {
-    cursor: pointer;
-    border-bottom: 1px dashed #aaa;
-    padding: 2px 6px;
-    min-width: 40px;
-    display: inline-block;
-    color: #495057;
+    cursor: pointer; border-bottom: 1px dashed #aaa; padding: 2px 6px;
+    min-width: 40px; display: inline-block; color: #495057;
 }
-.editable-cell:hover { background: #e8f5e9; border-bottom-color: #4caf50; }
-.save-ok {
-    animation: saveFlash 0.6s ease;
-}
-@keyframes saveFlash {
-    0% { background: #a5d6a7; }
-    100% { background: transparent; }
+.editable-cell:hover { background: var(--accent-soft); border-bottom-color: var(--accent); }
+.save-ok { animation: saveFlash 0.6s ease; }
+@keyframes saveFlash { 0% { background: #c6ecd6; } 100% { background: transparent; } }
+
+/* ── Бейджи ── */
+.empty-row { text-align: center; color: #999; font-style: italic; }
+.loading { text-align: center; color: #888; padding: 2rem !important; }
+.loading::before {
+    content: ''; display: inline-block; width: 1rem; height: 1rem;
+    border: .2em solid currentColor; border-right-color: transparent; border-radius: 50%;
+    animation: spinner-border .75s linear infinite; margin-right: .5rem; vertical-align: middle;
 }
 
-/* Simple-DataTables integration */
+/* ── Simple-DataTables ── */
 .datatable-wrapper { margin-top: .5rem; }
 .datatable-top {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: .5rem;
-    padding: .5rem .75rem;
-    justify-content: flex-end;
+    display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+    padding: .5rem .75rem; justify-content: flex-end;
 }
 .datatable-top .elf-export-bar { display: flex; gap: .3rem; }
 .datatable-bottom {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: .5rem;
-    padding: .5rem .75rem;
-    font-size: .85rem;
-    color: #666;
+    display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+    padding: .5rem .75rem; font-size: .85rem; color: var(--ef-muted);
 }
 .datatable-bottom .datatable-info { flex: 1; }
 .datatable-bottom .datatable-dropdown { margin-left: auto; white-space: nowrap; }
-.datatable-sorter {
-    cursor: pointer;
-    position: relative;
-    padding-right: 1.2rem;
-}
+.datatable-sorter { cursor: pointer; position: relative; padding-right: 1.2rem; }
 .datatable-sorter::before,
 .datatable-sorter::after {
-    content: '';
-    position: absolute;
-    right: 2px;
-    border: 4px solid transparent;
-    opacity: .4;
+    content: ''; position: absolute; right: 2px; border: 4px solid transparent; opacity: .35;
 }
-.datatable-sorter::before { border-bottom-color: #fff; top: calc(50% - 8px); }
-.datatable-sorter::after { border-top-color: #fff; top: calc(50% + 1px); }
-.datatable-sorter.datatable-ascending::before { opacity: 1; }
-.datatable-sorter.datatable-descending::after { opacity: 1; }
+.datatable-sorter::before { border-bottom-color: var(--ef-muted); top: calc(50% - 8px); }
+.datatable-sorter::after  { border-top-color: var(--ef-muted); top: calc(50% + 1px); }
+.datatable-sorter.datatable-ascending::before { opacity: 1; border-bottom-color: var(--accent-dark); }
+.datatable-sorter.datatable-descending::after { opacity: 1; border-top-color: var(--accent-dark); }
 .datatable-table thead th { white-space: nowrap; }
 .datatable-pagination-list { flex-wrap: wrap; }
 .datatable-empty { text-align: center; color: #999; font-style: italic; padding: 2rem !important; }
 .datatable-input { max-width: 400px; width: 100%; }
 .datatable-selector { max-width: 80px; }
 
-/* Toast */
+/* ── Тосты ── */
 .elf-toast-container {
     position: fixed; top: 4.5rem; right: 1.2rem; z-index: 10000;
     display: flex; flex-direction: column; gap: .6rem; max-width: 440px; pointer-events: none;
 }
 .elf-toast {
     pointer-events: auto; display: flex; gap: .7rem; padding: .9rem 1rem;
-    border-radius: .625rem; box-shadow: 0 6px 24px rgba(0,0,0,.15);
+    border-radius: .625rem; box-shadow: 0 6px 24px rgba(16,24,40,.15);
     background: #fff; color: #333; font-size: .88rem; line-height: 1.45;
     animation: elfToastIn .35s ease-out; border-left: 4px solid #aaa;
     position: relative; overflow: hidden;
@@ -150,24 +158,23 @@ h1, h2, h3 { color: var(--supplier-primary); }
 .elf-toast-message { white-space: pre-line; word-break: break-word; }
 .elf-toast-close {
     position: absolute; top: .5rem; right: .6rem;
-    background: none; border: none; font-size: 1.1rem;
-    cursor: pointer; color: #999; line-height: 1;
+    background: none; border: none; font-size: 1.1rem; cursor: pointer; color: #999; line-height: 1;
 }
 .elf-toast-close:hover { color: #333; }
 .elf-toast-progress {
     position: absolute; bottom: 0; left: 0; height: 3px;
     background: rgba(0,0,0,.12); animation: elfToastProgress linear forwards;
 }
-.elf-toast-success { border-left-color: #198754; }
+.elf-toast-success { border-left-color: var(--accent); }
 .elf-toast-error   { border-left-color: #dc3545; }
-.elf-toast-warning { border-left-color: #ffc107; }
-.elf-toast-info    { border-left-color: #2e7d32; }
-@keyframes elfToastIn  { from { opacity:0; transform:translateX(60px); } to { opacity:1; transform:translateX(0); } }
-@keyframes elfToastOut { from { opacity:1; } to { opacity:0; transform:translateX(60px); } }
-@keyframes elfToastProgress { from { width:100%; } to { width:0%; } }
+.elf-toast-warning { border-left-color: #e0a63c; }
+.elf-toast-info    { border-left-color: var(--accent); }
+@keyframes elfToastIn  { from { opacity: 0; transform: translateX(60px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes elfToastOut { from { opacity: 1; } to { opacity: 0; transform: translateX(60px); } }
+@keyframes elfToastProgress { from { width: 100%; } to { width: 0%; } }
 
-/* Login page supplier variant */
+/* ── Экран входа ── */
 .login-page {
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(135deg, #2e7d32 0%, #388e3c 50%, #43a047 100%); overflow: auto;
+    background: linear-gradient(180deg, #f4f5f7 0%, #eceef2 100%); overflow: auto;
 }
