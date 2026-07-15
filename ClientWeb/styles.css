@@ -2583,3 +2583,32 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent) !importan
         border:1px solid #e4e7ec !important; border-radius:10px !important;
         box-shadow:var(--shadow-sm) !important; margin:22px 24px !important; padding:22px 24px !important; }
 }
+
+/* ── Шелл под макет: лого, поиск, юзер-блок, точки меню ── */
+.top-nav-content { min-height:52px; }
+.logo-container { display:flex; align-items:center; gap:9px; }
+.ef-logo2 { width:24px; height:24px; border-radius:7px; background:var(--accent); position:relative; flex:none; display:inline-block; }
+.ef-logo2::before, .ef-logo2::after { content:""; position:absolute; background:#fff; border-radius:1px; }
+.ef-logo2::before { left:10px; top:5px; width:4px; height:14px; }
+.ef-logo2::after  { left:5px; top:10px; width:14px; height:4px; }
+.ef-appname { font-size:14px; font-weight:700; color:#1b2430; }
+.top-nav-actions { display:flex; align-items:center; gap:12px; }
+.ef-topsearch { width:280px; max-width:34vw; height:32px; border:1px solid #d0d5dd; border-radius:8px;
+    padding:0 11px; font-size:12.5px; outline:none; background:#f8f9fb; box-sizing:border-box; }
+.ef-topsearch:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); background:#fff; }
+.ef-user { display:flex; align-items:center; gap:8px; }
+.ef-user__avatar { width:30px; height:30px; border-radius:50%; background:var(--accent-soft); color:var(--accent-dark);
+    display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex:none; }
+.ef-user__meta { display:flex; flex-direction:column; line-height:1.2; }
+.ef-user__meta b { font-size:12.5px; font-weight:600; color:#1b2430; }
+.ef-user__meta i { font-size:11px; color:#98a2b3; font-style:normal; }
+.ef-navdot { width:8px; height:8px; border-radius:3px; background:#c6ccd6; flex:none; display:inline-block; }
+.nav-menu a.active .ef-navdot { background:var(--accent); }
+.ef-sidever { font-size:11px; color:#98a2b3; padding:10px 10px 0; border-top:1px solid #eef0f3; margin-top:12px; }
+
+@media (min-width: 900px) {
+    .sidebar .ef-side-logout { display:none !important; }
+}
+@media (max-width: 899px) {
+    .ef-topsearch, .ef-user { display:none !important; }
+}
