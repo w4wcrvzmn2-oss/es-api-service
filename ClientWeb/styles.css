@@ -2612,3 +2612,26 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent) !importan
 @media (max-width: 899px) {
     .ef-topsearch, .ef-user { display:none !important; }
 }
+
+/* Без анимаций появления/перехода между разделами */
+.main-content, .dashboard, .section, .card, .stat-card, .info-card,
+.quick-actions, .user-info, .table-container { animation: none !important; }
+
+/* ── Заголовки разделов под макет ── */
+.page-header { margin:0 0 18px !important; padding:0 !important; border:0 !important;
+    background:transparent !important; box-shadow:none !important; }
+.main-content h1, .page-header h1, .section > h1 {
+    font-size:21px !important; font-weight:700 !important; letter-spacing:-.01em !important;
+    color:#1b2430 !important; margin:0 0 4px !important; background:none !important;
+    -webkit-text-fill-color:#1b2430 !important; text-align:left !important; }
+.page-icon { display:none !important; }
+.main-content h2, .section h2 { font-size:16px !important; font-weight:700 !important; color:#1b2430 !important; }
+.main-content h3, .section h3 { font-size:13px !important; font-weight:600 !important; color:#1b2430 !important; }
+
+/* ── Таблицы данных под дизайн-систему ── */
+.data-table { border-collapse:collapse; width:100%; }
+.data-table thead th { background:#f8f9fb !important; color:#667085 !important; font-size:11.5px !important;
+    font-weight:600 !important; text-transform:uppercase; letter-spacing:.04em;
+    border-bottom:1px solid #e4e7ec !important; padding:8px 12px !important; text-align:left; }
+.data-table tbody td { border-bottom:1px solid #eef0f3 !important; font-size:13px !important; padding:9px 12px !important; color:#1b2430; }
+.data-table tbody tr:hover { background:#f8f9fb !important; }
