@@ -14,7 +14,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     document.getElementById('buyerForm').addEventListener('submit', handleSubmit);
+
+    // Маска телефона: форматируем по мере ввода
+    const phoneEl = document.getElementById('phone');
+    if (phoneEl) {
+        phoneEl.addEventListener('input', () => { phoneEl.value = formatPhone(phoneEl.value); });
+    }
 });
+
+// Форматирует номер в вид +7 (999) 123-45-67
+function formatPhone(value) {
+    let d = (value || '').replace(/\D/g, '');
+    if (d.startsWith('8')) d = '7' + d.slice(1);
+    if (d.startsWith('7')) d = d.slice(1);
+    d = d.slice(0, 10);
+    if (d.length === 0) return '';
+    let res = '+7';
+    if (d.length > 0) res += ' (' + d.slice(0, 3);
+    if (d.length >= 3) res += ')';
+    if (d.length > 3) res += ' ' + d.slice(3, 6);
+    if (d.length >= 6) res += '-' + d.slice(6, 8);
+    if (d.length >= 8) res += '-' + d.slice(8, 10);
+    return res;
+}
 
 async function loadBuyer(id) {
     try {
@@ -23,7 +45,7 @@ async function loadBuyer(id) {
             document.getElementById('name').value = data.name || '';
             document.getElementById('inn').value = data.inn || '';
             document.getElementById('code').value = data.code || '';
-            document.getElementById('phone').value = data.phone || '';
+            document.getElementById('phone').value = data.phone ? formatPhone(data.phone) : '';
             document.getElementById('address').value = data.address || '';
             document.getElementById('email').value = data.email || '';
             document.getElementById('isActive').checked = data.is_active !== false;
