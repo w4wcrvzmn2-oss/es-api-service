@@ -2692,8 +2692,8 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent) !importan
 .info-card strong { color: #667085 !important; }
 .info-card span { color: #1b2430 !important; font-weight: 600; }
 
-/* ── «Быстрые действия»: единый чистый стиль, без разноцветья и переполнения ── */
-.action-buttons { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)) !important; }
+/* ── «Быстрые действия»: аккуратное вертикальное меню во всю ширину ── */
+.action-buttons { display: grid !important; grid-template-columns: 1fr !important; gap: 10px !important; }
 .action-buttons > * { min-width: 0; }
 .action-buttons .btn,
 .action-buttons .btn-primary,
@@ -2703,11 +2703,12 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent) !importan
     background: #fff !important; color: #1b2430 !important;
     border: 1px solid #d0d5dd !important;
     box-shadow: none !important;
-    padding: 12px 14px !important;
+    padding: 13px 16px !important;
+    font-weight: 600 !important;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block;
-    text-align: left;
+    text-align: left; width: 100%;
 }
 .action-buttons .btn:hover {
-    background: #f8f9fb !important; border-color: var(--accent) !important; color: var(--accent-dark) !important;
+    background: var(--accent-soft) !important; border-color: var(--accent) !important; color: var(--accent-dark) !important;
     transform: none !important;
 }
