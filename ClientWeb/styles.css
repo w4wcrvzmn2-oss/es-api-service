@@ -2712,3 +2712,7 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent) !importan
     background: var(--accent-soft) !important; border-color: var(--accent) !important; color: var(--accent-dark) !important;
     transform: none !important;
 }
+
+/* Карточки «Аккаунт» и «Быстрые действия» — по одному уровню (убираем сдвиг margin-top) */
+.user-info, .quick-actions { margin-top: 0 !important; }
+.quick-actions h3, .user-info h2 { margin: 0 0 14px !important; font-size: 16px !important; font-weight: 700 !important; }
