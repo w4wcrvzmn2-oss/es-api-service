@@ -1,0 +1,260 @@
+/* ============================================================
+   Электронная Фармация — дизайн-система (v1.0)
+   Самодостаточно: системные шрифты, без CDN и внешних ресурсов.
+   Реализация макета из Claude Design «Электронная Фармация.dc.html».
+   Акцент задаётся ролью кабинета через класс на <body>:
+     .role-admin | .role-management | .role-supplier
+   ============================================================ */
+
+:root {
+    /* Нейтральные */
+    --ef-bg:            #f4f5f7;
+    --ef-surface:       #ffffff;
+    --ef-border:        #e4e7ec;
+    --ef-border-soft:   #eef0f3;
+    --ef-field-border:  #d0d5dd;
+    --ef-table-head:    #f8f9fb;
+    --ef-text:          #1b2430;
+    --ef-text-2:        #475467;
+    --ef-muted:         #667085;
+    --ef-faint:         #98a2b3;
+
+    /* Семантические (текст / фон-плашка) */
+    --ef-success:   #256e46;  --ef-success-bg: #eaf5ef;
+    --ef-warning:   #96660f;  --ef-warning-bg: #fdf3e3;
+    --ef-danger:    #b62c27;  --ef-danger-bg:  #fdecec;
+    --ef-info:      #2b6cab;  --ef-info-bg:    #eaf2f9;
+    --ef-draft:     #475467;  --ef-draft-bg:   #eef0f3;
+
+    /* Акцент по умолчанию — роль администратора */
+    --ef-accent:      #4b52c4;
+    --ef-accent-dark: #3a40a3;
+    --ef-accent-soft: #eef0fb;
+    --ef-accent-2:    #d97b1f; /* второй акцент (кабинет управления) */
+
+    /* Радиусы / тени */
+    --ef-r-ctl:   6px;   /* контролы */
+    --ef-r-field: 8px;   /* поля, кнопки */
+    --ef-r-card:  10px;  /* карточки */
+    --ef-sh-sm: 0 1px 2px rgba(16,24,40,.07);
+    --ef-sh-md: 0 4px 12px rgba(16,24,40,.10);
+    --ef-sh-lg: 0 12px 32px rgba(16,24,40,.16);
+
+    --ef-font: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --ef-mono: ui-monospace, Menlo, Consolas, "Roboto Mono", monospace;
+}
+
+/* ── Акценты ролей ── */
+.role-admin      { --ef-accent:#4b52c4; --ef-accent-dark:#3a40a3; --ef-accent-soft:#eef0fb; }
+.role-management { --ef-accent:#2b6cab; --ef-accent-dark:#22578c; --ef-accent-soft:#eaf2f9; }
+.role-supplier   { --ef-accent:#2e8a57; --ef-accent-dark:#256f46; --ef-accent-soft:#eaf5ef; }
+
+/* ── База ── */
+.ef, .ef * { box-sizing: border-box; }
+.ef {
+    margin: 0;
+    background: var(--ef-bg);
+    color: var(--ef-text);
+    font-family: var(--ef-font);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+.ef a { color: var(--ef-accent); text-decoration: none; }
+.ef a:hover { color: var(--ef-accent-dark); text-decoration: underline; }
+.ef-mono { font-family: var(--ef-mono); }
+
+/* ── Типографика ── */
+.ef-h1 { font-size: 26px; font-weight: 700; letter-spacing: -.01em; margin: 0; }
+.ef-h2 { font-size: 18px; font-weight: 700; margin: 0; }
+.ef-h3 { font-size: 15px; font-weight: 600; margin: 0; }
+.ef-page-title { font-size: 21px; font-weight: 700; letter-spacing: -.01em; margin: 0; }
+.ef-eyebrow { font-size: 12px; color: var(--ef-faint); margin-bottom: 4px; }
+.ef-caption { font-size: 11.5px; font-weight: 600; color: var(--ef-muted);
+              text-transform: uppercase; letter-spacing: .04em; }
+
+/* ── Кнопки ── */
+.ef-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    border: 1px solid transparent; cursor: pointer;
+    font-family: inherit; font-size: 13px; font-weight: 600;
+    padding: 9px 16px; border-radius: var(--ef-r-field);
+    transition: background .15s, border-color .15s, box-shadow .15s;
+    text-decoration: none;
+}
+.ef-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ef-accent-soft); }
+.ef-btn--primary   { background: var(--ef-accent); color: #fff; }
+.ef-btn--primary:hover { background: var(--ef-accent-dark); color: #fff; text-decoration: none; }
+.ef-btn--secondary { background: #fff; color: var(--ef-text); border-color: var(--ef-field-border); }
+.ef-btn--secondary:hover { background: #f8f9fb; }
+.ef-btn--ghost     { background: transparent; color: var(--ef-accent); }
+.ef-btn--ghost:hover { background: var(--ef-accent-soft); text-decoration: none; }
+.ef-btn--danger    { background: var(--ef-danger-bg); color: var(--ef-danger); }
+.ef-btn--danger:hover { background: #fadcdb; }
+.ef-btn--solid-danger { background: var(--ef-danger); color: #fff; }
+.ef-btn--solid-danger:hover { background: #9e2420; }
+.ef-btn:disabled, .ef-btn[disabled] { background: var(--ef-border-soft); color: var(--ef-faint);
+                                       border-color: transparent; cursor: not-allowed; }
+.ef-btn--sm  { font-size: 12px; padding: 6px 12px; border-radius: var(--ef-r-ctl); }
+.ef-btn--block { width: 100%; }
+
+/* ── Поля формы ── */
+.ef-field { display: block; }
+.ef-label { font-size: 12px; font-weight: 600; margin-bottom: 5px; display: block; }
+.ef-label .ef-req { color: var(--ef-danger); }
+.ef-input, .ef-select, .ef-textarea {
+    width: 100%; box-sizing: border-box; height: 34px;
+    border: 1px solid var(--ef-field-border); border-radius: var(--ef-r-field);
+    padding: 0 10px; font-family: inherit; font-size: 13px; color: var(--ef-text);
+    background: #fff; outline: none; transition: border-color .15s, box-shadow .15s;
+}
+.ef-textarea { height: auto; padding: 8px 10px; resize: vertical; }
+.ef-input::placeholder, .ef-textarea::placeholder { color: var(--ef-faint); }
+.ef-input:focus, .ef-select:focus, .ef-textarea:focus {
+    border-color: var(--ef-accent); box-shadow: 0 0 0 3px var(--ef-accent-soft);
+}
+.ef-input:disabled, .ef-select:disabled {
+    background: #f8f9fb; color: var(--ef-faint); cursor: not-allowed;
+}
+.ef-input.ef-invalid { border-color: #e58a86; box-shadow: 0 0 0 3px var(--ef-danger-bg); }
+.ef-error-text { font-size: 11.5px; color: var(--ef-danger); margin-top: 4px; }
+
+/* ── Карточки ── */
+.ef-card {
+    background: var(--ef-surface); border: 1px solid var(--ef-border);
+    border-radius: var(--ef-r-card);
+}
+.ef-card--pad { padding: 20px; }
+.ef-card__head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 13px 16px; border-bottom: 1px solid var(--ef-border-soft);
+}
+.ef-card__title { font-size: 14px; font-weight: 700; }
+
+/* ── KPI ── */
+.ef-kpi { background: var(--ef-surface); border: 1px solid var(--ef-border);
+          border-radius: var(--ef-r-card); padding: 14px 16px; }
+.ef-kpi__label { font-size: 12px; font-weight: 600; color: var(--ef-muted); }
+.ef-kpi__value { font-size: 25px; font-weight: 700; font-family: var(--ef-mono); letter-spacing: -.02em; }
+.ef-kpi__delta { font-size: 12px; font-weight: 600; }
+.ef-kpi__bar   { height: 4px; border-radius: 2px; background: var(--ef-border-soft); margin-top: 10px; }
+.ef-kpi__bar > i { display: block; height: 4px; border-radius: 2px; background: var(--ef-accent); }
+
+/* ── Бейджи / статусы ── */
+.ef-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+    background: var(--ef-draft-bg); color: var(--ef-draft);
+}
+.ef-badge--success { background: var(--ef-success-bg); color: var(--ef-success); }
+.ef-badge--warning { background: var(--ef-warning-bg); color: var(--ef-warning); }
+.ef-badge--danger  { background: var(--ef-danger-bg);  color: var(--ef-danger); }
+.ef-badge--info    { background: var(--ef-info-bg);    color: var(--ef-info); }
+.ef-badge--accent  { background: var(--ef-accent-soft); color: var(--ef-accent-dark); }
+
+/* ── Таблицы ── */
+.ef-table { width: 100%; border-collapse: collapse; }
+.ef-table thead th {
+    text-align: left; font-size: 11.5px; font-weight: 600; color: var(--ef-muted);
+    text-transform: uppercase; letter-spacing: .04em;
+    padding: 8px 12px; background: var(--ef-table-head);
+    border-bottom: 1px solid var(--ef-border); white-space: nowrap;
+}
+.ef-table thead th.ef-sortable { cursor: pointer; }
+.ef-table thead th.ef-sorted { color: var(--ef-accent-dark); }
+.ef-table tbody td { padding: 9px 12px; border-bottom: 1px solid var(--ef-border-soft); font-size: 13px; }
+.ef-table tbody tr:hover { background: #f8f9fb; }
+.ef-table .ef-num { font-family: var(--ef-mono); text-align: right; }
+.ef-table .ef-dim { color: var(--ef-muted); }
+.ef-table-wrap { overflow-x: auto; }
+
+/* Редактируемая ячейка (наценка и т.п.) */
+.ef-cell-edit {
+    width: 62px; height: 26px; border: 1px solid transparent; border-radius: var(--ef-r-ctl);
+    font-family: var(--ef-mono); font-size: 13px; text-align: right;
+    background: transparent; outline: none; padding: 0 6px;
+}
+.ef-cell-edit:hover { border-color: var(--ef-field-border); background: #fff; }
+.ef-cell-edit:focus { border-color: var(--ef-accent); box-shadow: 0 0 0 3px var(--ef-accent-soft); background: #fff; }
+.ef-save-flash { animation: efSaveFlash .6s ease; }
+@keyframes efSaveFlash { 0% { background: var(--ef-success-bg); } 100% { background: transparent; } }
+
+/* ── Панель фильтров над таблицей ── */
+.ef-toolbar {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    padding: 12px 14px; border-bottom: 1px solid var(--ef-border-soft);
+}
+
+/* ── Пагинация ── */
+.ef-pagination { display: flex; align-items: center; gap: 4px; }
+.ef-pagination button {
+    cursor: pointer; background: #fff; border: 1px solid var(--ef-field-border);
+    color: var(--ef-text-2); font-size: 12px; min-width: 28px; height: 28px;
+    border-radius: var(--ef-r-ctl); padding: 0 6px;
+}
+.ef-pagination button:hover { background: #f8f9fb; }
+.ef-pagination button.is-active { background: var(--ef-accent); color: #fff; border-color: var(--ef-accent); font-weight: 600; }
+
+/* ── Чекбокс / переключатель ── */
+.ef-check { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; }
+.ef-check__box { width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--ef-field-border);
+                 display: inline-flex; align-items: center; justify-content: center;
+                 color: #fff; font-size: 11px; font-weight: 700; box-sizing: border-box; }
+.ef-check input:checked + .ef-check__box { background: var(--ef-accent); border-color: var(--ef-accent); }
+
+/* ── Верхняя навигация ── */
+.ef-topbar {
+    background: #fff; border-bottom: 1px solid var(--ef-border);
+    display: flex; align-items: center; gap: 14px; padding: 0 18px; height: 52px;
+}
+.ef-brand { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 700; }
+.ef-logo { width: 24px; height: 24px; border-radius: 7px; background: var(--ef-accent);
+           position: relative; flex: none; }
+.ef-logo::before, .ef-logo::after { content: ""; position: absolute; background: #fff; border-radius: 1px; }
+.ef-logo::before { left: 10px; top: 5px; width: 4px; height: 14px; }
+.ef-logo::after  { left: 5px; top: 10px; width: 14px; height: 4px; }
+
+/* ── Боковое меню ── */
+.ef-sidebar { width: 216px; flex: none; background: #fff; border-right: 1px solid var(--ef-border);
+              padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.ef-nav-item {
+    display: flex; align-items: center; gap: 10px; border: 0; text-align: left; cursor: pointer;
+    font-family: inherit; font-size: 13px; padding: 8px 10px; border-radius: var(--ef-r-field);
+    background: transparent; color: var(--ef-text-2); font-weight: 500; text-decoration: none;
+}
+.ef-nav-item:hover { background: #f4f5f7; text-decoration: none; }
+.ef-nav-item.is-active { background: var(--ef-accent-soft); color: var(--ef-accent-dark); font-weight: 600; }
+.ef-nav-item .ef-dot { width: 8px; height: 8px; border-radius: 3px; background: var(--ef-field-border); flex: none; }
+.ef-nav-item.is-active .ef-dot { background: var(--ef-accent); }
+
+/* ── Тост ── */
+.ef-toast-wrap { position: fixed; right: 20px; bottom: 20px; z-index: 10000;
+                 display: flex; flex-direction: column; gap: 10px; }
+.ef-toast {
+    display: inline-flex; align-items: center; gap: 10px;
+    background: #171e29; color: #fff; padding: 11px 14px; border-radius: var(--ef-r-card);
+    box-shadow: var(--ef-sh-lg); font-size: 13px; animation: efToast .25s ease-out;
+}
+.ef-toast__dot { width: 18px; height: 18px; border-radius: 50%; display: inline-flex;
+                 align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+.ef-toast--success .ef-toast__dot { background: #2f8f5b; }
+.ef-toast--error   .ef-toast__dot { background: var(--ef-danger); }
+.ef-toast__close { color: #8b96a5; margin-left: 6px; cursor: pointer; }
+@keyframes efToast { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ── Модалка ── */
+.ef-modal-backdrop { position: fixed; inset: 0; background: rgba(16,24,40,.45);
+                     display: flex; align-items: center; justify-content: center; z-index: 9000; }
+.ef-modal { background: #fff; border-radius: 12px; box-shadow: var(--ef-sh-lg);
+            width: 360px; max-width: calc(100% - 32px); overflow: hidden; animation: efModal .18s ease-out; }
+.ef-modal__title { padding: 16px 18px 0; font-size: 15px; font-weight: 700; }
+.ef-modal__body  { padding: 8px 18px 16px; font-size: 13px; color: var(--ef-muted); line-height: 1.5; }
+.ef-modal__foot  { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px;
+                   background: #f8f9fb; border-top: 1px solid var(--ef-border-soft); }
+@keyframes efModal { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
+
+/* ── Раскладка приложения ── */
+.ef-app   { display: flex; flex-direction: column; min-height: 100vh; }
+.ef-body  { flex: 1; display: flex; min-height: 0; }
+.ef-main  { flex: 1; min-width: 0; overflow-y: auto; padding: 22px 24px 60px; }

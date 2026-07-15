@@ -3,73 +3,100 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Авторизация - ES API Service</title>
-    <link rel="stylesheet" href="styles.css">
+    <title>Вход — Электронная Фармация</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💊</text></svg>">
+    <link rel="stylesheet" href="ef-design.css">
     <style>
-        .login-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            padding: 20px;
+        .login-screen {
+            flex: 1; display: flex; align-items: center; justify-content: center;
+            padding: 48px 24px; min-height: 100vh; box-sizing: border-box;
+            background: linear-gradient(180deg, #f4f5f7 0%, #eceef2 100%);
         }
-        .login-box {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 40px;
-            border-radius: 15px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-            backdrop-filter: blur(10px);
-            width: 100%;
-            max-width: 400px;
-        }
-        .login-box h1 {
-            text-align: center;
-            color: #2c3e50;
-            margin-bottom: 30px;
-            font-size: 2em;
-        }
-        .login-logo {
-            text-align: center;
-            font-size: 3em;
-            margin-bottom: 20px;
-        }
+        .login-col { width: 400px; max-width: 100%; }
+        .login-brand { display: flex; align-items: center; gap: 11px; justify-content: center; margin-bottom: 22px; }
+        .login-brand .ef-logo { width: 34px; height: 34px; border-radius: 9px; }
+        .login-brand .ef-logo::before { left: 14.5px; top: 7px; width: 5px; height: 20px; }
+        .login-brand .ef-logo::after  { left: 7px; top: 14.5px; width: 20px; height: 5px; }
+        .login-title { font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+        .login-sub   { font-size: 12px; color: var(--ef-muted); }
+        .login-card  { background: #fff; border: 1px solid var(--ef-border); border-radius: 12px;
+                       box-shadow: 0 4px 12px rgba(16,24,40,.06); padding: 26px 26px 22px; }
         #loginError {
-            display: none;
-            margin-bottom: 15px;
-            white-space: pre-line;
-            word-wrap: break-word;
-            line-height: 1.6;
+            display: none; background: var(--ef-danger-bg); color: var(--ef-danger);
+            border: 1px solid #f2c9c7; border-radius: var(--ef-r-field); padding: 10px 12px;
+            font-size: 12.5px; line-height: 1.5; margin-bottom: 14px; white-space: pre-line; word-wrap: break-word;
         }
+        #protocolWarning {
+            display: none; background: var(--ef-warning-bg); color: var(--ef-warning);
+            border: 1px solid #f0dca6; border-radius: var(--ef-r-field);
+            padding: 10px 12px; font-size: 12.5px; margin-bottom: 14px;
+        }
+        .login-field { margin-bottom: 14px; }
+        .login-hint { display: flex; flex-direction: column; gap: 6px; }
     </style>
 </head>
-<body>
-    <div class="login-container">
-        <div class="login-box">
-            <div class="login-logo">🔐</div>
-            <h1>ЭльФиСА</h1>
-            
-            <div id="loginError" class="error"></div>
-            
-            <div id="protocolWarning" style="display: none; background: #fff3cd; color: #856404; padding: 12px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #ffc107;">
-                <strong>⚠️ Внимание:</strong> Страница должна открываться через HTTP сервер.<br>
-                Откройте: <code>http://localhost:8080/login.html</code>
+<body class="ef role-admin">
+    <div class="login-screen">
+        <div class="login-col">
+
+            <div class="login-brand">
+                <div class="ef-logo"></div>
+                <div>
+                    <div class="login-title">Электронная Фармация</div>
+                    <div class="login-sub">Оптовая фарм-дистрибуция</div>
+                </div>
             </div>
-            
-            <form id="loginForm">
-                <div class="form-group">
-                    <label for="username">Имя пользователя</label>
-                    <input type="text" id="username" required autocomplete="username" placeholder="admin">
+
+            <div class="login-card">
+                <div class="ef-h2" style="font-size:18px">Вход в систему</div>
+                <div style="font-size:12.5px;color:var(--ef-muted);margin:5px 0 18px">
+                    Роль определяется автоматически — вы попадёте в свой кабинет.
                 </div>
-                
-                <div class="form-group">
-                    <label for="password">Пароль</label>
-                    <input type="password" id="password" required autocomplete="current-password" placeholder="••••••••">
+
+                <div id="loginError"></div>
+                <div id="protocolWarning">
+                    <strong>⚠️ Внимание:</strong> Страница должна открываться через HTTP-сервер, а не через file://.
                 </div>
-                
-                <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">
-                    Войти
-                </button>
-            </form>
+
+                <form id="loginForm">
+                    <div class="login-field">
+                        <label class="ef-label" for="username">Логин или e-mail</label>
+                        <input class="ef-input" type="text" id="username" required
+                               autocomplete="username" placeholder="operator@apteka.ru">
+                    </div>
+                    <div class="login-field">
+                        <label class="ef-label" for="password">Пароль</label>
+                        <input class="ef-input" type="password" id="password" required
+                               autocomplete="current-password" placeholder="••••••••">
+                    </div>
+                    <button type="submit" class="ef-btn ef-btn--primary ef-btn--block" style="margin-top:4px">
+                        Войти
+                    </button>
+                </form>
+            </div>
+
+            <div class="ef-card ef-card--pad login-hint" style="margin-top:16px;padding:12px 14px">
+                <div class="ef-caption" style="margin-bottom:2px">Редирект по роли</div>
+                <div style="display:flex;align-items:center;gap:8px;font-size:12.5px">
+                    <span class="ef-dot" style="background:#4b52c4"></span>
+                    <span style="width:130px;font-weight:600">Администратор</span>
+                    <span class="ef-mono" style="color:var(--ef-muted)">/index.html</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;font-size:12.5px">
+                    <span class="ef-dot" style="background:#2e8a57"></span>
+                    <span style="width:130px;font-weight:600">Поставщик</span>
+                    <span class="ef-mono" style="color:var(--ef-muted)">/supplier/</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;font-size:12.5px">
+                    <span class="ef-dot" style="background:#2b6cab"></span>
+                    <span style="width:130px;font-weight:600">Покупатель</span>
+                    <span class="ef-mono" style="color:var(--ef-muted)">десктоп-приложение</span>
+                </div>
+            </div>
+
+            <div style="text-align:center;font-size:11.5px;color:var(--ef-faint);margin-top:16px">
+                Работает в закрытой сети · интернет не требуется
+            </div>
         </div>
     </div>
 
@@ -88,7 +115,7 @@
             errorDiv.innerHTML = '❌ <strong>Ошибка протокола:</strong> Страница открыта через <code>file://</code> протокол.\n\n' +
                 '<strong>Решение:</strong>\n' +
                 '1. Убедитесь, что сервер запущен\n' +
-                '2. Откройте в браузере: <a href="http://localhost:8080/login.html" style="color: #007bff;">http://localhost:8080/login.html</a>\n\n' +
+                '2. Откройте в браузере: <a href="http://localhost:8080/login.html">http://localhost:8080/login.html</a>\n\n' +
                 'Текущий адрес: <code>' + window.location.href + '</code>';
             errorDiv.style.display = 'block';
             document.getElementById('loginForm').style.opacity = '0.5';
@@ -97,7 +124,7 @@
 
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             // Проверяем протокол еще раз перед отправкой
             if (window.location.protocol === 'file:') {
                 const errorDiv = document.getElementById('loginError');
@@ -105,24 +132,24 @@
                 errorDiv.style.display = 'block';
                 return;
             }
-            
+
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
-            
+
             // Автоматически определяем URL API из текущего адреса страницы
             let apiUrl = window.location.origin;
-            
+
             // Если origin пустой или file://, используем localhost:8080 по умолчанию
             if (!apiUrl || apiUrl === 'null' || apiUrl.startsWith('file://')) {
                 apiUrl = 'http://localhost:8080';
                 console.warn('Используется URL по умолчанию:', apiUrl);
             }
-            
+
             console.log('Определен URL API:', apiUrl);
-            
+
             const errorDiv = document.getElementById('loginError');
             errorDiv.style.display = 'none';
-            
+
             try {
                 const result = await AuthManager.login(username, password, apiUrl);
                 if (result.success && result.token) {
@@ -152,14 +179,14 @@
             } catch (error) {
                 console.error('Ошибка при авторизации:', error);
                 let errorMessage = error.message || 'Неизвестная ошибка';
-                
+
                 // Улучшаем сообщение об ошибке
-                if (errorMessage.includes('Failed to fetch') || 
+                if (errorMessage.includes('Failed to fetch') ||
                     errorMessage.includes('NetworkError') ||
                     errorMessage.includes('ERR_CONNECTION_REFUSED')) {
                     errorMessage = `Не удалось подключиться к серверу ${apiUrl}\n\nВозможные причины:\n• Сервер не запущен\n• Неправильный адрес сервера\n• Проблемы с сетью\n\nУбедитесь, что сервер запущен и доступен.`;
                 }
-                
+
                 // Заменяем переносы строк на HTML
                 errorMessage = errorMessage.replace(/\n/g, '<br>');
                 errorDiv.innerHTML = errorMessage;
@@ -167,7 +194,7 @@
                 errorDiv.style.whiteSpace = 'pre-line';
             }
         });
-        
+
         // Загружаем сохраненное имя пользователя
         const savedUsername = localStorage.getItem('es_api_username');
         if (savedUsername) {
@@ -176,4 +203,3 @@
     </script>
 </body>
 </html>
-
