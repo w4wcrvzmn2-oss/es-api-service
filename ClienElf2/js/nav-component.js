@@ -32,7 +32,7 @@
     `<nav class="navbar navbar-expand-lg navbar-light bg-white">
         <div class="container-fluid px-3">
             <a class="navbar-brand d-flex align-items-center gap-2" href="${r}index.html">
-                <span style="font-size:1.3rem">\ud83d\udc8a</span><span class="fw-semibold">ЭльФиСА</span>
+                <span style="display:inline-flex;width:26px;height:26px;border-radius:8px;background:#2b6cab;position:relative"><span style="position:absolute;left:11px;top:5px;width:4px;height:16px;background:#fff;border-radius:1px"></span><span style="position:absolute;left:5px;top:11px;width:16px;height:4px;background:#fff;border-radius:1px"></span></span><span class="fw-semibold">PharmData</span>
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav">
                 <span class="navbar-toggler-icon"></span>

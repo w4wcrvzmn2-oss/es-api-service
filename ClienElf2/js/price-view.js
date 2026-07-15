@@ -82,7 +82,7 @@ async function loadPriceItems() {
         allItems = data.items || [];
 
         document.getElementById('pageTitle').textContent = pl.name || 'Просмотр прайса';
-        document.title = (pl.name || 'Прайс') + ' - ЭльФиСА';
+        document.title = (pl.name || 'Прайс') + ' - PharmData';
 
         document.getElementById('infoName').textContent = pl.name || '-';
         document.getElementById('infoSupplier').textContent = pl.supplier_name || '-';
