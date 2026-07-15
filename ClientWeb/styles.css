@@ -2651,3 +2651,37 @@ input:focus, select:focus, textarea:focus { border-color:var(--accent) !importan
 .stats-grid > *, .cards-view > * { min-width: 0; }
 /* элементы любой inline-сетки не должны выпирать содержимым */
 .main-content [style*="grid"] > * { min-width: 0; }
+
+/* ── Гасим остатки старой (фиолетовой) темы на отдельных страницах ── */
+/* Точки в боковом меню: возвращаем flex + отступ (перебиваем локальный display:block) */
+.sidebar .nav-menu a { display: flex !important; align-items: center !important; gap: 11px !important;
+    padding: 9px 12px !important; }
+.sidebar .nav-menu li { margin-bottom: 3px !important; }
+
+/* Заголовки-градиенты страниц */
+.page-header { border-bottom: 0 !important; }
+.page-header h1, .page-header h1:not(:has(.page-icon)) {
+    background: none !important; -webkit-background-clip: initial !important;
+    background-clip: initial !important; -webkit-text-fill-color: #1b2430 !important;
+    color: #1b2430 !important; font-size: 21px !important; }
+
+/* Таблица сводного прайса и контейнеры */
+.summary-table { border-collapse: collapse !important; box-shadow: none !important; }
+.summary-table th { background: #f8f9fb !important; color: #667085 !important; font-size: 11.5px !important;
+    font-weight: 600 !important; letter-spacing: .04em !important; border-bottom: 1px solid #e4e7ec !important;
+    padding: 8px 12px !important; }
+.summary-table th:hover { background: #eef0f3 !important; }
+.summary-table td { border-bottom: 1px solid #eef0f3 !important; font-size: 13px !important; padding: 9px 12px !important; }
+.summary-table-container, .table-container { border: 1px solid #e4e7ec !important; border-radius: 10px !important;
+    box-shadow: var(--shadow-sm) !important; background: #fff !important; }
+
+/* Фильтр-поля старого образца */
+.filters-section { box-shadow: none !important; }
+.filter-select, .filter-input { border: 1px solid #d0d5dd !important; border-radius: 8px !important;
+    height: 34px !important; padding: 0 10px !important; font-size: 13px !important; }
+.filter-select:focus, .filter-input:focus { border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px var(--accent-soft) !important; outline: none !important; }
+
+/* Инлайновые фиолетовые плашки-градиенты (summaryHeader и т.п.) */
+[style*="linear-gradient(135deg, #667eea"], [style*="linear-gradient(135deg,#667eea"] {
+    background: var(--accent-soft) !important; color: var(--accent-dark) !important; }
