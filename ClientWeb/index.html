@@ -53,7 +53,7 @@
                     <h3 id="suppliersCount" style="margin:6px 0 0;font-size:26px">-</h3>
                 </div>
                 <div class="stat-card" style="text-align:left;padding:14px 16px">
-                    <p style="margin:0;font-size:12px;font-weight:600;color:#667085">Импортов</p>
+                    <p style="margin:0;font-size:12px;font-weight:600;color:#667085">Сопоставлено</p>
                     <h3 id="importsCount" style="margin:6px 0 0;font-size:26px">-</h3>
                 </div>
                 <div class="stat-card" style="text-align:left;padding:14px 16px">
@@ -150,58 +150,24 @@
                 document.getElementById('suppliersCount').textContent = '-';
             }
 
-            // Загрузка количества импортов (получаем для всех поставщиков)
+            // Позиции в прайсе и сопоставлено — из лёгкого /api/stats/global (COUNT, быстро).
+            // Раньше тут тянулся весь сводный прайс (тысячи строк) + импорты по каждому
+            // поставщику отдельным запросом — отсюда была «вечная загрузка».
             try {
-                // Получаем всех поставщиков и считаем их импорты
-                const suppliersRes = await AuthManager.authenticatedFetch('/api/suppliers');
-                if (suppliersRes.ok) {
-                    const suppliers = await suppliersRes.json();
-                    let totalImports = 0;
-                    
-                    if (Array.isArray(suppliers) && suppliers.length > 0) {
-                        // Для каждого поставщика получаем импорты (параллельно)
-                        const importPromises = suppliers.map(async (supplier) => {
-                            try {
-                                const importsRes = await AuthManager.authenticatedFetch(`/api/invoice-imports?supplier_id=${supplier.supplier_id}`);
-                                if (importsRes.ok) {
-                                    const data = await importsRes.json();
-                                    return data.imports && Array.isArray(data.imports) ? data.imports.length : 0;
-                                }
-                                return 0;
-                            } catch (e) {
-                                console.warn(`Ошибка загрузки импортов для поставщика ${supplier.supplier_id}:`, e);
-                                return 0;
-                            }
-                        });
-                        
-                        const counts = await Promise.all(importPromises);
-                        totalImports = counts.reduce((sum, count) => sum + count, 0);
-                    }
-                    
-                    document.getElementById('importsCount').textContent = totalImports;
-                    console.log('Импортов найдено:', totalImports);
+                const statsRes = await AuthManager.authenticatedFetch('/api/stats/global');
+                if (statsRes.ok) {
+                    const st = await statsRes.json();
+                    document.getElementById('pricesCount').textContent = (st.total != null ? st.total : 0);
+                    document.getElementById('importsCount').textContent = (st.matched != null ? st.matched : 0);
+                    console.log('Статистика:', st);
                 } else {
+                    document.getElementById('pricesCount').textContent = '-';
                     document.getElementById('importsCount').textContent = '-';
                 }
             } catch (error) {
-                console.error('Ошибка загрузки импортов:', error);
-                document.getElementById('importsCount').textContent = '-';
-            }
-
-            // Загрузка количества позиций в прайсе (сводный прайс всех поставщиков)
-            try {
-                const pricesRes = await AuthManager.authenticatedFetch('/api/supplier-prices/summary');
-                if (pricesRes.ok) {
-                    const data = await pricesRes.json();
-                    const count = data.summary && Array.isArray(data.summary) ? data.summary.length : 0;
-                    document.getElementById('pricesCount').textContent = count;
-                    console.log('Позиций в прайсе:', count);
-                } else {
-                    document.getElementById('pricesCount').textContent = '-';
-                }
-            } catch (error) {
-                console.error('Ошибка загрузки прайсов:', error);
+                console.error('Ошибка загрузки статистики:', error);
                 document.getElementById('pricesCount').textContent = '-';
+                document.getElementById('importsCount').textContent = '-';
             }
             
             // Обновляем время завершения обновления
