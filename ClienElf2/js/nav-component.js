@@ -29,7 +29,7 @@
     ).join('');
 
     document.body.insertAdjacentHTML('afterbegin',
-    `<nav class="navbar navbar-expand-lg navbar-dark" style="background:linear-gradient(135deg,#31528f 0%,#3d64ac 100%)">
+    `<nav class="navbar navbar-expand-lg navbar-light bg-white">
         <div class="container-fluid px-3">
             <a class="navbar-brand d-flex align-items-center gap-2" href="${r}index.html">
                 <span style="font-size:1.3rem">\ud83d\udc8a</span><span class="fw-semibold">ЭльФиСА</span>
@@ -39,7 +39,7 @@
             </button>
             <div class="collapse navbar-collapse" id="mainNav">
                 <ul class="navbar-nav me-auto mb-2 mb-lg-0">${links}</ul>
-                <button class="btn btn-outline-light btn-sm" onclick="AuthManager.logout()">
+                <button class="btn btn-outline-secondary btn-sm" onclick="AuthManager.logout()">
                     <i class="bi bi-box-arrow-right"></i> \u0412\u044b\u0439\u0442\u0438
                 </button>
             </div>

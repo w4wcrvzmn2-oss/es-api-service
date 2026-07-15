@@ -55,18 +55,18 @@
     const safeSupplierName = escapeHtml(supplierName);
 
     document.body.insertAdjacentHTML('afterbegin',
-    `<nav class="navbar navbar-expand-lg navbar-dark" style="background:linear-gradient(135deg,#2e7d32 0%,#388e3c 100%)">
+    `<nav class="navbar navbar-expand-lg navbar-light supplier-navbar bg-white">
         <div class="container-fluid px-3">
             <a class="navbar-brand d-flex align-items-center gap-2" href="${r}index.html">
-                <i class="bi bi-building" style="font-size:1.3rem"></i><span class="fw-semibold">Кабинет поставщика</span>
+                <i class="bi bi-building" style="font-size:1.3rem;color:var(--accent)"></i><span class="fw-semibold">Кабинет поставщика</span>
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="mainNav">
                 <ul class="navbar-nav me-auto mb-2 mb-lg-0">${links}</ul>
-                <span class="navbar-text text-light me-3"><i class="bi bi-person-circle"></i> ${safeSupplierName}</span>
-                <button class="btn btn-outline-light btn-sm" onclick="AuthManager.logout()">
+                <span class="navbar-text me-3"><i class="bi bi-person-circle"></i> ${safeSupplierName}</span>
+                <button class="btn btn-outline-secondary btn-sm" onclick="AuthManager.logout()">
                     <i class="bi bi-box-arrow-right"></i> Выйти
                 </button>
             </div>
