@@ -418,6 +418,7 @@ func (s *Server) handleCreateBuyerUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := uuid.New().String()
+	now := time.Now().UTC()
 	bu := models.BuyerUser{
 		BuyerUserID: userID,
 		BuyerID:     req.BuyerID,
@@ -427,15 +428,32 @@ func (s *Server) handleCreateBuyerUser(w http.ResponseWriter, r *http.Request) {
 		Role:        req.Role,
 		IsActive:    req.IsActive,
 		Password:    passwordPtr,
-		CreatedAt:   time.Now().UTC(),
+		CreatedAt:   now,
 	}
-	if err := s.database.GORMWith(ctx).Create(&bu).Error; err != nil {
+
+	// Создаём пользователя вместе с BuyerApplication одной транзакцией.
+	// Без активной BuyerApplication пользователь не может оформить заказ
+	// (resolveBuyerUser делает INNER JOIN BuyerApplication ... IsActive=1).
+	err := s.database.GORMWith(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&bu).Error; err != nil {
+			return err
+		}
+		app := models.BuyerApplication{
+			BuyerApplicationID: uuid.New().String(),
+			BuyerID:            req.BuyerID,
+			BuyerUserID:        userID,
+			IsActive:           true,
+			CreatedAt:          now,
+		}
+		return tx.Create(&app).Error
+	})
+	if err != nil {
 		s.logger.Error("Ошибка создания пользователя: %v", err)
 		s.writeError(w, http.StatusInternalServerError, "Ошибка создания пользователя")
 		return
 	}
 
-	s.logger.Info("Создан пользователь покупателя: %s - %s", userID, req.FullName)
+	s.logger.Info("Создан пользователь покупателя: %s - %s (+ BuyerApplication)", userID, req.FullName)
 	s.handleGetBuyerUserByID(w, r, userID)
 }
 
