@@ -23,8 +23,9 @@ AS
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = @name AND object_id = OBJECT_ID('dbo.SupplierPrice'))
     BEGIN PRINT 'НЕТ: ' + @name; RETURN; END
+    DECLARE @sql NVARCHAR(MAX) = N'DROP INDEX ' + QUOTENAME(@name) + N' ON dbo.SupplierPrice';
     BEGIN TRY
-        EXEC sp_executesql N'DROP INDEX ' + QUOTENAME(@name) + N' ON dbo.SupplierPrice';
+        EXEC sp_executesql @sql;
         PRINT 'DROPPED: ' + @name;
     END TRY
     BEGIN CATCH
