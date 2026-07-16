@@ -7,29 +7,41 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%232b6cab'/><rect x='42' y='22' width='16' height='56' rx='5' fill='%23fff'/><rect x='22' y='42' width='56' height='16' rx='5' fill='%23fff'/></svg>">
     <link href="vendor/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="css/custom.css">
+    <style>
+        .ef-login-bg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+            padding: 24px; background: linear-gradient(180deg, #f4f5f7 0%, #eceef2 100%); overflow: auto; }
+        .ef-login-logo { width: 44px; height: 44px; border-radius: 12px; background: #2b6cab; position: relative; }
+        .ef-login-logo::before, .ef-login-logo::after { content: ''; position: absolute; background: #fff; border-radius: 2px; }
+        .ef-login-logo::before { left: 19px; top: 9px; width: 6px; height: 26px; }
+        .ef-login-logo::after  { left: 9px; top: 19px; width: 26px; height: 6px; }
+        .ef-login-card { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(16,24,40,.06); }
+    </style>
 </head>
 <body>
-    <div class="login-page">
-        <div class="card shadow-lg border-0" style="max-width:420px;width:100%">
-            <div class="card-body p-4 p-md-5">
-                <div class="text-center mb-4">
-                    <span style="font-size:3rem">💊</span>
-                    <h1 class="h3 mt-2" style="color:#31528f">PharmData</h1>
-                    <p class="text-muted">Система управления прайсами и заказами</p>
-                </div>
+    <div class="ef-login-bg">
+        <div style="width:400px;max-width:100%">
+            <div class="text-center mb-3">
+                <div class="ef-login-logo mx-auto"></div>
+                <div class="fw-bold mt-2" style="font-size:20px;letter-spacing:-.01em;color:#1b2430">PharmData</div>
+                <div class="text-muted" style="font-size:13px">Кабинет управления</div>
+            </div>
 
-                <div id="errorMessage" class="alert alert-danger d-none"></div>
+            <div class="ef-login-card p-4">
+                <div class="fw-bold mb-3" style="font-size:17px;color:#1b2430">Вход в систему</div>
+
+                <div id="errorMessage" class="alert alert-danger d-none py-2" style="font-size:13px"></div>
 
                 <form id="loginForm">
-                    <div class="form-floating mb-3">
-                        <input type="text" class="form-control" id="username" placeholder="Логин" required autocomplete="username">
-                        <label for="username">Логин</label>
+                    <div class="mb-3">
+                        <label for="username" class="form-label" style="font-size:13px;font-weight:600">Логин или e-mail</label>
+                        <input type="text" class="form-control" id="username" required autocomplete="username">
                     </div>
-                    <div class="form-floating mb-4">
-                        <input type="password" class="form-control" id="password" placeholder="Пароль" required autocomplete="current-password">
-                        <label for="password">Пароль</label>
+                    <div class="mb-3">
+                        <label for="password" class="form-label" style="font-size:13px;font-weight:600">Пароль</label>
+                        <input type="password" class="form-control" id="password" required autocomplete="current-password">
                     </div>
-                    <button type="submit" class="login-btn w-100 py-2" id="loginBtn">Войти</button>
+                    <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold" id="loginBtn">Войти</button>
                 </form>
             </div>
         </div>
