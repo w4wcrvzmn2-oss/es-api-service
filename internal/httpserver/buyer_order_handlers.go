@@ -229,35 +229,66 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 	}
 	var totalAmount float64
 
+	// Валидируем количества и собираем уникальные SupplierPriceID для одного запроса.
+	priceIDs := make([]interface{}, 0, len(req.Items))
+	seenID := make(map[string]bool, len(req.Items))
 	for _, ri := range req.Items {
 		if ri.Qty <= 0 {
 			s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Количество должно быть > 0 (supplier_price_id: %s)", ri.SupplierPriceID))
 			return
 		}
-
-		// Денормализованная схема: см. MD/15.
-		// LEFT JOIN'ы фильтруют висячие FK-ссылки → NULL в OrderItem.
-		var row resolvedPriceRow
-		err := s.database.GORMWith(ctx).
-			Table("SupplierPrice AS sp").
-			Select(`CAST(sp.SupplierID AS NVARCHAR(50)) AS SupplierID,
-				CASE WHEN p.ProductID IS NULL THEN NULL ELSE CAST(p.ProductID AS NVARCHAR(50)) END AS ProductID,
-				CASE WHEN r.RegionID IS NULL THEN NULL ELSE CAST(r.RegionID AS NVARCHAR(50)) END AS RegionID,
-				CASE WHEN spl.PriceListID IS NULL THEN NULL ELSE CAST(spl.PriceListID AS NVARCHAR(50)) END AS PriceListID,
-				ISNULL(sp.FinalPrice, sp.Price) * (1 + ISNULL(plr.MarkupPct, 0) / 100.0) AS UnitPrice`).
-			Joins("LEFT JOIN Product p ON p.ProductID = sp.GUID_ES").
-			Joins("LEFT JOIN Region r ON r.RegionID = sp.RegionID").
-			Joins("LEFT JOIN SupplierPriceList spl ON spl.PriceListID = sp.PriceListID").
-			Joins("LEFT JOIN PriceListRegion plr ON plr.PriceListID = sp.PriceListID AND plr.RegionID = sp.RegionID AND plr.IsActive = 1").
-			Where("sp.SupplierPriceID = ? AND sp.IsActive = ?", db.UUIDParam(ri.SupplierPriceID), true).
-			Take(&row).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			s.writeError(w, http.StatusNotFound, fmt.Sprintf("Товар не найден или недоступен: %s", ri.SupplierPriceID))
-			return
+		key := strings.ToLower(ri.SupplierPriceID)
+		if !seenID[key] {
+			seenID[key] = true
+			priceIDs = append(priceIDs, db.UUIDParam(ri.SupplierPriceID))
 		}
-		if err != nil {
-			s.logger.Error("Ошибка получения SupplierPrice %s: %v", ri.SupplierPriceID, err)
-			s.writeError(w, http.StatusInternalServerError, "Ошибка получения данных товара")
+	}
+
+	// Один запрос на всю корзину вместо N (было N+1: отдельный SELECT на каждую позицию).
+	// Денормализованная схема: см. MD/15. LEFT JOIN'ы фильтруют висячие FK-ссылки → NULL в OrderItem.
+	var resolvedRows []struct {
+		SupplierPriceID string
+		SupplierID      string
+		ProductID       *string
+		RegionID        *string
+		PriceListID     *string
+		UnitPrice       float64
+	}
+	if err := s.database.GORMWith(ctx).
+		Table("SupplierPrice AS sp").
+		Select(`CAST(sp.SupplierPriceID AS NVARCHAR(50)) AS SupplierPriceID,
+			CAST(sp.SupplierID AS NVARCHAR(50)) AS SupplierID,
+			CASE WHEN p.ProductID IS NULL THEN NULL ELSE CAST(p.ProductID AS NVARCHAR(50)) END AS ProductID,
+			CASE WHEN r.RegionID IS NULL THEN NULL ELSE CAST(r.RegionID AS NVARCHAR(50)) END AS RegionID,
+			CASE WHEN spl.PriceListID IS NULL THEN NULL ELSE CAST(spl.PriceListID AS NVARCHAR(50)) END AS PriceListID,
+			ISNULL(sp.FinalPrice, sp.Price) * (1 + ISNULL(plr.MarkupPct, 0) / 100.0) AS UnitPrice`).
+		Joins("LEFT JOIN Product p ON p.ProductID = sp.GUID_ES").
+		Joins("LEFT JOIN Region r ON r.RegionID = sp.RegionID").
+		Joins("LEFT JOIN SupplierPriceList spl ON spl.PriceListID = sp.PriceListID").
+		Joins("LEFT JOIN PriceListRegion plr ON plr.PriceListID = sp.PriceListID AND plr.RegionID = sp.RegionID AND plr.IsActive = 1").
+		Where("sp.SupplierPriceID IN ? AND sp.IsActive = ?", priceIDs, true).
+		Scan(&resolvedRows).Error; err != nil {
+		s.logger.Error("Ошибка резолва позиций заказа: %v", err)
+		s.writeError(w, http.StatusInternalServerError, "Ошибка получения данных товара")
+		return
+	}
+
+	// Индексируем по SupplierPriceID (GUID из CAST — верхний регистр, ключ приводим к нижнему).
+	byID := make(map[string]resolvedPriceRow, len(resolvedRows))
+	for _, rr := range resolvedRows {
+		byID[strings.ToLower(rr.SupplierPriceID)] = resolvedPriceRow{
+			SupplierID:  rr.SupplierID,
+			ProductID:   rr.ProductID,
+			RegionID:    rr.RegionID,
+			PriceListID: rr.PriceListID,
+			UnitPrice:   rr.UnitPrice,
+		}
+	}
+
+	for _, ri := range req.Items {
+		row, ok := byID[strings.ToLower(ri.SupplierPriceID)]
+		if !ok {
+			s.writeError(w, http.StatusNotFound, fmt.Sprintf("Товар не найден или недоступен: %s", ri.SupplierPriceID))
 			return
 		}
 		totalAmount += ri.Qty * row.UnitPrice
@@ -306,8 +337,10 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 			return fmt.Errorf("[Order] insert: %w", err)
 		}
 
+		// Батч-вставка всех позиций одним запросом вместо INSERT на каждую строку.
+		lines := make([]models.OrderItem, 0, len(resolvedItems))
 		for _, it := range resolvedItems {
-			line := models.OrderItem{
+			lines = append(lines, models.OrderItem{
 				OrderLineID:    uuid.New().String(),
 				OrderID:        orderID,
 				SupplierID:     it.row.SupplierID,
@@ -318,8 +351,10 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 				UnitPrice:      it.row.UnitPrice,
 				PriceListID:    it.row.PriceListID,
 				CreatedAt:      now,
-			}
-			if err := tx.Create(&line).Error; err != nil {
+			})
+		}
+		if len(lines) > 0 {
+			if err := tx.CreateInBatches(lines, 100).Error; err != nil {
 				return fmt.Errorf("OrderItem insert: %w", err)
 			}
 		}

@@ -1007,48 +1007,8 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 		s.logger.Debug("Выполнение SQL запроса для сводного прайса")
 	}
 
-	// Сначала проверяем общее количество сопоставленных записей
-	countQuery := ""
-	if supplierID != "" {
-		countQuery = `
-			SELECT COUNT(*) 
-			FROM SupplierPrice sp WITH (NOLOCK)
-			WHERE sp.SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)
-			  AND sp.IsActive = 1
-			  AND sp.GUID_ES IS NOT NULL
-		`
-		countArgs := []interface{}{sql.Named("supplierID", supplierID)}
-		if regionID != "" {
-			countQuery += ` AND (sp.RegionID = CAST(@regionID AS UNIQUEIDENTIFIER) OR sp.RegionID IS NULL)`
-			countArgs = append(countArgs, sql.Named("regionID", regionID))
-		}
-		var totalMatched int
-		if err := s.database.GORMWith(ctx).Raw(countQuery, countArgs...).Row().Scan(&totalMatched); err == nil && s.logger != nil {
-			s.logger.Info("Всего сопоставленных записей (IsActive=1, GUID_ES IS NOT NULL): %d", totalMatched)
-		}
-
-		// Проверяем количество уникальных GUID_ES
-		uniqueQuery := `
-			SELECT COUNT(DISTINCT sp.GUID_ES)
-			FROM SupplierPrice sp WITH (NOLOCK)
-			WHERE sp.SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)
-			  AND sp.IsActive = 1
-			  AND sp.GUID_ES IS NOT NULL
-		`
-		uniqueArgs := []interface{}{sql.Named("supplierID", supplierID)}
-		if regionID != "" {
-			uniqueQuery += ` AND (sp.RegionID = CAST(@regionID AS UNIQUEIDENTIFIER) OR sp.RegionID IS NULL)`
-			uniqueArgs = append(uniqueArgs, sql.Named("regionID", regionID))
-		}
-		var uniqueGUIDs int
-		if err := s.database.GORMWith(ctx).Raw(uniqueQuery, uniqueArgs...).Row().Scan(&uniqueGUIDs); err == nil && s.logger != nil {
-			s.logger.Info("Уникальных GUID_ES (после группировки): %d", uniqueGUIDs)
-			if totalMatched > uniqueGUIDs {
-				s.logger.Info("⚠️ %d записей объединено в %d уникальных препаратов (среднее: %.1f записей на препарат)", 
-					totalMatched-uniqueGUIDs, uniqueGUIDs, float64(totalMatched)/float64(uniqueGUIDs))
-			}
-		}
-	}
+	// Диагностические COUNT/COUNT(DISTINCT) убраны: они выполняли два лишних
+	// прохода по SupplierPrice на каждый запрос сводного прайса только ради лог-строк.
 
 	// Retry логика для обработки deadlock
 	maxRetries := 3
