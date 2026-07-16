@@ -18,6 +18,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         await loadAccount(currentBuyerId);
     }
 
+    // Подключённые прайсы грузим и при создании, и при редактировании.
+    await loadPriceListAssignments(currentBuyerId);
+
     document.getElementById('buyerForm').addEventListener('submit', handleSubmit);
 
     // Маска телефона: форматируем по мере ввода
@@ -118,6 +121,13 @@ async function handleSubmit(e) {
 
         // Личный кабинет (логин + пароль), если заполнены.
         await ensureAccount(buyerId);
+
+        // Назначенные прайсы (и при создании, и при редактировании).
+        try {
+            await API.put(`/api/buyers/${buyerId}/price-lists`, { price_list_ids: collectCheckedPriceLists() });
+        } catch (err) {
+            console.error('Не удалось сохранить прайсы покупателя:', err);
+        }
 
         // При создании — заводим точку доставки из адреса, чтобы сразу был Location ID.
         if (isCreate && address) {
@@ -314,6 +324,50 @@ function togglePwd() {
     const icon = document.getElementById('togglePwdIcon');
     if (el.type === 'password') { el.type = 'text'; icon.className = 'bi bi-eye-slash'; }
     else { el.type = 'password'; icon.className = 'bi bi-eye'; }
+}
+
+let allPriceListsForAssign = [];
+
+async function loadPriceListAssignments(buyerId) {
+    const box = document.getElementById('priceListsAssign');
+    if (!box) return;
+    try {
+        const resp = await API.get('/api/price-lists');
+        allPriceListsForAssign = (resp && resp.price_lists) || [];
+    } catch (e) {
+        box.innerHTML = '<div class="text-danger">Не удалось загрузить список прайсов</div>';
+        return;
+    }
+
+    const assignedIds = new Set();
+    if (buyerId) {
+        try {
+            const assigned = await API.get(`/api/buyers/${buyerId}/price-lists`) || [];
+            assigned.forEach(a => assignedIds.add((a.price_list_id || '').toLowerCase()));
+        } catch (e) { /* назначений нет — ок */ }
+    }
+
+    if (allPriceListsForAssign.length === 0) {
+        box.innerHTML = '<div class="text-muted">Прайсов пока нет.</div>';
+        return;
+    }
+
+    box.innerHTML = '<div class="row g-2">' + allPriceListsForAssign.map(pl => {
+        const id = pl.price_list_id;
+        const checked = assignedIds.has((id || '').toLowerCase()) ? 'checked' : '';
+        const label = escapeHtml(pl.name || '-') +
+            (pl.supplier_name ? ` · <span class="text-muted">${escapeHtml(pl.supplier_name)}</span>` : '');
+        return `<div class="col-md-6">
+            <div class="form-check">
+                <input class="form-check-input pl-assign" type="checkbox" value="${id}" id="pl_${id}" ${checked}>
+                <label class="form-check-label" for="pl_${id}">${label}</label>
+            </div>
+        </div>`;
+    }).join('') + '</div>';
+}
+
+function collectCheckedPriceLists() {
+    return Array.from(document.querySelectorAll('.pl-assign:checked')).map(el => el.value);
 }
 
 async function deleteBuyer() {

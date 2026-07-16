@@ -163,3 +163,14 @@ type BuyerApplication struct {
 	IsActive           bool       `json:"is_active"`
 	CreatedAt          time.Time  `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
 }
+
+// BuyerPriceList — назначение management-прайса (PriceList) покупателю.
+// Если у покупателя есть активные назначения — каталог показывает товары
+// только из этих прайсов; нет назначений — работает по региону (страховка).
+type BuyerPriceList struct {
+	BuyerPriceListID string    `json:"buyer_price_list_id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
+	BuyerID          string    `json:"buyer_id" gorm:"type:uniqueidentifier"`
+	PriceListID      string    `json:"price_list_id" gorm:"type:uniqueidentifier"`
+	IsActive         bool      `json:"is_active"`
+	CreatedAt        time.Time `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
+}

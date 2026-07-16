@@ -75,6 +75,10 @@ func (s *Server) handlePriceListsRouter(w http.ResponseWriter, r *http.Request) 
 			s.handleGetPriceListItems(w, r)
 			return
 		}
+		if len(pathParts) >= 5 && pathParts[4] == "buyers" && r.Method == http.MethodGet {
+			s.handleGetPriceListBuyers(w, r, pathParts[3])
+			return
+		}
 		if len(pathParts) >= 5 && pathParts[4] == "fetch" && r.Method == http.MethodPost {
 			s.handleForceFetchPriceList(w, r, pathParts[3])
 			return

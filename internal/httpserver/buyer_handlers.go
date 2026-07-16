@@ -41,6 +41,19 @@ func (s *Server) handleBuyersRouter(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/buyers")
 	path = strings.TrimPrefix(path, "/")
 
+	// Подпуть {id}/price-lists — назначенные покупателю прайс-листы.
+	if parts := strings.Split(path, "/"); len(parts) == 2 && parts[0] != "" && parts[1] == "price-lists" {
+		switch r.Method {
+		case http.MethodGet:
+			s.handleGetBuyerPriceLists(w, r, parts[0])
+		case http.MethodPut:
+			s.handleSetBuyerPriceLists(w, r, parts[0])
+		default:
+			s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
+		}
+		return
+	}
+
 	if path != "" && !strings.Contains(path, "/") {
 		switch r.Method {
 		case http.MethodGet:

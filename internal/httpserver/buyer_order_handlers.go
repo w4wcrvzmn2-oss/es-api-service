@@ -665,6 +665,33 @@ func (s *Server) handleBuyerCatalog(w http.ResponseWriter, r *http.Request) {
 		base = base.Where("sp.RegionID = ?", db.UUIDParam(regionID))
 	}
 
+	// Ограничение по назначенным прайс-листам покупателя.
+	// Страховка: если назначений нет (или покупатель не резолвится) — фильтр не применяется,
+	// каталог работает как раньше (по региону). Предикат принадлежности прайсу повторяет
+	// логику price_list_handlers.go (прямой PriceListID ИЛИ цепочка ImportPoint→InvoiceImport).
+	if buyerUserID, _, ok := s.resolveBuyerUser(ctx, r); ok {
+		var buyerID string
+		_ = s.database.GORMWith(ctx).
+			Raw(`SELECT CAST(BuyerID AS NVARCHAR(50)) FROM BuyerUser WHERE BuyerUserID = ?`, db.UUIDParam(buyerUserID)).
+			Scan(&buyerID).Error
+		if buyerID != "" {
+			var assignedCount int64
+			_ = s.database.GORMWith(ctx).
+				Raw(`SELECT COUNT(*) FROM BuyerPriceList WHERE BuyerID = ? AND IsActive = 1`, db.UUIDParam(buyerID)).
+				Scan(&assignedCount).Error
+			if assignedCount > 0 {
+				base = base.Where(`EXISTS (
+					SELECT 1 FROM BuyerPriceList bpl
+					INNER JOIN PriceList pl ON pl.PriceListID = bpl.PriceListID
+					LEFT JOIN InvoiceImport ii ON ii.InvoiceImportID = sp.InvoiceImportID
+					WHERE bpl.BuyerID = ? AND bpl.IsActive = 1
+					  AND ( sp.PriceListID = pl.PriceListID
+					        OR (pl.ImportPointID IS NOT NULL AND ii.ImportPointID = pl.ImportPointID AND pl.SupplierID = sp.SupplierID) )
+				)`, db.UUIDParam(buyerID))
+			}
+		}
+	}
+
 	var total int64
 	if err := base.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		s.logger.Error("Ошибка подсчёта каталога: %v", err)

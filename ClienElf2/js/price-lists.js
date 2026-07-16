@@ -36,7 +36,8 @@ async function loadPriceLists() {
                     <td class="text-center">${cnt > 0 ? `<a href="price-view.html?id=${price.price_list_id}" class="fw-semibold text-decoration-none" title="Просмотр позиций">${cnt.toLocaleString('ru-RU')}</a>` : '-'}</td>
                     <td class="text-center text-nowrap">
                         <a href="price-view.html?id=${price.price_list_id}" class="btn btn-outline-primary btn-sm me-1" title="Просмотр позиций"><i class="bi bi-eye"></i></a>
-                        <a href="price-edit.html?id=${price.price_list_id}" class="btn btn-outline-secondary btn-sm" title="Редактировать"><i class="bi bi-pencil"></i></a>
+                        <a href="price-edit.html?id=${price.price_list_id}" class="btn btn-outline-secondary btn-sm me-1" title="Редактировать"><i class="bi bi-pencil"></i></a>
+                        <button class="btn btn-outline-info btn-sm" onclick="showPriceListBuyers('${price.price_list_id}')" title="Подключённые клиенты"><i class="bi bi-people"></i></button>
                     </td>
                     <td class="text-center">
                         <button class="btn btn-outline-danger btn-sm" onclick="deletePriceList('${price.price_list_id}')" title="Удалить"><i class="bi bi-trash"></i></button>
@@ -90,6 +91,55 @@ async function deletePriceList(priceId) {
 
 function goLinks(supplierId) {
     window.location.href = 'links.html?supplier=' + supplierId;
+}
+
+function ensureBuyersModal() {
+    let el = document.getElementById('plBuyersModal');
+    if (el) return el;
+    document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal fade" id="plBuyersModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title"><i class="bi bi-people"></i> Клиенты прайса</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+          </div>
+          <div class="modal-body" id="plBuyersBody"><div class="text-muted">Загрузка...</div></div>
+          <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button></div>
+        </div>
+      </div>
+    </div>`);
+    return document.getElementById('plBuyersModal');
+}
+
+async function showPriceListBuyers(priceListId) {
+    const modalEl = ensureBuyersModal();
+    const body = document.getElementById('plBuyersBody');
+    const pl = allPriceLists.find(p => p.price_list_id === priceListId);
+    modalEl.querySelector('.modal-title').innerHTML =
+        `<i class="bi bi-people"></i> Клиенты прайса${pl ? ': ' + escapeHtml(pl.name || '') : ''}`;
+    body.innerHTML = '<div class="text-muted">Загрузка...</div>';
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modal.show();
+    try {
+        const buyers = await API.get(`/api/price-lists/${priceListId}/buyers`) || [];
+        if (!Array.isArray(buyers) || buyers.length === 0) {
+            body.innerHTML = '<div class="text-muted">К этому прайсу пока не подключён ни один клиент. Подключение задаётся в карточке покупателя.</div>';
+            return;
+        }
+        body.innerHTML = `<div class="mb-2 text-muted small">Подключено клиентов: ${buyers.length}</div>
+            <table class="table table-sm table-striped align-middle mb-0">
+              <thead><tr><th>Клиент</th><th>ИНН</th><th>Регион</th></tr></thead>
+              <tbody>${buyers.map(b => `<tr>
+                <td>${escapeHtml(b.name || '-')}</td>
+                <td>${escapeHtml(b.inn || '')}</td>
+                <td>${escapeHtml(b.region_name || '')}</td>
+              </tr>`).join('')}</tbody>
+            </table>`;
+    } catch (err) {
+        console.error('Ошибка загрузки клиентов прайса:', err);
+        body.innerHTML = '<div class="alert alert-danger mb-0">Не удалось загрузить клиентов</div>';
+    }
 }
 
 function escapeHtml(text) {
