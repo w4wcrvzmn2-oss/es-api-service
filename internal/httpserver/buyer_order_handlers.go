@@ -303,6 +303,26 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 	if req.LocationID != nil && *req.LocationID != "" {
 		locationID = req.LocationID
 	}
+
+	// Проверяем адрес доставки заранее: если location_id не существует или
+	// не принадлежит покупателю — отдаём понятный 400, а не FK-ошибку 500 при вставке.
+	if locationID != nil {
+		var cnt int64
+		if err := s.database.GORMWith(ctx).Raw(`
+			SELECT COUNT(*) FROM BuyerLocation bl
+			INNER JOIN BuyerUser bu ON bu.BuyerID = bl.BuyerID
+			WHERE bl.BuyerLocationID = ? AND bu.BuyerUserID = ?`,
+			db.UUIDParam(*locationID), db.UUIDParam(buyerUserID)).Scan(&cnt).Error; err != nil {
+			s.logger.Error("Ошибка проверки адреса доставки: %v", err)
+			s.writeError(w, http.StatusInternalServerError, "Ошибка проверки адреса доставки")
+			return
+		}
+		if cnt == 0 {
+			s.writeError(w, http.StatusBadRequest, "Адрес доставки (location_id) не найден или не принадлежит покупателю. Возьмите Location ID из карточки покупателя.")
+			return
+		}
+	}
+
 	commentStr := ""
 	if req.Comment != nil {
 		commentStr = *req.Comment
