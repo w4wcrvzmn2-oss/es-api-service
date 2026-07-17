@@ -164,6 +164,27 @@ type BuyerApplication struct {
 	CreatedAt          time.Time  `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
 }
 
+// SupplierExportConfig — куда и как поставщик выгружает заказы (FTP/почта).
+type SupplierExportConfig struct {
+	SupplierExportConfigID string    `json:"id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
+	SupplierID             string    `json:"supplier_id" gorm:"type:uniqueidentifier"`
+	Method                 string    `json:"method"` // none|ftp|email|both
+	Format                 string    `json:"format"` // DBF
+	FtpHost                *string   `json:"ftp_host,omitempty"`
+	FtpPort                int       `json:"ftp_port"`
+	FtpUser                *string   `json:"ftp_user,omitempty"`
+	FtpPassword            *string   `json:"ftp_password,omitempty"`
+	FtpDir                 *string   `json:"ftp_dir,omitempty"`
+	EmailTo                *string   `json:"email_to,omitempty"`
+	SmtpHost               *string   `json:"smtp_host,omitempty"`
+	SmtpPort               int       `json:"smtp_port"`
+	SmtpUser               *string   `json:"smtp_user,omitempty"`
+	SmtpPassword           *string   `json:"smtp_password,omitempty"`
+	SmtpFrom               *string   `json:"smtp_from,omitempty"`
+	IsActive               bool      `json:"is_active"`
+	UpdatedAt              time.Time `json:"updated_at" gorm:"autoCreateTime:false"`
+}
+
 // BuyerPriceList — назначение management-прайса (PriceList) покупателю.
 // Если у покупателя есть активные назначения — каталог показывает товары
 // только из этих прайсов; нет назначений — работает по региону (страховка).

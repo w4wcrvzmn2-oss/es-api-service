@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Выгрузка заказов - Кабинет поставщика</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%232e8a57'/><rect x='42' y='22' width='16' height='56' rx='5' fill='%23fff'/><rect x='22' y='42' width='56' height='16' rx='5' fill='%23fff'/></svg>">
+    <link href="../vendor/bootstrap.min.css" rel="stylesheet">
+    <link href="../vendor/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/supplier.css">
+</head>
+<body class="bg-light">
+    <script src="../js/auth.js"></script>
+    <script>if (!AuthManager.isAuthenticated()) window.location.href = AuthManager.getLoginPath();</script>
+    <script src="../js/nav-supplier.js"></script>
+
+    <div class="container-fluid py-4 px-3 px-lg-5" style="max-width:820px">
+        <h1 class="mb-4"><i class="bi bi-upload"></i> Выгрузка заказов</h1>
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <p class="text-muted">
+                    Куда отправлять заказы при нажатии «Выгрузить» на странице заказов.
+                    Формат файла — DBF.
+                </p>
+
+                <form id="exportForm">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Способ выгрузки</label>
+                        <select class="form-select" id="method">
+                            <option value="none">Не выгружать</option>
+                            <option value="ftp">Только FTP</option>
+                            <option value="email">Только почта</option>
+                            <option value="both">FTP и почта</option>
+                        </select>
+                    </div>
+
+                    <!-- FTP -->
+                    <fieldset id="ftpBlock" class="border rounded p-3 mb-3">
+                        <legend class="float-none w-auto px-2 fs-6 text-muted">FTP</legend>
+                        <div class="row g-3">
+                            <div class="col-md-8">
+                                <label class="form-label">Хост</label>
+                                <input type="text" class="form-control" id="ftp_host" placeholder="ftp.example.ru">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Порт</label>
+                                <input type="number" class="form-control" id="ftp_port" value="21">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Логин</label>
+                                <input type="text" class="form-control" id="ftp_user" autocomplete="off">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Пароль</label>
+                                <input type="password" class="form-control" id="ftp_password" autocomplete="new-password">
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Каталог</label>
+                                <input type="text" class="form-control" id="ftp_dir" placeholder="/orders">
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <!-- Почта -->
+                    <fieldset id="emailBlock" class="border rounded p-3 mb-3">
+                        <legend class="float-none w-auto px-2 fs-6 text-muted">Почта</legend>
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label">Куда отправлять (получатель)</label>
+                                <input type="email" class="form-control" id="email_to" placeholder="orders@example.ru">
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label">SMTP-сервер</label>
+                                <input type="text" class="form-control" id="smtp_host" placeholder="smtp.example.ru">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Порт</label>
+                                <input type="number" class="form-control" id="smtp_port" value="587">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Логин SMTP</label>
+                                <input type="text" class="form-control" id="smtp_user" autocomplete="off">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Пароль SMTP</label>
+                                <input type="password" class="form-control" id="smtp_password" autocomplete="new-password">
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Отправитель (From)</label>
+                                <input type="email" class="form-control" id="smtp_from" placeholder="noreply@example.ru">
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <div class="d-flex align-items-center gap-3">
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Сохранить</button>
+                        <span class="text-muted">Формат: <b>DBF</b></span>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="../vendor/bootstrap.bundle.min.js"></script>
+    <script src="../js/api.js"></script>
+    <script src="../js/toast.js"></script>
+    <script>
+        function toggleBlocks() {
+            const m = document.getElementById('method').value;
+            document.getElementById('ftpBlock').style.display   = (m === 'ftp'   || m === 'both') ? '' : 'none';
+            document.getElementById('emailBlock').style.display = (m === 'email' || m === 'both') ? '' : 'none';
+        }
+        document.getElementById('method').addEventListener('change', toggleBlocks);
+
+        function setVal(id, v) { document.getElementById(id).value = (v == null ? '' : v); }
+        function getVal(id) { const v = document.getElementById(id).value.trim(); return v === '' ? null : v; }
+        function getInt(id, def) { const n = parseInt(document.getElementById(id).value, 10); return isFinite(n) && n > 0 ? n : def; }
+
+        async function loadConfig() {
+            try {
+                const c = await API.get('/api/sc/export-config') || {};
+                setVal('method', c.method || 'none');
+                setVal('ftp_host', c.ftp_host); setVal('ftp_port', c.ftp_port || 21);
+                setVal('ftp_user', c.ftp_user); setVal('ftp_password', c.ftp_password);
+                setVal('ftp_dir', c.ftp_dir);
+                setVal('email_to', c.email_to);
+                setVal('smtp_host', c.smtp_host); setVal('smtp_port', c.smtp_port || 587);
+                setVal('smtp_user', c.smtp_user); setVal('smtp_password', c.smtp_password);
+                setVal('smtp_from', c.smtp_from);
+            } catch (e) {
+                console.error('Не удалось загрузить настройки:', e);
+            }
+            toggleBlocks();
+        }
+
+        document.getElementById('exportForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const body = {
+                method: document.getElementById('method').value,
+                format: 'DBF',
+                ftp_host: getVal('ftp_host'), ftp_port: getInt('ftp_port', 21),
+                ftp_user: getVal('ftp_user'), ftp_password: getVal('ftp_password'),
+                ftp_dir: getVal('ftp_dir'),
+                email_to: getVal('email_to'),
+                smtp_host: getVal('smtp_host'), smtp_port: getInt('smtp_port', 587),
+                smtp_user: getVal('smtp_user'), smtp_password: getVal('smtp_password'),
+                smtp_from: getVal('smtp_from'),
+                is_active: true
+            };
+            try {
+                await API.put('/api/sc/export-config', body);
+                if (window.Toast && Toast.success) Toast.success('Сохранено', 'Настройки выгрузки обновлены');
+                else alert('Настройки сохранены');
+            } catch (err) {
+                if (window.Toast && Toast.error) Toast.error('Ошибка', err.message || 'Не удалось сохранить');
+                else alert('Ошибка сохранения: ' + (err.message || ''));
+            }
+        });
+
+        loadConfig();
+    </script>
+</body>
+</html>
