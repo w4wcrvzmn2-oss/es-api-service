@@ -122,9 +122,9 @@ async function handleSubmit(e) {
         // Личный кабинет (логин + пароль), если заполнены.
         await ensureAccount(buyerId);
 
-        // Назначенные прайсы (и при создании, и при редактировании).
+        // Назначенные прайсы + индивидуальная наценка (и при создании, и при редактировании).
         try {
-            await API.put(`/api/buyers/${buyerId}/price-lists`, { price_list_ids: collectCheckedPriceLists() });
+            await API.put(`/api/buyers/${buyerId}/price-lists`, { items: collectPriceListItems() });
         } catch (err) {
             console.error('Не удалось сохранить прайсы покупателя:', err);
         }
@@ -339,11 +339,12 @@ async function loadPriceListAssignments(buyerId) {
         return;
     }
 
-    const assignedIds = new Set();
+    // Назначенные прайсы + индивидуальная наценка клиента.
+    const assignedMarkup = {}; // price_list_id(lower) -> markup_pct
     if (buyerId) {
         try {
             const assigned = await API.get(`/api/buyers/${buyerId}/price-lists`) || [];
-            assigned.forEach(a => assignedIds.add((a.price_list_id || '').toLowerCase()));
+            assigned.forEach(a => { assignedMarkup[(a.price_list_id || '').toLowerCase()] = a.markup_pct || 0; });
         } catch (e) { /* назначений нет — ок */ }
     }
 
@@ -352,22 +353,53 @@ async function loadPriceListAssignments(buyerId) {
         return;
     }
 
-    box.innerHTML = '<div class="row g-2">' + allPriceListsForAssign.map(pl => {
+    box.innerHTML = allPriceListsForAssign.map(pl => {
         const id = pl.price_list_id;
-        const checked = assignedIds.has((id || '').toLowerCase()) ? 'checked' : '';
-        const label = escapeHtml(pl.name || '-') +
-            (pl.supplier_name ? ` · <span class="text-muted">${escapeHtml(pl.supplier_name)}</span>` : '');
-        return `<div class="col-md-6">
-            <div class="form-check">
-                <input class="form-check-input pl-assign" type="checkbox" value="${id}" id="pl_${id}" ${checked}>
-                <label class="form-check-label" for="pl_${id}">${label}</label>
+        const key = (id || '').toLowerCase();
+        const isAssigned = Object.prototype.hasOwnProperty.call(assignedMarkup, key);
+        const checked = isAssigned ? 'checked' : '';
+        const markupVal = isAssigned ? assignedMarkup[key] : '';
+        const plMarkup = (pl.default_markup_pct != null) ? pl.default_markup_pct : 0;
+        const search = ((pl.name || '') + ' ' + (pl.supplier_name || '')).toLowerCase();
+        return `<div class="pl-row border-bottom py-2" data-search="${escapeHtml(search)}">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <div class="form-check mb-0 flex-grow-1">
+                    <input class="form-check-input pl-assign" type="checkbox" value="${id}" id="pl_${id}" ${checked}>
+                    <label class="form-check-label" for="pl_${id}">
+                        ${escapeHtml(pl.name || '-')}${pl.supplier_name ? ` · <span class="text-muted">${escapeHtml(pl.supplier_name)}</span>` : ''}
+                    </label>
+                </div>
+                <div class="input-group input-group-sm" style="width:200px">
+                    <span class="input-group-text">Наценка клиента</span>
+                    <input type="number" step="0.01" class="form-control pl-markup" data-pl="${id}" value="${markupVal}" placeholder="0">
+                    <span class="input-group-text">%</span>
+                </div>
+                <span class="text-muted small" title="Наценка самого прайса" style="min-width:78px">прайс: ${plMarkup}%</span>
             </div>
         </div>`;
-    }).join('') + '</div>';
+    }).join('');
+
+    // Поиск/фильтр по прайсам.
+    const searchEl = document.getElementById('plSearch');
+    if (searchEl && !searchEl._bound) {
+        searchEl._bound = true;
+        searchEl.addEventListener('input', () => {
+            const q = searchEl.value.trim().toLowerCase();
+            document.querySelectorAll('#priceListsAssign .pl-row').forEach(row => {
+                row.style.display = (!q || (row.getAttribute('data-search') || '').includes(q)) ? '' : 'none';
+            });
+        });
+    }
 }
 
-function collectCheckedPriceLists() {
-    return Array.from(document.querySelectorAll('.pl-assign:checked')).map(el => el.value);
+// Собирает отмеченные прайсы с индивидуальной наценкой: [{price_list_id, markup_pct}].
+function collectPriceListItems() {
+    return Array.from(document.querySelectorAll('.pl-assign:checked')).map(el => {
+        const id = el.value;
+        const markupEl = document.querySelector(`.pl-markup[data-pl="${id}"]`);
+        const markup = markupEl ? parseFloat(markupEl.value) : 0;
+        return { price_list_id: id, markup_pct: isFinite(markup) ? markup : 0 };
+    });
 }
 
 async function deleteBuyer() {

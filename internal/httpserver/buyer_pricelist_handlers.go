@@ -26,15 +26,19 @@ func (s *Server) handleGetBuyerPriceLists(w http.ResponseWriter, r *http.Request
 	defer cancel()
 
 	type row struct {
-		PriceListID  string `json:"price_list_id"`
-		Name         string `json:"name"`
-		SupplierName string `json:"supplier_name"`
+		PriceListID      string  `json:"price_list_id"`
+		Name             string  `json:"name"`
+		SupplierName     string  `json:"supplier_name"`
+		MarkupPct        float64 `json:"markup_pct"`         // индивидуальная наценка клиента
+		DefaultMarkupPct float64 `json:"default_markup_pct"` // наценка самого прайса
 	}
 	rows := []row{}
 	err := s.database.GORMWith(ctx).Raw(`
 		SELECT CAST(pl.PriceListID AS NVARCHAR(50)) AS PriceListID,
 		       pl.Name AS Name,
-		       ISNULL(sup.Name, '') AS SupplierName
+		       ISNULL(sup.Name, '') AS SupplierName,
+		       CAST(ISNULL(bpl.MarkupPct, 0) AS FLOAT) AS MarkupPct,
+		       CAST(ISNULL(pl.DefaultMarkupPct, 0) AS FLOAT) AS DefaultMarkupPct
 		FROM BuyerPriceList bpl
 		INNER JOIN PriceList pl ON pl.PriceListID = bpl.PriceListID
 		LEFT JOIN Supplier sup ON sup.SupplierID = pl.SupplierID
@@ -62,11 +66,32 @@ func (s *Server) handleSetBuyerPriceLists(w http.ResponseWriter, r *http.Request
 	defer cancel()
 
 	var req struct {
+		Items []struct {
+			PriceListID string  `json:"price_list_id"`
+			MarkupPct   float64 `json:"markup_pct"`
+		} `json:"items"`
+		// Совместимость со старым форматом без наценки.
 		PriceListIDs []string `json:"price_list_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeError(w, http.StatusBadRequest, "Неверный формат запроса")
 		return
+	}
+
+	// Нормализуем к единому виду [{PriceListID, MarkupPct}].
+	type item struct {
+		id     string
+		markup float64
+	}
+	var items []item
+	if len(req.Items) > 0 {
+		for _, it := range req.Items {
+			items = append(items, item{id: it.PriceListID, markup: it.MarkupPct})
+		}
+	} else {
+		for _, id := range req.PriceListIDs {
+			items = append(items, item{id: id, markup: 0})
+		}
 	}
 
 	now := time.Now().UTC()
@@ -76,15 +101,16 @@ func (s *Server) handleSetBuyerPriceLists(w http.ResponseWriter, r *http.Request
 			return e
 		}
 		seen := make(map[string]bool)
-		for _, plID := range req.PriceListIDs {
-			if plID == "" || seen[plID] {
+		for _, it := range items {
+			if it.id == "" || seen[it.id] {
 				continue
 			}
-			seen[plID] = true
+			seen[it.id] = true
 			link := models.BuyerPriceList{
 				BuyerPriceListID: uuid.New().String(),
 				BuyerID:          buyerID,
-				PriceListID:      plID,
+				PriceListID:      it.id,
+				MarkupPct:        it.markup,
 				IsActive:         true,
 				CreatedAt:        now,
 			}
@@ -100,11 +126,11 @@ func (s *Server) handleSetBuyerPriceLists(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	s.logger.Info("Покупателю %s назначено прайсов: %d", buyerID, len(req.PriceListIDs))
+	s.logger.Info("Покупателю %s назначено прайсов: %d", buyerID, len(items))
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message":  "Прайсы покупателя обновлены",
 		"buyer_id": buyerID,
-		"count":    len(req.PriceListIDs),
+		"count":    len(items),
 	})
 }
 

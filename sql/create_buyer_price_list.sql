@@ -18,6 +18,7 @@ BEGIN
         BuyerPriceListID uniqueidentifier NOT NULL CONSTRAINT DF_BuyerPriceList_Id DEFAULT NEWID(),
         BuyerID          uniqueidentifier NOT NULL,
         PriceListID      uniqueidentifier NOT NULL,
+        MarkupPct        decimal(6,2)     NOT NULL CONSTRAINT DF_BuyerPriceList_Markup DEFAULT 0,
         IsActive         bit              NOT NULL CONSTRAINT DF_BuyerPriceList_IsActive DEFAULT 1,
         CreatedAt        datetime2(3)     NOT NULL CONSTRAINT DF_BuyerPriceList_CreatedAt DEFAULT GETUTCDATE(),
         CONSTRAINT PK_BuyerPriceList PRIMARY KEY (BuyerPriceListID)
@@ -27,4 +28,14 @@ BEGIN
     PRINT 'BuyerPriceList: таблица создана';
 END
 ELSE
-    PRINT 'BuyerPriceList: уже существует, пропущено';
+BEGIN
+    -- Таблица уже есть — добавляем колонку индивидуальной наценки клиента, если её нет.
+    IF COL_LENGTH('dbo.BuyerPriceList', 'MarkupPct') IS NULL
+    BEGIN
+        ALTER TABLE dbo.BuyerPriceList
+            ADD MarkupPct decimal(6,2) NOT NULL CONSTRAINT DF_BuyerPriceList_Markup DEFAULT 0;
+        PRINT 'BuyerPriceList: добавлена колонка MarkupPct';
+    END
+    ELSE
+        PRINT 'BuyerPriceList: уже существует (с MarkupPct), пропущено';
+END

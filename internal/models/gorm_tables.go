@@ -171,6 +171,7 @@ type BuyerPriceList struct {
 	BuyerPriceListID string    `json:"buyer_price_list_id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
 	BuyerID          string    `json:"buyer_id" gorm:"type:uniqueidentifier"`
 	PriceListID      string    `json:"price_list_id" gorm:"type:uniqueidentifier"`
+	MarkupPct        float64   `json:"markup_pct" gorm:"type:decimal(6,2)"` // индивидуальная наценка клиента на этот прайс
 	IsActive         bool      `json:"is_active"`
 	CreatedAt        time.Time `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
 }
