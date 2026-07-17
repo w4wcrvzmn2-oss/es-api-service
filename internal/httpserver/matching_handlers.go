@@ -832,8 +832,11 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 	if v := r.URL.Query().Get("offset"); v != "" {
 		fmt.Sscanf(v, "%d", &offsetVal)
 	}
-	if limitVal <= 0 || limitVal > 5000 {
-		limitVal = 5000
+	if limitVal <= 0 {
+		limitVal = 5000 // по умолчанию (совместимо со старым клиентом)
+	}
+	if limitVal > 200000 {
+		limitVal = 200000 // явный большой лимит разрешаем: весь прайс одним запросом
 	}
 	if offsetVal < 0 {
 		offsetVal = 0
