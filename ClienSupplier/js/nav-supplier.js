@@ -66,6 +66,9 @@
             <div class="collapse navbar-collapse" id="mainNav">
                 <ul class="navbar-nav me-auto mb-2 mb-lg-0">${links}</ul>
                 <span class="navbar-text me-3"><i class="bi bi-person-circle"></i> ${safeSupplierName}</span>
+                <a class="btn btn-primary btn-sm me-2" href="/download/PharmData-Setup.exe" download title="Скачать приложение для Windows">
+                    <i class="bi bi-download"></i> Приложение
+                </a>
                 <button class="btn btn-outline-secondary btn-sm" onclick="AuthManager.logout()">
                     <i class="bi bi-box-arrow-right"></i> Выйти
                 </button>

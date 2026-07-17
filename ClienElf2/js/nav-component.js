@@ -39,6 +39,9 @@
             </button>
             <div class="collapse navbar-collapse" id="mainNav">
                 <ul class="navbar-nav me-auto mb-2 mb-lg-0">${links}</ul>
+                <a class="btn btn-primary btn-sm me-2" href="/download/PharmData-Setup.exe" download title="\u0421\u043a\u0430\u0447\u0430\u0442\u044c \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0435 \u0434\u043b\u044f Windows">
+                    <i class="bi bi-download"></i> \u041f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0435
+                </a>
                 <button class="btn btn-outline-secondary btn-sm" onclick="AuthManager.logout()">
                     <i class="bi bi-box-arrow-right"></i> \u0412\u044b\u0439\u0442\u0438
                 </button>
