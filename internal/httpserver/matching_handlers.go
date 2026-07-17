@@ -929,11 +929,11 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 			FROM LatestPrices lp
 			LEFT JOIN es_ef2 ef2 WITH (NOLOCK) ON lp.GUID_ES = ef2.GUID_ES
 			-- Region не используется в сводном прайсе
-			OUTER APPLY (
-				SELECT TOP 1 PRODUCER_NAME
-				FROM es_producer ep WITH (NOLOCK)
-				WHERE ep.KOD_PRODUCER = ef2.PRODUCER_COD
-			) ep
+			LEFT JOIN (
+				SELECT KOD_PRODUCER, MIN(PRODUCER_NAME) AS PRODUCER_NAME
+				FROM es_producer WITH (NOLOCK)
+				GROUP BY KOD_PRODUCER
+			) ep ON ep.KOD_PRODUCER = ef2.PRODUCER_COD
 			WHERE lp.rn = 1
 			  AND (@q = N'' OR ef2.NAME LIKE @q)
 			ORDER BY ISNULL(ef2.NAME, ''), ef2.NAME, ISNULL(lp.BatchNumber, ''), lp.ExpiryDate
@@ -1018,11 +1018,11 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 			LEFT JOIN es_ef2 ef2 WITH (NOLOCK) ON lp.GUID_ES = ef2.GUID_ES
 			LEFT JOIN Supplier s WITH (NOLOCK) ON lp.SupplierID = s.SupplierID AND s.IsActive = 1
 			-- Region не используется в сводном прайсе - все данные о препарате из ЕС
-			OUTER APPLY (
-				SELECT TOP 1 PRODUCER_NAME
-				FROM es_producer ep WITH (NOLOCK)
-				WHERE ep.KOD_PRODUCER = ef2.PRODUCER_COD
-			) ep
+			LEFT JOIN (
+				SELECT KOD_PRODUCER, MIN(PRODUCER_NAME) AS PRODUCER_NAME
+				FROM es_producer WITH (NOLOCK)
+				GROUP BY KOD_PRODUCER
+			) ep ON ep.KOD_PRODUCER = ef2.PRODUCER_COD
 			WHERE lp.rn = 1
 			  AND (@q = N'' OR ef2.NAME LIKE @q)
 			ORDER BY ISNULL(ef2.NAME, ''), ef2.NAME, s.Name, ISNULL(lp.BatchNumber, ''), lp.ExpiryDate, lp.FinalPrice
