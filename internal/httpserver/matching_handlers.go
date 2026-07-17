@@ -819,6 +819,26 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	// Поиск по названию (дозагрузка из десктопа) и постраничность.
+	search := strings.TrimSpace(r.URL.Query().Get("q"))
+	qLike := ""
+	if search != "" {
+		qLike = "%" + search + "%"
+	}
+	limitVal, offsetVal := 5000, 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		fmt.Sscanf(v, "%d", &limitVal)
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		fmt.Sscanf(v, "%d", &offsetVal)
+	}
+	if limitVal <= 0 || limitVal > 5000 {
+		limitVal = 5000
+	}
+	if offsetVal < 0 {
+		offsetVal = 0
+	}
+
 	if supplierID != "" {
 		// Валидация UUID для защиты от SQL injection
 		if _, err := uuid.Parse(supplierID); err != nil {
@@ -871,7 +891,7 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 
 		query += `
 			)
-			SELECT TOP 5000
+			SELECT
 				CAST(lp.GUID_ES AS NVARCHAR(50)) AS GUID_ES,
 				CAST(lp.SupplierPriceID AS NVARCHAR(50)) AS SupplierPriceID,
 				NULL AS SupplierID,
@@ -912,7 +932,9 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				WHERE ep.KOD_PRODUCER = ef2.PRODUCER_COD
 			) ep
 			WHERE lp.rn = 1
+			  AND (@q = N'' OR ef2.NAME LIKE @q)
 			ORDER BY ISNULL(ef2.NAME, ''), ef2.NAME, ISNULL(lp.BatchNumber, ''), lp.ExpiryDate
+			OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
 		`
 	} else {
 		// Сводный прайс для всех поставщиков (группировка по препарату и поставщику)
@@ -957,7 +979,7 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 
 		query += `
 			)
-			SELECT TOP 5000
+			SELECT
 				CAST(lp.GUID_ES AS NVARCHAR(50)) AS GUID_ES,
 				CAST(lp.SupplierPriceID AS NVARCHAR(50)) AS SupplierPriceID,
 				CAST(lp.SupplierID AS NVARCHAR(50)) AS SupplierID,
@@ -999,9 +1021,14 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				WHERE ep.KOD_PRODUCER = ef2.PRODUCER_COD
 			) ep
 			WHERE lp.rn = 1
+			  AND (@q = N'' OR ef2.NAME LIKE @q)
 			ORDER BY ISNULL(ef2.NAME, ''), ef2.NAME, s.Name, ISNULL(lp.BatchNumber, ''), lp.ExpiryDate, lp.FinalPrice
+			OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
 		`
 	}
+
+	// Общие параметры обеих веток: фильтр по имени и постраничность.
+	args = append(args, sql.Named("q", qLike), sql.Named("offset", offsetVal), sql.Named("limit", limitVal))
 
 	if s.logger != nil {
 		s.logger.Debug("Выполнение SQL запроса для сводного прайса")
