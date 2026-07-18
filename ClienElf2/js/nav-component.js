@@ -6,6 +6,7 @@
 
     const items = [
         { href: r + 'index.html',         icon: 'bi-house-door',   text: '\u0413\u043b\u0430\u0432\u043d\u0430\u044f',       file: 'index.html' },
+        { href: p + 'monitoring.html',     icon: 'bi-graph-up',     text: '\u041c\u043e\u043d\u0438\u0442\u043e\u0440\u0438\u043d\u0433', file: 'monitoring.html' },
         { href: p + 'regions.html',        icon: 'bi-geo-alt',      text: '\u0420\u0435\u0433\u0438\u043e\u043d\u044b',       file: 'regions.html' },
         { href: p + 'access-points.html',  icon: 'bi-plug',         text: '\u0422\u043e\u0447\u043a\u0438 \u0434\u043e\u0441\u0442\u0443\u043f\u0430', file: 'access-points.html' },
         { href: p + 'suppliers.html',      icon: 'bi-building',     text: '\u041f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a\u0438',   file: 'suppliers.html' },

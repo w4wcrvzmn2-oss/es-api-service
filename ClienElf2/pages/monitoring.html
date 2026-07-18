@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Мониторинг - PharmData</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%232b6cab'/><rect x='42' y='22' width='16' height='56' rx='5' fill='%23fff'/><rect x='22' y='42' width='56' height='16' rx='5' fill='%23fff'/></svg>">
+    <link href="../vendor/bootstrap.min.css" rel="stylesheet">
+    <link href="../vendor/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/custom.css">
+    <style>
+        .mon-card { border:1px solid #e4e7ec; border-radius:12px; background:#fff; padding:16px 18px; }
+        .mon-card .lbl { font-size:12.5px; color:#667085; font-weight:600; }
+        .mon-card .val { font-size:26px; font-weight:700; margin-top:4px; color:#1b2430; }
+        .mon-card .sub { font-size:12px; color:#98a2b3; margin-top:2px; }
+    </style>
+</head>
+<body class="bg-light">
+    <script src="../js/auth.js"></script>
+    <script>if (!AuthManager.isAuthenticated()) window.location.href = '../login.html';</script>
+    <script src="../js/nav-component.js"></script>
+
+    <div class="container-fluid py-4 px-3 px-lg-5">
+        <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+            <h1 class="mb-0"><i class="bi bi-graph-up"></i> Мониторинг</h1>
+            <div class="d-flex align-items-center gap-2">
+                <span class="text-muted small" id="updated"></span>
+                <button class="btn btn-outline-secondary btn-sm" onclick="loadMonitoring()"><i class="bi bi-arrow-clockwise"></i> Обновить</button>
+            </div>
+        </div>
+
+        <div class="row g-3 mb-3" id="cards">
+            <div class="col-12 text-muted">Загрузка...</div>
+        </div>
+
+        <div class="row g-3">
+            <div class="col-lg-5">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header fw-semibold">Заказы по статусам</div>
+                    <div class="card-body p-0">
+                        <table class="table table-sm table-striped align-middle mb-0">
+                            <thead><tr><th>Статус</th><th class="text-center">Кол-во</th><th class="text-end">Сумма</th></tr></thead>
+                            <tbody id="byStatus"><tr><td colspan="3" class="text-muted p-3">—</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-7">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header fw-semibold">Последние заказы</div>
+                    <div class="card-body p-0">
+                        <table class="table table-sm table-striped align-middle mb-0">
+                            <thead><tr><th>Дата</th><th>Клиент</th><th>Статус</th><th class="text-end">Сумма</th></tr></thead>
+                            <tbody id="recent"><tr><td colspan="4" class="text-muted p-3">—</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="../vendor/bootstrap.bundle.min.js"></script>
+    <script src="../js/api.js"></script>
+    <script>
+        function money(v){ return (Number(v)||0).toLocaleString('ru-RU',{minimumFractionDigits:2, maximumFractionDigits:2}); }
+        function num(v){ return (Number(v)||0).toLocaleString('ru-RU'); }
+        function esc(t){ const d=document.createElement('div'); d.textContent=(t==null?'':String(t)); return d.innerHTML; }
+
+        function card(lbl, val, sub){
+            return `<div class="col-6 col-md-4 col-xl-3"><div class="mon-card">
+                <div class="lbl">${lbl}</div><div class="val">${val}</div>
+                ${sub?`<div class="sub">${sub}</div>`:''}</div></div>`;
+        }
+
+        async function loadMonitoring(){
+            const cards = document.getElementById('cards');
+            cards.innerHTML = '<div class="col-12 text-muted">Загрузка...</div>';
+            try {
+                const d = await API.get('/api/monitoring') || {};
+                const p = d.prices || {}, o = d.orders || {};
+                cards.innerHTML =
+                    card('Поставщики', num(d.suppliers)) +
+                    card('Покупатели', num(d.buyers)) +
+                    card('Прайс-листы', num(d.price_lists)) +
+                    card('Позиций в прайсе', num(p.total), 'сопоставлено ' + num(p.matched)) +
+                    card('Не сопоставлено', num(p.unmatched)) +
+                    card('Заказов всего', num(o.total), 'сегодня ' + num(o.today)) +
+                    card('Заказов сегодня', num(o.today)) +
+                    card('Сумма заказов', money(o.sum) + ' ₽');
+
+                const bs = document.getElementById('byStatus');
+                const st = (o.by_status || []);
+                bs.innerHTML = st.length ? st.map(s => `<tr>
+                    <td><span class="badge bg-secondary">${esc(s.status)}</span></td>
+                    <td class="text-center">${num(s.count)}</td>
+                    <td class="text-end">${money(s.sum)} ₽</td></tr>`).join('')
+                    : '<tr><td colspan="3" class="text-muted p-3">Нет заказов</td></tr>';
+
+                const rc = document.getElementById('recent');
+                const ro = (d.recent_orders || []);
+                rc.innerHTML = ro.length ? ro.map(r => `<tr>
+                    <td>${r.created_at ? new Date(r.created_at).toLocaleString('ru') : '-'}</td>
+                    <td>${esc(r.buyer_name)}</td>
+                    <td><span class="badge bg-secondary">${esc(r.status || 'N/A')}</span></td>
+                    <td class="text-end">${money(r.total)} ₽</td></tr>`).join('')
+                    : '<tr><td colspan="4" class="text-muted p-3">Нет заказов</td></tr>';
+
+                document.getElementById('updated').textContent =
+                    'Обновлено: ' + (d.generated_at ? new Date(d.generated_at).toLocaleTimeString('ru') : new Date().toLocaleTimeString('ru'));
+            } catch (e) {
+                console.error('Ошибка мониторинга:', e);
+                cards.innerHTML = '<div class="col-12 text-danger">Ошибка загрузки данных мониторинга</div>';
+            }
+        }
+
+        loadMonitoring();
+    </script>
+</body>
+</html>

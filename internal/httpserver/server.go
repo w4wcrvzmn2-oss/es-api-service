@@ -290,6 +290,7 @@ func (s *Server) setupAPIRoutes(mux *http.ServeMux) {
 
 	// Глобальная статистика
 	mux.HandleFunc("/api/stats/global", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGlobalStats)).ServeHTTP)))
+	mux.HandleFunc("/api/monitoring", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleMonitoring)).ServeHTTP)))
 
 	// Поиск препаратов
 	mux.HandleFunc("/api/drugs/search", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleSearchDrugs)).ServeHTTP)))

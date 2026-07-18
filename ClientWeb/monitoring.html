@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Мониторинг — PharmData</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%234b52c4'/><rect x='42' y='22' width='16' height='56' rx='5' fill='%23fff'/><rect x='22' y='42' width='56' height='16' rx='5' fill='%23fff'/></svg>">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .mon-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; }
+        .mon-card { text-align:left; padding:14px 16px; }
+        .mon-card p { margin:0; font-size:12px; font-weight:600; color:#667085; }
+        .mon-card h3 { margin:6px 0 0; font-size:26px; }
+        .mon-card .sub { font-size:12px; color:#98a2b3; margin-top:2px; }
+        .mon-tables { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; margin-top:16px; }
+        .mon-tables table { width:100%; border-collapse:collapse; }
+        .mon-tables th, .mon-tables td { padding:8px 10px; border-bottom:1px solid #eef0f3; font-size:13.5px; text-align:left; }
+        .mon-tables th { color:#667085; font-weight:600; }
+    </style>
+</head>
+<body>
+    <script src="auth.js"></script>
+    <script>if (!AuthManager.isAuthenticated()) window.location.href = 'login.html';</script>
+    <script src="toast.js"></script>
+    <script src="loading.js"></script>
+    <script src="navigation.js"></script>
+
+    <div class="dashboard">
+        <main class="main-content">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px">
+                <div>
+                    <div style="font-size:12px;color:#98a2b3;margin-bottom:2px">Администратор / Мониторинг</div>
+                    <h2 style="font-size:21px;font-weight:700;margin:0">Мониторинг</h2>
+                </div>
+                <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+                    <div id="updated" style="color:#667085;font-size:12.5px;font-style:italic"></div>
+                    <button onclick="loadMonitoring()" class="btn btn-secondary">🔄 Обновить</button>
+                </div>
+            </div>
+
+            <div class="mon-grid" id="cards">
+                <div style="color:#667085">Загрузка...</div>
+            </div>
+
+            <div class="mon-tables">
+                <div class="user-info">
+                    <h2>📦 Заказы по статусам</h2>
+                    <table>
+                        <thead><tr><th>Статус</th><th>Кол-во</th><th>Сумма</th></tr></thead>
+                        <tbody id="byStatus"><tr><td colspan="3">—</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="user-info">
+                    <h2>🕓 Последние заказы</h2>
+                    <table>
+                        <thead><tr><th>Дата</th><th>Клиент</th><th>Статус</th><th>Сумма</th></tr></thead>
+                        <tbody id="recent"><tr><td colspan="4">—</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function money(v){ return (Number(v)||0).toLocaleString('ru-RU',{minimumFractionDigits:2, maximumFractionDigits:2}); }
+        function num(v){ return (Number(v)||0).toLocaleString('ru-RU'); }
+        function esc(t){ const d=document.createElement('div'); d.textContent=(t==null?'':String(t)); return d.innerHTML; }
+        function card(lbl, val, sub){
+            return `<div class="stat-card mon-card"><p>${lbl}</p><h3>${val}</h3>${sub?`<div class="sub">${sub}</div>`:''}</div>`;
+        }
+
+        async function loadMonitoring(){
+            const cards = document.getElementById('cards');
+            cards.innerHTML = '<div style="color:#667085">Загрузка...</div>';
+            try {
+                const res = await AuthManager.authenticatedFetch('/api/monitoring');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const d = await res.json();
+                const p = d.prices || {}, o = d.orders || {};
+                cards.innerHTML =
+                    card('Поставщики', num(d.suppliers)) +
+                    card('Покупатели', num(d.buyers)) +
+                    card('Прайс-листы', num(d.price_lists)) +
+                    card('Позиций в прайсе', num(p.total), 'сопоставлено ' + num(p.matched)) +
+                    card('Не сопоставлено', num(p.unmatched)) +
+                    card('Заказов всего', num(o.total), 'сегодня ' + num(o.today)) +
+                    card('Сумма заказов', money(o.sum) + ' ₽');
+
+                const st = (o.by_status || []);
+                document.getElementById('byStatus').innerHTML = st.length
+                    ? st.map(s => `<tr><td>${esc(s.status)}</td><td>${num(s.count)}</td><td>${money(s.sum)} ₽</td></tr>`).join('')
+                    : '<tr><td colspan="3">Нет заказов</td></tr>';
+
+                const ro = (d.recent_orders || []);
+                document.getElementById('recent').innerHTML = ro.length
+                    ? ro.map(r => `<tr>
+                        <td>${r.created_at ? new Date(r.created_at).toLocaleString('ru') : '-'}</td>
+                        <td>${esc(r.buyer_name)}</td>
+                        <td>${esc(r.status || 'N/A')}</td>
+                        <td>${money(r.total)} ₽</td></tr>`).join('')
+                    : '<tr><td colspan="4">Нет заказов</td></tr>';
+
+                document.getElementById('updated').textContent =
+                    '✅ Обновлено: ' + (d.generated_at ? new Date(d.generated_at).toLocaleTimeString('ru') : new Date().toLocaleTimeString('ru'));
+            } catch (e) {
+                console.error('Ошибка мониторинга:', e);
+                cards.innerHTML = '<div style="color:#e74c3c">Ошибка загрузки данных мониторинга</div>';
+            }
+        }
+
+        setTimeout(loadMonitoring, 300);
+        window.loadMonitoring = loadMonitoring;
+    </script>
+</body>
+</html>
