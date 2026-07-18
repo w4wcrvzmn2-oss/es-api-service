@@ -874,15 +874,23 @@ func (s *Server) handleSCOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	from := r.URL.Query().Get("from")
-	to := r.URL.Query().Get("to")
-	search := r.URL.Query().Get("search")
-
+	// Страница шлёт date_from/date_to (поддержим и старые from/to). Пусто → последний месяц.
+	// Даты по умолчанию в UTC — CreatedAt хранится в UTC, иначе на сервере в другом часовом
+	// поясе свежие заказы «сегодня» выпадали из диапазона.
+	from := r.URL.Query().Get("date_from")
 	if from == "" {
-		from = time.Now().AddDate(0, -1, 0).Format("2006-01-02")
+		from = r.URL.Query().Get("from")
+	}
+	to := r.URL.Query().Get("date_to")
+	if to == "" {
+		to = r.URL.Query().Get("to")
+	}
+	search := r.URL.Query().Get("search")
+	if from == "" {
+		from = time.Now().UTC().AddDate(0, -1, 0).Format("2006-01-02")
 	}
 	if to == "" {
-		to = time.Now().Format("2006-01-02")
+		to = time.Now().UTC().Format("2006-01-02")
 	}
 
 	where := `oi.SupplierID=CAST(@sid AS UNIQUEIDENTIFIER)
@@ -891,29 +899,33 @@ func (s *Server) handleSCOrders(w http.ResponseWriter, r *http.Request) {
 		where += ` AND (b.Name LIKE '%'+@search+'%' OR CAST(o.OrderID AS NVARCHAR(50)) LIKE '%'+@search+'%')`
 	}
 
+	// Форма ответа и имена полей согласованы со страницей orders.html:
+	// {items:[{order_id, order_date, buyer_name, delivery_address, total_items, total_amount, status_name}], total}.
 	q := fmt.Sprintf(`SELECT CAST(o.OrderID AS NVARCHAR(50)) AS OrderID,
 			b.Name AS BuyerName,
-			o.CreatedAt AS CreatedAt,
-			os.Name AS Status,
-			SUM(oi.Qty * oi.UnitPrice) AS Total,
-			SUM(oi.Qty) AS TotalQty
+			ISNULL(bl.Address, '') AS DeliveryAddress,
+			o.CreatedAt AS OrderDate,
+			os.Name AS StatusName,
+			SUM(oi.Qty * oi.UnitPrice) AS TotalAmount,
+			COUNT(oi.OrderLineID) AS TotalItems
 		FROM [Order] o
 		JOIN BuyerUser bu ON o.BuyerUserID = bu.BuyerUserID
 		JOIN Buyer b ON bu.BuyerID = b.BuyerID
 		JOIN OrderItem oi ON oi.OrderID = o.OrderID
 		LEFT JOIN OrderStatus os ON o.OrderStatusID = os.OrderStatusID
+		LEFT JOIN BuyerLocation bl ON bl.BuyerLocationID = o.BuyerLocationID
 		WHERE %s
-		GROUP BY o.OrderID, b.Name, o.CreatedAt, os.Name
+		GROUP BY o.OrderID, b.Name, bl.Address, o.CreatedAt, os.Name
 		ORDER BY o.CreatedAt DESC`, where)
 
 	type OrderRow struct {
-		OrderID      string     `json:"order_id"`
-		BuyerName    string     `json:"buyer_name"`
-		CreatedAt    *time.Time `json:"-"`
-		CreatedAtStr *string    `json:"created_at" gorm:"-"`
-		Status       *string    `json:"status"`
-		Total        float64    `json:"total"`
-		TotalQty     float64    `json:"total_qty"`
+		OrderID         string    `json:"order_id"`
+		BuyerName       string    `json:"buyer_name"`
+		DeliveryAddress string    `json:"delivery_address"`
+		OrderDate       time.Time `json:"order_date"`
+		StatusName      *string   `json:"status_name"`
+		TotalAmount     float64   `json:"total_amount"`
+		TotalItems      int       `json:"total_items"`
 	}
 	var result []OrderRow
 	err := s.database.GORMWith(r.Context()).Raw(q,
@@ -923,16 +935,13 @@ func (s *Server) handleSCOrders(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
-	for i := range result {
-		if result[i].CreatedAt != nil {
-			t := result[i].CreatedAt.Format("02.01.2006, 15:04:05")
-			result[i].CreatedAtStr = &t
-		}
-	}
 	if result == nil {
 		result = []OrderRow{}
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"items": result,
+		"total": len(result),
+	})
 }
 
 // --- Change Password ---
