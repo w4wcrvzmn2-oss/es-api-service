@@ -33,6 +33,12 @@
                         <input type="text" class="form-control" id="searchInput" placeholder="Поиск по клиенту, адресу...">
                         <button class="btn btn-primary" onclick="loadOrders()"><i class="bi bi-search"></i></button>
                     </div>
+                    <button class="btn btn-success btn-sm" id="btnExport" onclick="exportOrders()" title="Сформировать DBF и отправить по настройкам выгрузки">
+                        <i class="bi bi-upload"></i> Выгрузить
+                    </button>
+                    <a class="btn btn-outline-secondary btn-sm" href="order-export.html" title="Настройки FTP / почты">
+                        <i class="bi bi-gear"></i>
+                    </a>
                     <span class="text-muted ms-auto" id="totalInfo"></span>
                 </div>
             </div>
@@ -117,6 +123,56 @@
     function formatMoney(value) {
         const n = Number(value);
         return Number.isFinite(n) ? n.toLocaleString('ru-RU', {minimumFractionDigits:2}) : '0,00';
+    }
+
+    function downloadBase64(fileName, b64) {
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const blob = new Blob([bytes], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName || 'orders.dbf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    async function exportOrders() {
+        const btn = document.getElementById('btnExport');
+        const dateFrom = document.getElementById('dateFrom').value;
+        const dateTo = document.getElementById('dateTo').value;
+        btn.disabled = true;
+        const oldHtml = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Выгрузка...';
+        try {
+            const q = '/api/sc/orders/export?date_from=' + encodeURIComponent(dateFrom) +
+                      '&date_to=' + encodeURIComponent(dateTo);
+            const data = await API.post(q, {});
+            if (!data || !data.file_base64) throw new Error('Пустой ответ сервера');
+            downloadBase64(data.file_name, data.file_base64);
+
+            const ftp = (data.ftp && data.ftp.status) || 'skip';
+            const email = (data.email && data.email.status) || 'skip';
+            let detail = 'Заказов: ' + (data.orders_count || 0) + ', строк: ' + (data.lines_count || 0);
+            if (ftp === 'ok') detail += '; FTP: ок';
+            if (ftp === 'error') detail += '; FTP: ошибка — ' + (data.ftp.error || '');
+            if (email === 'ok') detail += '; почта: ок';
+            if (email === 'error') detail += '; почта: ошибка — ' + (data.email.error || '');
+            if (ftp === 'skip' && email === 'skip') {
+                detail += '. Отправка не настроена — только скачивание (раздел «Выгрузка заказов»).';
+            }
+            if (window.Toast && Toast.success) Toast.success('Выгрузка готова', detail);
+            else alert(detail);
+        } catch (e) {
+            if (window.Toast && Toast.error) Toast.error('Ошибка выгрузки', e.message || String(e));
+            else alert('Ошибка выгрузки: ' + (e.message || e));
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = oldHtml;
+        }
     }
     </script>
 </body>

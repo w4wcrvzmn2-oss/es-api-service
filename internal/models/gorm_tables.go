@@ -185,6 +185,18 @@ type SupplierExportConfig struct {
 	UpdatedAt              time.Time `json:"updated_at" gorm:"autoCreateTime:false"`
 }
 
+// OrderExportLog — журнал выгрузок заказов поставщика.
+type OrderExportLog struct {
+	OrderExportLogID string    `json:"id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
+	SupplierID       string    `json:"supplier_id" gorm:"type:uniqueidentifier"`
+	Method           *string   `json:"method,omitempty"`
+	FileName         *string   `json:"file_name,omitempty"`
+	OrdersCount      int       `json:"orders_count"`
+	Status           string    `json:"status"` // ok|error
+	Message          *string   `json:"message,omitempty"`
+	CreatedAt        time.Time `json:"created_at" gorm:"autoCreateTime:false"`
+}
+
 // BuyerPriceList — назначение management-прайса (PriceList) покупателю.
 // Если у покупателя есть активные назначения — каталог показывает товары
 // только из этих прайсов; нет назначений — работает по региону (страховка).

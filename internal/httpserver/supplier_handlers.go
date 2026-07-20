@@ -1022,6 +1022,8 @@ func (s *Server) setupSupplierRoutes(mux *http.ServeMux) {
 	scRoute("/api/sc/regions", s.handleSCRegions)
 	scRoute("/api/sc/clients", s.handleSCClients)
 	scRoute("/api/sc/orders", s.handleSCOrders)
+	scRoute("/api/sc/orders/export", s.handleSCOrdersExport)
 	scRoute("/api/sc/export-config", s.handleSCExportConfig)
+	scRoute("/api/sc/order-delivery", s.handleSCOrderDelivery)
 	scRoute("/api/sc/change-password", s.handleSCChangePassword)
 }
