@@ -257,11 +257,15 @@ func (Order) TableName() string { return "Order" }
 type OrderItem struct {
 	OrderLineID    string    `json:"order_line_id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
 	OrderID        string    `json:"order_id" gorm:"type:uniqueidentifier"`
-	SupplierID     string    `json:"supplier_id" gorm:"type:uniqueidentifier"`
-	SupplierItemID *string   `json:"supplier_item_id,omitempty" gorm:"type:uniqueidentifier"`
-	ProductID      *string   `json:"product_id,omitempty" gorm:"type:uniqueidentifier"`
-	RegionID       *string   `json:"region_id,omitempty" gorm:"type:uniqueidentifier"`
-	Qty            float64   `json:"qty"`
+	SupplierID      string    `json:"supplier_id" gorm:"type:uniqueidentifier"`
+	SupplierItemID  *string   `json:"supplier_item_id,omitempty" gorm:"type:uniqueidentifier"`
+	SupplierPriceID *string   `json:"supplier_price_id,omitempty" gorm:"type:uniqueidentifier"`
+	ProductID       *string   `json:"product_id,omitempty" gorm:"type:uniqueidentifier"`
+	RegionID        *string   `json:"region_id,omitempty" gorm:"type:uniqueidentifier"`
+	ItemName        *string   `json:"item_name,omitempty"`
+	ItemCode        *string   `json:"item_code,omitempty"`
+	Barcode         *string   `json:"barcode,omitempty"`
+	Qty             float64   `json:"qty"`
 	UnitPrice      float64   `json:"unit_price"`
 	PriceListID    *string   `json:"price_list_id,omitempty" gorm:"type:uniqueidentifier"`
 	CreatedAt      time.Time `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`

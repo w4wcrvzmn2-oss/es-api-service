@@ -13,16 +13,22 @@ import (
 
 // OrderLine — одна строка выгрузки (позиция заказа).
 type OrderLine struct {
-	OrderID   string
-	OrderDate time.Time
-	Buyer     string
-	Address   string
-	Code      string
-	Name      string
-	Barcode   string
-	Qty       float64
-	Price     float64
-	Sum       float64
+	OrderID      string
+	OrderDate    time.Time
+	Buyer        string
+	Address      string
+	Code         string
+	Name         string
+	SuppName     string
+	Barcode      string
+	Manufacturer string
+	Country      string
+	Series       string
+	Batch        string
+	Expiry       *time.Time
+	Qty          float64
+	Price        float64
+	Sum          float64
 }
 
 type fieldDesc struct {
@@ -41,7 +47,13 @@ func BuildOrdersDBF(lines []OrderLine) ([]byte, error) {
 		{"ADDRESS", 'C', 120, 0},
 		{"CODE", 'C', 40, 0},
 		{"NAME", 'C', 120, 0},
+		{"SUP_NAME", 'C', 120, 0},
 		{"BARCODE", 'C', 20, 0},
+		{"MANUFACT", 'C', 80, 0},
+		{"COUNTRY", 'C', 40, 0},
+		{"SERIES", 'C', 30, 0},
+		{"BATCH", 'C', 30, 0},
+		{"EXPIRY", 'D', 8, 0},
 		{"QTY", 'N', 12, 3},
 		{"PRICE", 'N', 12, 2},
 		{"SUMMA", 'N', 14, 2},
@@ -124,7 +136,17 @@ func BuildOrdersDBF(lines []OrderLine) ([]byte, error) {
 		writeC(line.Address, 120)
 		writeC(line.Code, 40)
 		writeC(line.Name, 120)
+		writeC(line.SuppName, 120)
 		writeC(line.Barcode, 20)
+		writeC(line.Manufacturer, 80)
+		writeC(line.Country, 40)
+		writeC(line.Series, 30)
+		writeC(line.Batch, 30)
+		if line.Expiry != nil {
+			writeD(*line.Expiry)
+		} else {
+			writeD(time.Time{})
+		}
 		writeN(line.Qty, 12, 3)
 		writeN(line.Price, 12, 2)
 		writeN(line.Sum, 14, 2)

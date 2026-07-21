@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"es_api_service/internal/db"
@@ -28,6 +29,9 @@ type BuyerOrderCreateRequest struct {
 type BuyerOrderItemReq struct {
 	SupplierPriceID string  `json:"supplier_price_id"`
 	Qty             float64 `json:"qty"`
+	ItemName        *string `json:"item_name,omitempty"`
+	ItemCode        *string `json:"item_code,omitempty"`
+	Barcode         *string `json:"barcode,omitempty"`
 }
 
 type BuyerOrderResponse struct {
@@ -191,6 +195,10 @@ type resolvedPriceRow struct {
 	RegionID    *string
 	PriceListID *string
 	UnitPrice   float64
+	ItemName    sql.NullString
+	ItemCode    sql.NullString
+	Barcode     sql.NullString
+	SuppName    sql.NullString
 }
 
 // handleBuyerCreateOrder — POST /api/buyer/orders
@@ -224,8 +232,10 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 	// Резолвим позиции до транзакции — чтобы битый supplier_price_id возвращал 404/400
 	// без открытия транзакции.
 	var resolvedItems []struct {
-		row resolvedPriceRow
-		qty float64
+		row  resolvedPriceRow
+		qty  float64
+		spID string
+		req  BuyerOrderItemReq
 	}
 	var totalAmount float64
 
@@ -246,7 +256,11 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 				CASE WHEN p.ProductID IS NULL THEN NULL ELSE CAST(p.ProductID AS NVARCHAR(50)) END AS ProductID,
 				CASE WHEN r.RegionID IS NULL THEN NULL ELSE CAST(r.RegionID AS NVARCHAR(50)) END AS RegionID,
 				CASE WHEN spl.PriceListID IS NULL THEN NULL ELSE CAST(spl.PriceListID AS NVARCHAR(50)) END AS PriceListID,
-				ISNULL(sp.FinalPrice, sp.Price) * (1 + ISNULL(plr.MarkupPct, 0) / 100.0) AS UnitPrice`).
+				ISNULL(sp.FinalPrice, sp.Price) * (1 + ISNULL(plr.MarkupPct, 0) / 100.0) AS UnitPrice,
+				sp.ItemName AS ItemName,
+				sp.ItemCode AS ItemCode,
+				sp.Barcode AS Barcode,
+				sp.SupplierItemName AS SuppName`).
 			Joins("LEFT JOIN Product p ON p.ProductID = sp.GUID_ES").
 			Joins("LEFT JOIN Region r ON r.RegionID = sp.RegionID").
 			Joins("LEFT JOIN SupplierPriceList spl ON spl.PriceListID = sp.PriceListID").
@@ -264,9 +278,11 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 		}
 		totalAmount += ri.Qty * row.UnitPrice
 		resolvedItems = append(resolvedItems, struct {
-			row resolvedPriceRow
-			qty float64
-		}{row: row, qty: ri.Qty})
+			row  resolvedPriceRow
+			qty  float64
+			spID string
+			req  BuyerOrderItemReq
+		}{row: row, qty: ri.Qty, spID: ri.SupplierPriceID, req: ri})
 	}
 
 	orderID := uuid.New().String()
@@ -329,17 +345,23 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 		}
 
 		for _, it := range resolvedItems {
+			spID := it.spID
+			itemName, itemCode, barcode := pickOrderItemSnapshot(it.req, it.row)
 			line := models.OrderItem{
-				OrderLineID:    uuid.New().String(),
-				OrderID:        orderID,
-				SupplierID:     it.row.SupplierID,
-				SupplierItemID: nil,
-				ProductID:      it.row.ProductID,
-				RegionID:       it.row.RegionID,
-				Qty:            it.qty,
-				UnitPrice:      it.row.UnitPrice,
-				PriceListID:    it.row.PriceListID,
-				CreatedAt:      now,
+				OrderLineID:     uuid.New().String(),
+				OrderID:         orderID,
+				SupplierID:      it.row.SupplierID,
+				SupplierItemID:  nil,
+				SupplierPriceID: &spID,
+				ProductID:       it.row.ProductID,
+				RegionID:        it.row.RegionID,
+				ItemName:        itemName,
+				ItemCode:        itemCode,
+				Barcode:         barcode,
+				Qty:             it.qty,
+				UnitPrice:       it.row.UnitPrice,
+				PriceListID:     it.row.PriceListID,
+				CreatedAt:       now,
 			}
 			if err := tx.Create(&line).Error; err != nil {
 				return fmt.Errorf("OrderItem insert: %w", err)
@@ -708,4 +730,46 @@ func (s *Server) handleBuyerCatalog(w http.ResponseWriter, r *http.Request) {
 		"items": items,
 		"total": total,
 	})
+}
+
+func pickOrderItemSnapshot(req BuyerOrderItemReq, row resolvedPriceRow) (name, code, barcode *string) {
+	if req.ItemName != nil {
+		if v := strings.TrimSpace(*req.ItemName); v != "" {
+			name = &v
+		}
+	}
+	if name == nil {
+		if row.ItemName.Valid {
+			if v := strings.TrimSpace(row.ItemName.String); v != "" {
+				name = &v
+			}
+		} else if row.SuppName.Valid {
+			if v := strings.TrimSpace(row.SuppName.String); v != "" {
+				name = &v
+			}
+		}
+	}
+
+	if req.ItemCode != nil {
+		if v := strings.TrimSpace(*req.ItemCode); v != "" {
+			code = &v
+		}
+	}
+	if code == nil && row.ItemCode.Valid {
+		if v := strings.TrimSpace(row.ItemCode.String); v != "" {
+			code = &v
+		}
+	}
+
+	if req.Barcode != nil {
+		if v := strings.TrimSpace(*req.Barcode); v != "" {
+			barcode = &v
+		}
+	}
+	if barcode == nil && row.Barcode.Valid {
+		if v := strings.TrimSpace(row.Barcode.String); v != "" {
+			barcode = &v
+		}
+	}
+	return name, code, barcode
 }

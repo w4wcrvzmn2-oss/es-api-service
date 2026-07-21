@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/smtp"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -219,7 +220,8 @@ func derefStr(p *string) string {
 }
 
 // handleSCOrdersExport — POST /api/sc/orders/export
-// Формирует DBF по заказам за период, опционально шлёт на FTP/почту, всегда отдаёт файл на скачивание (base64 в JSON).
+// Формирует отдельный DBF на каждый заказ за период; при нескольких — ZIP.
+// Опционально шлёт на FTP (каждый DBF отдельно) / почту (ZIP или один DBF), всегда отдаёт файл на скачивание.
 func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "POST only"})
@@ -244,15 +246,21 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	type row struct {
-		OrderID   string
-		OrderDate time.Time
-		Buyer     string
-		Address   string
-		Code      sql.NullString
-		Name      sql.NullString
-		Barcode   sql.NullString
-		Qty       float64
-		Price     float64
+		OrderID      string
+		OrderDate    time.Time
+		Buyer        string
+		Address      string
+		Code         sql.NullString
+		Name         sql.NullString
+		SuppName     sql.NullString
+		Barcode      sql.NullString
+		Manufacturer sql.NullString
+		Country      sql.NullString
+		Series       sql.NullString
+		Batch        sql.NullString
+		Expiry       sql.NullTime
+		Qty          float64
+		Price        float64
 	}
 	var rows []row
 	err := s.database.GORMWith(ctx).Raw(`
@@ -261,9 +269,23 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 			o.CreatedAt AS OrderDate,
 			b.Name AS Buyer,
 			ISNULL(bl.Address, '') AS Address,
-			sp.ItemCode AS Code,
-			COALESCE(sp.ItemName, sp.SupplierItemName, p.Name, N'') AS Name,
-			sp.Barcode AS Barcode,
+			COALESCE(NULLIF(LTRIM(RTRIM(oi.ItemCode)), ''), sp.ItemCode, spfb.ItemCode) AS Code,
+			COALESCE(
+				NULLIF(LTRIM(RTRIM(oi.ItemName)), ''),
+				NULLIF(LTRIM(RTRIM(sp.ItemName)), ''),
+				NULLIF(LTRIM(RTRIM(sp.SupplierItemName)), ''),
+				NULLIF(LTRIM(RTRIM(spfb.ItemName)), ''),
+				NULLIF(LTRIM(RTRIM(spfb.SupplierItemName)), ''),
+				p.Name,
+				N''
+			) AS Name,
+			COALESCE(sp.SupplierItemName, spfb.SupplierItemName) AS SuppName,
+			COALESCE(NULLIF(LTRIM(RTRIM(oi.Barcode)), ''), sp.Barcode, spfb.Barcode) AS Barcode,
+			COALESCE(sp.Manufacturer, spfb.Manufacturer) AS Manufacturer,
+			COALESCE(sp.Country, spfb.Country) AS Country,
+			COALESCE(sp.Series, spfb.Series) AS Series,
+			COALESCE(sp.BatchNumber, spfb.BatchNumber) AS Batch,
+			COALESCE(sp.ExpiryDate, spfb.ExpiryDate) AS Expiry,
 			oi.Qty AS Qty,
 			oi.UnitPrice AS Price
 		FROM OrderItem oi
@@ -272,14 +294,23 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 		INNER JOIN Buyer b ON b.BuyerID = bu.BuyerID
 		LEFT JOIN BuyerLocation bl ON bl.BuyerLocationID = o.BuyerLocationID
 		LEFT JOIN Product p ON p.ProductID = oi.ProductID
+		LEFT JOIN SupplierPrice sp ON sp.SupplierPriceID = oi.SupplierPriceID
 		OUTER APPLY (
-			SELECT TOP 1 spx.ItemCode, spx.ItemName, spx.SupplierItemName, spx.Barcode
+			SELECT TOP 1
+				spx.ItemCode, spx.ItemName, spx.SupplierItemName, spx.Barcode,
+				spx.Manufacturer, spx.Country, spx.Series, spx.BatchNumber, spx.ExpiryDate
 			FROM SupplierPrice spx
-			WHERE spx.SupplierID = oi.SupplierID
-			  AND oi.ProductID IS NOT NULL
-			  AND spx.GUID_ES = oi.ProductID
-			ORDER BY spx.UpdatedAt DESC
-		) sp
+			WHERE sp.SupplierPriceID IS NULL
+			  AND spx.SupplierID = oi.SupplierID
+			  AND (
+			    (oi.ProductID IS NOT NULL AND spx.GUID_ES = oi.ProductID)
+			    OR ABS(ISNULL(spx.FinalPrice, spx.Price) - oi.UnitPrice) < 0.05
+			  )
+			ORDER BY
+			  CASE WHEN oi.ProductID IS NOT NULL AND spx.GUID_ES = oi.ProductID THEN 0 ELSE 1 END,
+			  ABS(ISNULL(spx.FinalPrice, spx.Price) - oi.UnitPrice),
+			  spx.UpdatedAt DESC
+		) spfb
 		WHERE oi.SupplierID = CAST(@sid AS UNIQUEIDENTIFIER)
 		  AND o.CreatedAt >= @from
 		  AND o.CreatedAt < DATEADD(day, 1, CAST(@to AS DATE))
@@ -297,31 +328,65 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lines := make([]orderexport.OrderLine, 0, len(rows))
-	orderIDs := map[string]struct{}{}
+	byOrder := map[string][]orderexport.OrderLine{}
+	orderDates := map[string]time.Time{}
 	for _, rw := range rows {
-		orderIDs[rw.OrderID] = struct{}{}
-		lines = append(lines, orderexport.OrderLine{
-			OrderID:   rw.OrderID,
-			OrderDate: rw.OrderDate,
-			Buyer:     rw.Buyer,
-			Address:   rw.Address,
-			Code:      nullStr(rw.Code),
-			Name:      nullStr(rw.Name),
-			Barcode:   nullStr(rw.Barcode),
-			Qty:       rw.Qty,
-			Price:     rw.Price,
-			Sum:       rw.Qty * rw.Price,
-		})
+		var expiry *time.Time
+		if rw.Expiry.Valid {
+			t := rw.Expiry.Time
+			expiry = &t
+		}
+		line := orderexport.OrderLine{
+			OrderID:      rw.OrderID,
+			OrderDate:    rw.OrderDate,
+			Buyer:        rw.Buyer,
+			Address:      rw.Address,
+			Code:         nullStr(rw.Code),
+			Name:         nullStr(rw.Name),
+			SuppName:     nullStr(rw.SuppName),
+			Barcode:      nullStr(rw.Barcode),
+			Manufacturer: nullStr(rw.Manufacturer),
+			Country:      nullStr(rw.Country),
+			Series:       nullStr(rw.Series),
+			Batch:        nullStr(rw.Batch),
+			Expiry:       expiry,
+			Qty:          rw.Qty,
+			Price:        rw.Price,
+			Sum:          rw.Qty * rw.Price,
+		}
+		byOrder[rw.OrderID] = append(byOrder[rw.OrderID], line)
+		orderDates[rw.OrderID] = rw.OrderDate
 	}
 
-	dbfBytes, err := orderexport.BuildOrdersDBF(lines)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Ошибка формирования DBF"})
-		return
+	orderFiles := make(map[string][]byte, len(byOrder))
+	totalLines := 0
+	for orderID, lines := range byOrder {
+		dbfBytes, err := orderexport.BuildOrdersDBF(lines)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Ошибка формирования DBF для заказа " + orderID})
+			return
+		}
+		orderFiles[orderexport.OrderDBFFileName(orderID, orderDates[orderID])] = dbfBytes
+		totalLines += len(lines)
 	}
 
-	fileName := fmt.Sprintf("orders_%s_%s.dbf", time.Now().UTC().Format("20060102_150405"), sid[:8])
+	var payload []byte
+	var fileName string
+	if len(orderFiles) == 1 {
+		for name, data := range orderFiles {
+			fileName = name
+			payload = data
+			break
+		}
+	} else {
+		zipBytes, err := orderexport.BuildZip(orderFiles)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Ошибка формирования ZIP"})
+			return
+		}
+		fileName = fmt.Sprintf("orders_%s_%s.zip", time.Now().UTC().Format("20060102_150405"), sid[:8])
+		payload = zipBytes
+	}
 
 	var cfg models.SupplierExportConfig
 	cfgErr := s.database.GORMWith(ctx).Where("SupplierID = ?", db.UUIDParam(sid)).Take(&cfg).Error
@@ -342,18 +407,31 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 	wantEmail := cfg.Method == "email" || cfg.Method == "both"
 
 	if wantFTP {
-		if err := uploadOrdersFTP(cfg, fileName, dbfBytes); err != nil {
-			ftpStatus = "error"
-			ftpErr = err.Error()
-			if s.logger != nil {
-				s.logger.Error("FTP выгрузка заказов %s: %v", sid, err)
+		ftpOK := 0
+		ftpFail := 0
+		for name, data := range orderFiles {
+			if err := uploadOrdersFTP(cfg, name, data); err != nil {
+				ftpFail++
+				if ftpErr == "" {
+					ftpErr = name + ": " + err.Error()
+				}
+				if s.logger != nil {
+					s.logger.Error("FTP выгрузка %s для поставщика %s: %v", name, sid, err)
+				}
+			} else {
+				ftpOK++
 			}
-		} else {
+		}
+		if ftpFail == 0 {
 			ftpStatus = "ok"
+		} else if ftpOK > 0 {
+			ftpStatus = "partial"
+		} else {
+			ftpStatus = "error"
 		}
 	}
 	if wantEmail {
-		if err := sendOrdersEmail(cfg, fileName, dbfBytes, len(orderIDs)); err != nil {
+		if err := sendOrdersEmail(cfg, fileName, payload, len(byOrder)); err != nil {
 			emailStatus = "error"
 			emailErr = err.Error()
 			if s.logger != nil {
@@ -366,7 +444,7 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 
 	status := "ok"
 	msgParts := []string{
-		fmt.Sprintf("orders=%d lines=%d", len(orderIDs), len(lines)),
+		fmt.Sprintf("orders=%d files=%d lines=%d", len(byOrder), len(orderFiles), totalLines),
 		"ftp=" + ftpStatus,
 		"email=" + emailStatus,
 	}
@@ -393,22 +471,29 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 		SupplierID:       sid,
 		Method:           &cfg.Method,
 		FileName:         &fileName,
-		OrdersCount:      len(orderIDs),
+		OrdersCount:      len(byOrder),
 		Status:           status,
 		Message:          &msg,
 		CreatedAt:        time.Now().UTC(),
 	}
 	_ = s.database.GORMWith(ctx).Create(&logRow)
 
+	fileList := make([]string, 0, len(orderFiles))
+	for name := range orderFiles {
+		fileList = append(fileList, name)
+	}
+	sort.Strings(fileList)
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":           true,
 		"file_name":    fileName,
-		"orders_count": len(orderIDs),
-		"lines_count":  len(lines),
+		"files":        fileList,
+		"orders_count": len(byOrder),
+		"lines_count":  totalLines,
 		"method":       cfg.Method,
 		"ftp":          map[string]string{"status": ftpStatus, "error": ftpErr},
 		"email":        map[string]string{"status": emailStatus, "error": emailErr},
-		"file_base64":  base64.StdEncoding.EncodeToString(dbfBytes),
+		"file_base64":  base64.StdEncoding.EncodeToString(payload),
 		"log_id":       logRow.OrderExportLogID,
 	})
 }
@@ -502,7 +587,7 @@ func sendOrdersEmail(cfg models.SupplierExportConfig, fileName string, data []by
 
 	fmt.Fprintf(&msg, "--%s\r\n", boundary)
 	fmt.Fprintf(&msg, "Content-Type: text/plain; charset=utf-8\r\n\r\n")
-	fmt.Fprintf(&msg, "Во вложении DBF с заказами (%d шт.).\r\n\r\n", ordersCount)
+	fmt.Fprintf(&msg, "Во вложении %s с заказами (%d шт., по одному DBF на заказ).\r\n\r\n", attachmentLabel(fileName), ordersCount)
 
 	fmt.Fprintf(&msg, "--%s\r\n", boundary)
 	fmt.Fprintf(&msg, "Content-Type: application/octet-stream; name=\"%s\"\r\n", fileName)
@@ -532,6 +617,13 @@ func sendOrdersEmail(cfg models.SupplierExportConfig, fileName string, data []by
 
 	recipients := splitEmails(*cfg.EmailTo)
 	return smtp.SendMail(addr, auth, from, recipients, msg.Bytes())
+}
+
+func attachmentLabel(fileName string) string {
+	if strings.HasSuffix(strings.ToLower(fileName), ".zip") {
+		return "ZIP-архив"
+	}
+	return "DBF-файл"
 }
 
 func splitEmails(s string) []string {
