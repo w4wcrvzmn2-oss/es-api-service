@@ -16,6 +16,7 @@
         .mon-tables table { width:100%; border-collapse:collapse; }
         .mon-tables th, .mon-tables td { padding:8px 10px; border-bottom:1px solid #eef0f3; font-size:13.5px; text-align:left; }
         .mon-tables th { color:#667085; font-weight:600; }
+        .mon-top-wrap { margin-top:16px; max-height:520px; overflow:auto; }
     </style>
 </head>
 <body>
@@ -58,6 +59,14 @@
                     </table>
                 </div>
             </div>
+
+            <div class="user-info mon-top-wrap">
+                <h2>🏆 Топ-500 наименований по заказам</h2>
+                <table>
+                    <thead><tr><th>#</th><th>Наименование</th><th>Заказов</th><th>Кол-во</th><th>Сумма</th></tr></thead>
+                    <tbody id="topItems"><tr><td colspan="5">—</td></tr></tbody>
+                </table>
+            </div>
         </main>
     </div>
 
@@ -99,6 +108,16 @@
                         <td>${esc(r.status || 'N/A')}</td>
                         <td>${money(r.total)} ₽</td></tr>`).join('')
                     : '<tr><td colspan="4">Нет заказов</td></tr>';
+
+                const ti = (d.top_items || []);
+                document.getElementById('topItems').innerHTML = ti.length
+                    ? ti.map((r, i) => `<tr>
+                        <td>${i + 1}</td>
+                        <td>${esc(r.item_name)}</td>
+                        <td>${num(r.orders_count)}</td>
+                        <td>${num(r.total_qty)}</td>
+                        <td>${money(r.total_sum)} ₽</td></tr>`).join('')
+                    : '<tr><td colspan="5">Нет данных по позициям</td></tr>';
 
                 document.getElementById('updated').textContent =
                     '✅ Обновлено: ' + (d.generated_at ? new Date(d.generated_at).toLocaleTimeString('ru') : new Date().toLocaleTimeString('ru'));

@@ -73,7 +73,6 @@ func (s *Server) handleMonitoring(w http.ResponseWriter, r *http.Request) {
 		ORDER BY COUNT(*) DESC
 	`).Scan(&byStatus)
 
-	// Последние заказы.
 	type recentRow struct {
 		OrderID   string    `json:"order_id"`
 		CreatedAt time.Time `json:"created_at"`
@@ -96,6 +95,26 @@ func (s *Server) handleMonitoring(w http.ResponseWriter, r *http.Request) {
 		ORDER BY o.CreatedAt DESC
 	`).Scan(&recent)
 
+	// Топ-500 наименований по заказанному количеству.
+	type topItemRow struct {
+		ItemName    string  `json:"item_name"`
+		OrdersCount int64   `json:"orders_count"`
+		TotalQty    float64 `json:"total_qty"`
+		TotalSum    float64 `json:"total_sum"`
+	}
+	topItems := []topItemRow{}
+	_ = g.Raw(`
+		SELECT TOP 500
+			COALESCE(NULLIF(LTRIM(RTRIM(p.Name)), ''), N'—') AS ItemName,
+			COUNT(DISTINCT oi.OrderID) AS OrdersCount,
+			ISNULL(SUM(oi.Qty), 0) AS TotalQty,
+			ISNULL(SUM(oi.Qty * oi.UnitPrice), 0) AS TotalSum
+		FROM OrderItem oi
+		LEFT JOIN Product p ON p.ProductID = oi.ProductID
+		GROUP BY COALESCE(NULLIF(LTRIM(RTRIM(p.Name)), ''), N'—')
+		ORDER BY SUM(oi.Qty) DESC, SUM(oi.Qty * oi.UnitPrice) DESC
+	`).Scan(&topItems)
+
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"suppliers":   suppliers,
 		"buyers":      buyers,
@@ -112,6 +131,7 @@ func (s *Server) handleMonitoring(w http.ResponseWriter, r *http.Request) {
 			"by_status": byStatus,
 		},
 		"recent_orders": recent,
+		"top_items":     topItems,
 		"generated_at":  time.Now().UTC(),
 	})
 }

@@ -33,7 +33,7 @@
                         <input type="text" class="form-control" id="searchInput" placeholder="Поиск по клиенту, адресу...">
                         <button class="btn btn-primary" onclick="loadOrders()"><i class="bi bi-search"></i></button>
                     </div>
-                    <button class="btn btn-success btn-sm" id="btnExport" onclick="exportOrders()" title="Сформировать DBF и отправить по настройкам выгрузки">
+                    <button class="btn btn-success btn-sm" id="btnExport" onclick="exportOrders()" title="По одному DBF на каждый заказ (несколько — ZIP)">
                         <i class="bi bi-upload"></i> Выгрузить
                     </button>
                     <a class="btn btn-outline-secondary btn-sm" href="order-export.html" title="Настройки FTP / почты">
@@ -156,7 +156,11 @@
 
             const ftp = (data.ftp && data.ftp.status) || 'skip';
             const email = (data.email && data.email.status) || 'skip';
-            let detail = 'Заказов: ' + (data.orders_count || 0) + ', строк: ' + (data.lines_count || 0);
+            const filesN = (data.files && data.files.length) || 0;
+            let detail = 'Заказов: ' + (data.orders_count || 0) +
+                ', DBF-файлов: ' + filesN +
+                ', строк: ' + (data.lines_count || 0);
+            if (filesN > 1) detail += ' (скачан ZIP)';
             if (ftp === 'ok') detail += '; FTP: ок';
             if (ftp === 'error') detail += '; FTP: ошибка — ' + (data.ftp.error || '');
             if (email === 'ok') detail += '; почта: ок';
