@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"es_api_service/internal/db"
 	"es_api_service/internal/dbfimport"
 	"es_api_service/internal/logger"
@@ -19,6 +20,9 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+// errFTPNoNewFiles — на FTP пусто, это не сбой расписания.
+var errFTPNoNewFiles = errors.New("на FTP нет файлов для импорта")
+
 // PriceListScheduler управляет автоматическим обновлением прайс-листов по расписанию
 type PriceListScheduler struct {
 	database *db.Database
@@ -31,7 +35,7 @@ type PriceListScheduler struct {
 // NewPriceListScheduler создает новый планировщик прайс-листов
 func NewPriceListScheduler(database *db.Database, logger *logger.Logger, importer *dbfimport.DBFImporter, matcher *matching.PriceMatcher) *PriceListScheduler {
 	// Используем парсер без секунд для внутреннего планировщика (формат: мин час день месяц день_недели)
-	cronParser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	cronParser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	return &PriceListScheduler{
 		database: database,
 		logger:   logger,
@@ -83,8 +87,8 @@ func (pls *PriceListScheduler) checkAndUpdatePriceLists() {
 
 	query := `
 		SELECT 
-			CAST(pl.PriceListID AS NVARCHAR(50)) AS PriceListID,
-			CAST(pl.ImportPointID AS NVARCHAR(50)) AS ImportPointID,
+			CAST(pl.PriceListID AS TEXT) AS PriceListID,
+			CAST(pl.ImportPointID AS TEXT) AS ImportPointID,
 			pl.ScheduleCron,
 			pl.NextUpdateAt,
 			pl.LastUpdateAt,
@@ -153,10 +157,10 @@ func (pls *PriceListScheduler) checkAndUpdatePriceLists() {
 				UPDATE InvoiceImport 
 				SET ImportStatus = 'FAILED',
 				    ErrorMessage = 'Импорт завис (превышено время ожидания 30 минут)',
-				    CompletedAt = GETUTCDATE()
-				WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)
+				    CompletedAt = (NOW() AT TIME ZONE 'utc')
+				WHERE ImportPointID = CAST(@importPointID AS UUID)
 				  AND ImportStatus = 'PROCESSING'
-				  AND StartedAt <= DATEADD(minute, -30, GETUTCDATE())
+				  AND StartedAt <= DATEADD(minute, -30, (NOW() AT TIME ZONE 'utc'))
 			`
 			res := pls.database.GORMWith(ctx).Exec(cleanupQuery, sql.Named("importPointID", importPointID))
 			if res.Error != nil {
@@ -171,9 +175,9 @@ func (pls *PriceListScheduler) checkAndUpdatePriceLists() {
 			checkActiveQuery := `
 				SELECT COUNT(*) 
 				FROM InvoiceImport 
-				WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)
+				WHERE ImportPointID = CAST(@importPointID AS UUID)
 				  AND ImportStatus = 'PROCESSING'
-				  AND StartedAt > DATEADD(minute, -30, GETUTCDATE())
+				  AND StartedAt > DATEADD(minute, -30, (NOW() AT TIME ZONE 'utc'))
 			`
 			var activeCount int
 			err = pls.database.GORMWith(ctx).Raw(checkActiveQuery, sql.Named("importPointID", importPointID)).Row().Scan(&activeCount)
@@ -232,13 +236,18 @@ func (pls *PriceListScheduler) checkAndUpdatePriceLists() {
 			}
 
 			if importErr != nil {
-				if pls.logger != nil {
-					pls.logger.Error("Ошибка обновления прайс-листа %s: %v", priceListID, importErr)
-				}
 				nextUpdate := pls.calculateNextUpdate(scheduleCron, now)
 				if nextUpdate != nil {
 					pls.updateNextUpdateAt(ctx, priceListID, nextUpdate.UTC())
+				}
+				if errors.Is(importErr, errFTPNoNewFiles) {
 					if pls.logger != nil {
+						pls.logger.Info("Прайс-лист %s: новых файлов на FTP нет, следующее окно: %s",
+							priceListID, nextUpdateOr(nextUpdate, "—"))
+					}
+				} else if pls.logger != nil {
+					pls.logger.Error("Ошибка обновления прайс-листа %s: %v", priceListID, importErr)
+					if nextUpdate != nil {
 						pls.logger.Info("Следующая попытка обновления прайс-листа %s: %s (MSK)", priceListID, nextUpdate.Format("2006-01-02 15:04:05"))
 					}
 				}
@@ -258,6 +267,13 @@ func (pls *PriceListScheduler) checkAndUpdatePriceLists() {
 	if updatedCount > 0 && pls.logger != nil {
 		pls.logger.Info("Автоматически обновлено прайс-листов: %d", updatedCount)
 	}
+}
+
+func nextUpdateOr(t *time.Time, fallback string) string {
+	if t == nil {
+		return fallback
+	}
+	return t.Format("2006-01-02 15:04:05")
 }
 
 // updatePriceListFromFTP скачивает файл с FTP и запускает импорт для прайс-листа
@@ -327,33 +343,28 @@ func (pls *PriceListScheduler) updatePriceListFromFTP(ctx context.Context, price
 
 		os.Remove(localPath)
 
-		if importErr == nil {
-			if delErr := conn.Delete(remoteFile); delErr != nil {
-				if pls.logger != nil {
-					pls.logger.Warn("[PLS/%s] Не удалось удалить FTP-файл %s: %v", pointName, remoteFile, delErr)
-				}
-			} else if pls.logger != nil {
-				pls.logger.Info("[PLS/%s] FTP-файл удалён: %s", pointName, remoteFile)
-			}
+		// Не удаляем файл на FTP: поставщики часто кладут один и тот же priceK.dbf,
+		// который перезаписывается. Удаление ломало повторный забор каждые N минут.
+		if importErr == nil && pls.logger != nil {
+			pls.logger.Info("[PLS/%s] Импорт FTP-файла завершён: %s (удалён только локальный временный файл)", pointName, remoteFile)
 		}
 
 		return importErr
 	}
 
 	if pls.logger != nil {
-		pls.logger.Warn("[PLS/%s] На FTP %s нет файлов для импорта в %s", pointName, addr, remotePath)
+		pls.logger.Info("[PLS/%s] На FTP %s нет файлов для импорта в %s — пропуск до следующего окна", pointName, addr, remotePath)
 	}
-	return fmt.Errorf("на FTP нет файлов для импорта")
+	return errFTPNoNewFiles
 }
 
 // calculateNextUpdate вычисляет следующее время обновления на основе CRON выражения
 func (pls *PriceListScheduler) calculateNextUpdate(cronExpr string, from time.Time) *time.Time {
-	// Пробуем сначала с секундами (расширенный формат)
-	parserWithSeconds := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	// Пробуем сначала с секундами (расширенный формат) + @every
+	parserWithSeconds := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	schedule, err := parserWithSeconds.Parse(cronExpr)
 	if err != nil {
-		// Если не получилось, пробуем без секунд (стандартный формат)
-		parserStandard := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		parserStandard := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 		schedule, err = parserStandard.Parse(cronExpr)
 		if err != nil {
 			if pls.logger != nil {
@@ -372,12 +383,13 @@ func (pls *PriceListScheduler) updatePriceListFromImportPoint(ctx context.Contex
 	// Если файл не указан, пытаемся найти последний файл для этой точки импорта
 	if filePath == "" {
 		query := `
-			SELECT TOP 1 FilePath
+			SELECT FilePath
 			FROM InvoiceImport
-			WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)
+			WHERE ImportPointID = CAST(@importPointID AS UUID)
 			  AND ImportStatus = 'COMPLETED'
 			ORDER BY CompletedAt DESC
-		`
+LIMIT 1
+`
 		var lastFilePath sql.NullString
 		err := pls.database.GORMWith(ctx).Raw(query, sql.Named("importPointID", importPointID)).Row().Scan(&lastFilePath)
 		if err != nil && err != sql.ErrNoRows {
@@ -508,8 +520,8 @@ func (pls *PriceListScheduler) updatePriceListFromImportPoint(ctx context.Contex
 func (pls *PriceListScheduler) getFieldMappings(ctx context.Context, importPointID string) ([]models.DBFFieldMapping, error) {
 	query := `
 		SELECT 
-			CAST(MappingID AS NVARCHAR(50)) AS MappingID,
-			CAST(ImportPointID AS NVARCHAR(50)) AS ImportPointID,
+			CAST(MappingID AS TEXT) AS MappingID,
+			CAST(ImportPointID AS TEXT) AS ImportPointID,
 			DBFFieldName, 
 			TargetFieldName, 
 			DataType, 
@@ -520,7 +532,7 @@ func (pls *PriceListScheduler) getFieldMappings(ctx context.Context, importPoint
 			CreatedAt,
 			UpdatedAt
 		FROM DBFFieldMapping
-		WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)
+		WHERE ImportPointID = CAST(@importPointID AS UUID)
 		ORDER BY DisplayOrder
 	`
 
@@ -557,8 +569,8 @@ func (pls *PriceListScheduler) updateNextUpdateAt(ctx context.Context, priceList
 	query := `
 		UPDATE PriceList
 		SET NextUpdateAt = @nextUpdate,
-		    UpdatedAt = GETUTCDATE()
-		WHERE PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER)
+		    UpdatedAt = (NOW() AT TIME ZONE 'utc')
+		WHERE PriceListID = CAST(@priceListID AS UUID)
 	`
 
 	err := pls.database.GORMWith(ctx).Exec(query, sql.Named("priceListID", priceListID), sql.Named("nextUpdate", nextUpdate)).Error
@@ -573,8 +585,8 @@ func (pls *PriceListScheduler) updateLastAndNextUpdate(ctx context.Context, pric
 		UPDATE PriceList
 		SET LastUpdateAt = @lastUpdate,
 		    NextUpdateAt = @nextUpdate,
-		    UpdatedAt = GETUTCDATE()
-		WHERE PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER)
+		    UpdatedAt = (NOW() AT TIME ZONE 'utc')
+		WHERE PriceListID = CAST(@priceListID AS UUID)
 	`
 
 	err := pls.database.GORMWith(ctx).Exec(query,

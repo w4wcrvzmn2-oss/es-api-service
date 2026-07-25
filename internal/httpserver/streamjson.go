@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	mssqldb "github.com/microsoft/go-mssqldb"
+	"github.com/google/uuid"
 )
 
 // JSONStreamer обеспечивает потоковую сериализацию JSON массивов
@@ -100,11 +100,12 @@ func convertSQLValueWithColumnInfo(val interface{}, columnName string) interface
 	// Проверяем по имени колонки, является ли это GUID
 	isGUIDColumn := isGUIDColumnName(columnName)
 
-	// Специальная обработка типов MS SQL Server
+	// UUID / бинарные GUID из PostgreSQL
 	switch v := val.(type) {
-	case mssqldb.UniqueIdentifier:
-		// GUID -> строка в стандартном формате
+	case uuid.UUID:
 		return v.String()
+	case [16]byte:
+		return formatGUID(v[:])
 	case []byte:
 		// Проверяем, является ли это GUID по длине или имени колонки
 		if len(v) == 16 || isGUIDColumn {

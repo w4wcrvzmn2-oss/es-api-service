@@ -79,7 +79,7 @@ func (ips *ImportPointScheduler) scanImportPoints() {
 
 	query := `
 		SELECT 
-			CAST(ImportPointID AS NVARCHAR(50)) AS ImportPointID,
+			CAST(ImportPointID AS TEXT) AS ImportPointID,
 			Name,
 			SourceType,
 			SourceFilePath,
@@ -157,9 +157,9 @@ func (ips *ImportPointScheduler) scanImportPoints() {
 func (ips *ImportPointScheduler) hasActiveImport(ctx context.Context, pointID string) bool {
 	query := `
 		SELECT COUNT(*) FROM InvoiceImport
-		WHERE ImportPointID = CAST(@pointID AS UNIQUEIDENTIFIER)
+		WHERE ImportPointID = CAST(@pointID AS UUID)
 		  AND ImportStatus = 'PROCESSING'
-		  AND StartedAt > DATEADD(minute, -30, GETUTCDATE())
+		  AND StartedAt > DATEADD(minute, -30, (NOW() AT TIME ZONE 'utc'))
 	`
 	var count int
 	err := ips.database.GORMWith(ctx).Raw(query, sql.Named("pointID", pointID)).Row().Scan(&count)
@@ -173,7 +173,7 @@ func (ips *ImportPointScheduler) hasActiveImport(ctx context.Context, pointID st
 func (ips *ImportPointScheduler) hasCronPriceList(ctx context.Context, pointID string) bool {
 	query := `
 		SELECT COUNT(*) FROM PriceList
-		WHERE ImportPointID = CAST(@pointID AS UNIQUEIDENTIFIER)
+		WHERE ImportPointID = CAST(@pointID AS UUID)
 		  AND IsActive = 1
 		  AND ScheduleCron IS NOT NULL
 		  AND ScheduleCron != ''
@@ -433,11 +433,11 @@ func (ips *ImportPointScheduler) importAndCleanup(ctx context.Context, pointID, 
 // getFieldMappings получает маппинг полей для точки импорта
 func (ips *ImportPointScheduler) getFieldMappings(ctx context.Context, importPointID string) ([]models.DBFFieldMapping, error) {
 	query := `
-		SELECT CAST(MappingID AS NVARCHAR(50)), CAST(ImportPointID AS NVARCHAR(50)),
+		SELECT CAST(MappingID AS TEXT), CAST(ImportPointID AS TEXT),
 		       DBFFieldName, TargetFieldName, DataType, IsRequired,
 		       DefaultValue, TransformRule, DisplayOrder, CreatedAt, UpdatedAt
 		FROM DBFFieldMapping
-		WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)
+		WHERE ImportPointID = CAST(@importPointID AS UUID)
 		ORDER BY DisplayOrder
 	`
 	rows, err := ips.database.GORMWith(ctx).Raw(query, sql.Named("importPointID", importPointID)).Rows()

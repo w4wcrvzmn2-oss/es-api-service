@@ -93,9 +93,9 @@ func (s *Server) handleGetBuyers(w http.ResponseWriter, r *http.Request) {
 	buyers := []buyerWithRegion{}
 	err := s.database.GORMWith(ctx).
 		Table("Buyer AS b").
-		Select(`CAST(b.BuyerID AS NVARCHAR(50)) AS BuyerID,
+		Select(`CAST(b.BuyerID AS TEXT) AS BuyerID,
 			b.Name, b.INN,
-			CAST(b.RegionID AS NVARCHAR(50)) AS RegionID,
+			CAST(b.RegionID AS TEXT) AS RegionID,
 			b.Code, b.Phone, b.Address, b.Email,
 			b.IsActive, b.CreatedAt,
 			r.Name AS RegionName`).
@@ -127,9 +127,9 @@ func (s *Server) handleGetBuyerByID(w http.ResponseWriter, r *http.Request, buye
 	var b buyerWithRegion
 	err := s.database.GORMWith(ctx).
 		Table("Buyer AS b").
-		Select(`CAST(b.BuyerID AS NVARCHAR(50)) AS BuyerID,
+		Select(`CAST(b.BuyerID AS TEXT) AS BuyerID,
 			b.Name, b.INN,
-			CAST(b.RegionID AS NVARCHAR(50)) AS RegionID,
+			CAST(b.RegionID AS TEXT) AS RegionID,
 			b.Code, b.Phone, b.Address, b.Email,
 			b.IsActive, b.CreatedAt,
 			r.Name AS RegionName`).
@@ -334,8 +334,8 @@ func (s *Server) handleGetBuyerUsers(w http.ResponseWriter, r *http.Request) {
 
 	q := s.database.GORMWith(ctx).
 		Table("BuyerUser AS bu").
-		Select(`CAST(bu.BuyerUserID AS NVARCHAR(50)) AS BuyerUserID,
-			CAST(bu.BuyerID AS NVARCHAR(50)) AS BuyerID,
+		Select(`CAST(bu.BuyerUserID AS TEXT) AS BuyerUserID,
+			CAST(bu.BuyerID AS TEXT) AS BuyerID,
 			bu.FullName, bu.Email, bu.Phone, bu.Role,
 			bu.IsActive, bu.CreatedAt,
 			b.Name AS BuyerName`).
@@ -369,8 +369,8 @@ func (s *Server) handleGetBuyerUserByID(w http.ResponseWriter, r *http.Request, 
 	var u buyerUserWithBuyer
 	err := s.database.GORMWith(ctx).
 		Table("BuyerUser AS bu").
-		Select(`CAST(bu.BuyerUserID AS NVARCHAR(50)) AS BuyerUserID,
-			CAST(bu.BuyerID AS NVARCHAR(50)) AS BuyerID,
+		Select(`CAST(bu.BuyerUserID AS TEXT) AS BuyerUserID,
+			CAST(bu.BuyerID AS TEXT) AS BuyerID,
 			bu.FullName, bu.Email, bu.Phone, bu.Role,
 			bu.IsActive, bu.CreatedAt,
 			b.Name AS BuyerName`).
@@ -658,10 +658,10 @@ func (s *Server) handleGetBuyerLocations(w http.ResponseWriter, r *http.Request)
 	locations := []locationWithRegion{}
 	err := s.database.GORMWith(ctx).
 		Table("BuyerLocation AS bl").
-		Select(`CAST(bl.BuyerLocationID AS NVARCHAR(50)) AS BuyerLocationID,
-			CAST(bl.BuyerID AS NVARCHAR(50)) AS BuyerID,
+		Select(`CAST(bl.BuyerLocationID AS TEXT) AS BuyerLocationID,
+			CAST(bl.BuyerID AS TEXT) AS BuyerID,
 			bl.Address,
-			CAST(bl.RegionID AS NVARCHAR(50)) AS RegionID,
+			CAST(bl.RegionID AS TEXT) AS RegionID,
 			bl.IsDefault, bl.CreatedAt,
 			r.Name AS RegionName`).
 		Joins("LEFT JOIN Region r ON bl.RegionID = r.RegionID").
@@ -692,10 +692,10 @@ func (s *Server) handleGetBuyerLocationByID(w http.ResponseWriter, r *http.Reque
 	var loc locationWithRegion
 	err := s.database.GORMWith(ctx).
 		Table("BuyerLocation AS bl").
-		Select(`CAST(bl.BuyerLocationID AS NVARCHAR(50)) AS BuyerLocationID,
-			CAST(bl.BuyerID AS NVARCHAR(50)) AS BuyerID,
+		Select(`CAST(bl.BuyerLocationID AS TEXT) AS BuyerLocationID,
+			CAST(bl.BuyerID AS TEXT) AS BuyerID,
 			bl.Address,
-			CAST(bl.RegionID AS NVARCHAR(50)) AS RegionID,
+			CAST(bl.RegionID AS TEXT) AS RegionID,
 			bl.IsDefault, bl.CreatedAt,
 			r.Name AS RegionName`).
 		Joins("LEFT JOIN Region r ON bl.RegionID = r.RegionID").

@@ -18,23 +18,23 @@ import (
 	"gorm.io/gorm"
 )
 
-// isValidCron проверяет корректность CRON выражения
+// isValidCron проверяет корректность CRON выражения (включая @every 1h30m).
 func isValidCron(cronExpr string) bool {
-	parserWithSeconds := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	parserWithSeconds := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	if _, err := parserWithSeconds.Parse(cronExpr); err == nil {
 		return true
 	}
-	parserStandard := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	parserStandard := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	_, err := parserStandard.Parse(cronExpr)
 	return err == nil
 }
 
 // calculateNextUpdateFromCron вычисляет следующее время обновления на основе CRON выражения
 func calculateNextUpdateFromCron(cronExpr string, from time.Time) *time.Time {
-	parserWithSeconds := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	parserWithSeconds := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	schedule, err := parserWithSeconds.Parse(cronExpr)
 	if err != nil {
-		parserStandard := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		parserStandard := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 		schedule, err = parserStandard.Parse(cronExpr)
 		if err != nil {
 			return nil
@@ -138,45 +138,52 @@ func (s *Server) handleGetPriceLists(w http.ResponseWriter, r *http.Request) {
 
 	supplierID := r.URL.Query().Get("supplier_id")
 
-	if s.logger != nil {
-		s.logger.Info("Запрос списка прайсов, supplier_id=%s", supplierID)
-	}
-
+	// Один LATERAL на последний импорт + один COUNT по SupplierPrice вместо
+	// двух коррелированных подзапросов на каждую строку прайса (раньше UI «висел»).
 	query := `
-		SELECT TOP 500
-			CAST(pl.PriceListID AS NVARCHAR(50)) AS PriceListID,
-			CAST(pl.SupplierID AS NVARCHAR(50)) AS SupplierID,
+		SELECT CAST(pl.PriceListID AS TEXT) AS PriceListID,
+			CAST(pl.SupplierID AS TEXT) AS SupplierID,
 			s.Name AS SupplierName,
 			pl.Name AS Name,
 			pl.Description AS Description,
-			CAST(pl.ImportPointID AS NVARCHAR(50)) AS ImportPointID,
+			CAST(pl.ImportPointID AS TEXT) AS ImportPointID,
 			ip.Name AS ImportPointName,
-			CAST(ISNULL(pl.DefaultMarkupPct, 0) AS FLOAT) AS DefaultMarkupPct,
+			CAST(COALESCE(pl.DefaultMarkupPct, 0) AS FLOAT) AS DefaultMarkupPct,
 			pl.ScheduleCron AS ScheduleCron,
 			pl.LastUpdateAt AS LastUpdateAt,
 			pl.NextUpdateAt AS NextUpdateAt,
 			pl.IsActive AS IsActive,
 			pl.CreatedAt AS CreatedAt,
 			pl.UpdatedAt AS UpdatedAt,
-			(SELECT COUNT(*) FROM PriceListRegion plr WHERE plr.PriceListID = pl.PriceListID AND plr.IsActive = 1) AS RegionsCount,
-			(SELECT COUNT(*) FROM SupplierPrice sp WHERE sp.InvoiceImportID = (
-				SELECT TOP 1 ii.InvoiceImportID FROM InvoiceImport ii
-				WHERE ii.ImportPointID = pl.ImportPointID AND ii.ImportStatus = 'COMPLETED'
-				ORDER BY ii.CompletedAt DESC
-			)) AS PricesCount,
-			(SELECT COUNT(*) FROM SupplierPrice sp WHERE sp.InvoiceImportID = (
-				SELECT TOP 1 ii.InvoiceImportID FROM InvoiceImport ii
-				WHERE ii.ImportPointID = pl.ImportPointID AND ii.ImportStatus = 'COMPLETED'
-				ORDER BY ii.CompletedAt DESC
-			) AND (sp.GUID_ES IS NULL OR CAST(sp.GUID_ES AS NVARCHAR(50)) = '')) AS UnmatchedCount
+			COALESCE(rc.RegionsCount, 0) AS RegionsCount,
+			COALESCE(pc.PricesCount, 0) AS PricesCount,
+			COALESCE(pc.UnmatchedCount, 0) AS UnmatchedCount
 		FROM PriceList pl
 		INNER JOIN Supplier s ON pl.SupplierID = s.SupplierID
 		LEFT JOIN ImportPoint ip ON pl.ImportPointID = ip.ImportPointID
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*)::int AS RegionsCount
+			FROM PriceListRegion plr
+			WHERE plr.PriceListID = pl.PriceListID AND plr.IsActive = 1
+		) rc ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT ii.InvoiceImportID
+			FROM InvoiceImport ii
+			WHERE ii.ImportPointID = pl.ImportPointID AND ii.ImportStatus = 'COMPLETED'
+			ORDER BY ii.CompletedAt DESC
+			LIMIT 1
+		) latest ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*)::int AS PricesCount,
+				COUNT(*) FILTER (WHERE sp.GUID_ES IS NULL)::int AS UnmatchedCount
+			FROM SupplierPrice sp
+			WHERE sp.InvoiceImportID = latest.InvoiceImportID
+		) pc ON TRUE
 	`
 
 	var args []interface{}
 	if supplierID != "" {
-		query += " WHERE pl.SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)"
+		query += " WHERE pl.SupplierID = CAST(@supplierID AS UUID)"
 		args = append(args, sql.Named("supplierID", supplierID))
 	}
 	query += " ORDER BY s.Name, pl.Name"
@@ -291,6 +298,12 @@ func (s *Server) handleCreatePriceList(w http.ResponseWriter, r *http.Request) {
 		nextUpdateAtArg = *nextUpdateAt
 	}
 
+	var importPointArg interface{}
+	if req.ImportPointID != nil && *req.ImportPointID != "" {
+		importPointArg = *req.ImportPointID
+	}
+
+	// Позиционные ? — как у ImportPoint; optional UUID решается в Go (без CASE/@named).
 	insertQuery := `
 		INSERT INTO PriceList (
 			PriceListID, SupplierID, Name, Description, ImportPointID,
@@ -298,29 +311,29 @@ func (s *Server) handleCreatePriceList(w http.ResponseWriter, r *http.Request) {
 			CreatedAt, UpdatedAt
 		)
 		VALUES (
-			CAST(@priceListID AS UNIQUEIDENTIFIER),
-			CAST(@supplierID AS UNIQUEIDENTIFIER),
-			@name,
-			@description,
-			CASE WHEN @importPointID IS NOT NULL AND @importPointID != '' THEN CAST(@importPointID AS UNIQUEIDENTIFIER) ELSE NULL END,
-			@defaultMarkupPct,
-			@scheduleCron,
-			@nextUpdateAt,
-			@isActive,
-			GETUTCDATE(), GETUTCDATE()
+			CAST(? AS UUID),
+			CAST(? AS UUID),
+			?,
+			?,
+			CAST(? AS UUID),
+			?,
+			?,
+			?,
+			?,
+			(NOW() AT TIME ZONE 'utc'), (NOW() AT TIME ZONE 'utc')
 		)
 	`
 
 	err := s.database.GORMWith(ctx).Exec(insertQuery,
-		sql.Named("priceListID", priceListID),
-		sql.Named("supplierID", req.SupplierID),
-		sql.Named("name", req.Name),
-		sql.Named("description", getStringPtr(req.Description)),
-		sql.Named("importPointID", getStringPtr(req.ImportPointID)),
-		sql.Named("defaultMarkupPct", defaultMarkupPct),
-		sql.Named("scheduleCron", scheduleCronArg),
-		sql.Named("nextUpdateAt", nextUpdateAtArg),
-		sql.Named("isActive", req.IsActive),
+		priceListID,
+		req.SupplierID,
+		req.Name,
+		getStringPtr(req.Description),
+		importPointArg,
+		defaultMarkupPct,
+		scheduleCronArg,
+		nextUpdateAtArg,
+		req.IsActive,
 	).Error
 	if err != nil {
 		if s.logger != nil {
@@ -336,17 +349,14 @@ func (s *Server) handleCreatePriceList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		regionQuery := `
-			INSERT INTO PriceListRegion (PriceListID, RegionID, IsActive, CreatedAt)
-			VALUES (CAST(@priceListID AS UNIQUEIDENTIFIER), CAST(@regionID AS UNIQUEIDENTIFIER), 1, GETUTCDATE());
+			INSERT INTO PriceListRegion (PriceListRegionID, PriceListID, RegionID, IsActive, CreatedAt)
+			VALUES (gen_random_uuid(), CAST(? AS UUID), CAST(? AS UUID), TRUE, (NOW() AT TIME ZONE 'utc'))
 		`
 		for _, regionID := range req.RegionIDs {
 			if regionID == "" {
 				continue
 			}
-			if err := s.database.GORMWith(ctx).Exec(regionQuery,
-				sql.Named("priceListID", priceListID),
-				sql.Named("regionID", regionID),
-			).Error; err != nil {
+			if err := s.database.GORMWith(ctx).Exec(regionQuery, priceListID, regionID).Error; err != nil {
 				if s.logger != nil {
 					s.logger.Warn("Ошибка добавления региона %s к прайсу: %v", regionID, err)
 				}
@@ -437,7 +447,7 @@ func (s *Server) handleUpdatePriceList(w http.ResponseWriter, r *http.Request) {
 		if *req.ImportPointID == "" {
 			updates = append(updates, "ImportPointID = NULL")
 		} else {
-			updates = append(updates, "ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)")
+			updates = append(updates, "ImportPointID = CAST(@importPointID AS UUID)")
 			args = append(args, sql.Named("importPointID", *req.ImportPointID))
 		}
 	}
@@ -471,20 +481,22 @@ func (s *Server) handleUpdatePriceList(w http.ResponseWriter, r *http.Request) {
 
 		// Каскадный апдейт MarkupPct в связанных SupplierPrice.
 		updatePricesQuery := `
-			UPDATE sp
-			SET sp.MarkupPct = CAST(@defaultMarkupPct AS DECIMAL(5,2)),
-				sp.UpdatedAt = GETUTCDATE()
-			FROM SupplierPrice sp
-			LEFT JOIN InvoiceImport ii ON sp.InvoiceImportID = ii.InvoiceImportID
-			LEFT JOIN PriceList pl ON pl.PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER)
-			WHERE sp.IsActive = 1
+			UPDATE SupplierPrice AS sp
+			SET MarkupPct = CAST(@defaultMarkupPct AS DECIMAL(5,2)),
+				UpdatedAt = (NOW() AT TIME ZONE 'utc')
+			WHERE sp.IsActive = TRUE
 			  AND (
-				sp.PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER)
-				OR
-				(pl.ImportPointID IS NOT NULL
-				 AND ii.ImportPointID = pl.ImportPointID
-				 AND pl.SupplierID = sp.SupplierID)
-			  );
+				sp.PriceListID = CAST(@priceListID AS UUID)
+				OR EXISTS (
+					SELECT 1
+					FROM InvoiceImport ii
+					JOIN PriceList pl ON pl.PriceListID = CAST(@priceListID AS UUID)
+					WHERE ii.InvoiceImportID = sp.InvoiceImportID
+					  AND pl.ImportPointID IS NOT NULL
+					  AND ii.ImportPointID = pl.ImportPointID
+					  AND pl.SupplierID = sp.SupplierID
+				)
+			  )
 		`
 		res := g.Exec(updatePricesQuery,
 			sql.Named("priceListID", priceListID),
@@ -522,13 +534,13 @@ func (s *Server) handleUpdatePriceList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updates = append(updates, "UpdatedAt = GETUTCDATE()")
+	updates = append(updates, "UpdatedAt = (NOW() AT TIME ZONE 'utc')")
 
 	if len(updates) > 0 {
 		query := fmt.Sprintf(`
 			UPDATE PriceList
 			SET %s
-			WHERE PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER);
+			WHERE PriceListID = CAST(@priceListID AS UUID);
 		`, strings.Join(updates, ", "))
 
 		res := g.Exec(query, args...)
@@ -545,7 +557,7 @@ func (s *Server) handleUpdatePriceList(w http.ResponseWriter, r *http.Request) {
 	if req.RegionIDs != nil {
 		var ownerSupplierID string
 		err := g.Raw(
-			`SELECT CAST(SupplierID AS NVARCHAR(50)) FROM PriceList WHERE PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER)`,
+			`SELECT CAST(SupplierID AS TEXT) FROM PriceList WHERE PriceListID = CAST(@priceListID AS UUID)`,
 			sql.Named("priceListID", priceListID),
 		).Row().Scan(&ownerSupplierID)
 		if err != nil {
@@ -562,23 +574,20 @@ func (s *Server) handleUpdatePriceList(w http.ResponseWriter, r *http.Request) {
 
 		txErr := g.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Exec(
-				`DELETE FROM PriceListRegion WHERE PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER)`,
-				sql.Named("priceListID", priceListID),
+				`DELETE FROM PriceListRegion WHERE PriceListID = CAST(? AS UUID)`,
+				priceListID,
 			).Error; err != nil {
 				return err
 			}
 			insertQuery := `
-				INSERT INTO PriceListRegion (PriceListID, RegionID, IsActive, CreatedAt)
-				VALUES (CAST(@priceListID AS UNIQUEIDENTIFIER), CAST(@regionID AS UNIQUEIDENTIFIER), 1, GETUTCDATE())
+				INSERT INTO PriceListRegion (PriceListRegionID, PriceListID, RegionID, IsActive, CreatedAt)
+				VALUES (gen_random_uuid(), CAST(? AS UUID), CAST(? AS UUID), TRUE, (NOW() AT TIME ZONE 'utc'))
 			`
 			for _, regionID := range req.RegionIDs {
 				if regionID == "" {
 					continue
 				}
-				if err := tx.Exec(insertQuery,
-					sql.Named("priceListID", priceListID),
-					sql.Named("regionID", regionID),
-				).Error; err != nil {
+				if err := tx.Exec(insertQuery, priceListID, regionID).Error; err != nil {
 					return err
 				}
 			}
@@ -600,7 +609,7 @@ func (s *Server) handleUpdatePriceList(w http.ResponseWriter, r *http.Request) {
 	if hasDefaultMarkupPct {
 		var savedValue float64
 		_ = g.Raw(
-			`SELECT CAST(ISNULL(DefaultMarkupPct, 0) AS FLOAT) FROM PriceList WHERE PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER)`,
+			`SELECT CAST(COALESCE(DefaultMarkupPct, 0) AS FLOAT) FROM PriceList WHERE PriceListID = CAST(@priceListID AS UUID)`,
 			sql.Named("priceListID", priceListID),
 		).Row().Scan(&savedValue)
 		response["default_markup_pct"] = savedValue
@@ -619,7 +628,7 @@ func getMapKeys(m map[string]interface{}) []string {
 
 // validateRegionsForSupplier проверяет, что все regionIDs принадлежат поставщику
 func (s *Server) validateRegionsForSupplier(ctx context.Context, supplierID string, regionIDs []string) (string, bool) {
-	query := `SELECT COUNT(*) FROM SupplierRegion WHERE SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER) AND RegionID = CAST(@regionID AS UNIQUEIDENTIFIER) AND IsActive = 1`
+	query := `SELECT COUNT(*) FROM SupplierRegion WHERE SupplierID = CAST(@supplierID AS UUID) AND RegionID = CAST(@regionID AS UUID) AND IsActive = 1`
 	for _, regionID := range regionIDs {
 		if regionID == "" {
 			continue
@@ -666,8 +675,8 @@ func (s *Server) handleDeletePriceList(w http.ResponseWriter, r *http.Request) {
 	var notFound bool
 	err := s.database.GORMWith(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Exec(
-			`UPDATE PriceList SET IsActive = 0, UpdatedAt = GETUTCDATE()
-			 WHERE PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER)`,
+			`UPDATE PriceList SET IsActive = 0, UpdatedAt = (NOW() AT TIME ZONE 'utc')
+			 WHERE PriceListID = CAST(@priceListID AS UUID)`,
 			sql.Named("priceListID", priceListID),
 		)
 		if res.Error != nil {
@@ -678,8 +687,8 @@ func (s *Server) handleDeletePriceList(w http.ResponseWriter, r *http.Request) {
 			return errors.New("not found")
 		}
 		return tx.Exec(
-			`UPDATE SupplierPrice SET IsActive = 0, UpdatedAt = GETUTCDATE()
-			 WHERE PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER)`,
+			`UPDATE SupplierPrice SET IsActive = 0, UpdatedAt = (NOW() AT TIME ZONE 'utc')
+			 WHERE PriceListID = CAST(@priceListID AS UUID)`,
 			sql.Named("priceListID", priceListID),
 		).Error
 	})
@@ -738,13 +747,13 @@ func (s *Server) handleGetPriceListRegions(w http.ResponseWriter, r *http.Reques
 	var regions []regionView
 	err := s.database.GORMWith(ctx).Raw(
 		`SELECT
-			CAST(plr.RegionID AS NVARCHAR(50)) AS RegionID,
+			CAST(plr.RegionID AS TEXT) AS RegionID,
 			r.Name AS RegionName,
 			r.Code AS RegionCode,
 			plr.IsActive AS IsActive
 		FROM PriceListRegion plr
 		INNER JOIN Region r ON plr.RegionID = r.RegionID
-		WHERE plr.PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER)
+		WHERE plr.PriceListID = CAST(@priceListID AS UUID)
 		  AND plr.IsActive = 1
 		ORDER BY r.Name`,
 		sql.Named("priceListID", priceListID),
@@ -795,12 +804,12 @@ func (s *Server) handleGetPriceListItems(w http.ResponseWriter, r *http.Request)
 	err := g.Raw(
 		`SELECT pl.Name AS Name,
 			s.Name AS SupplierName,
-			CAST(pl.SupplierID AS NVARCHAR(50)) AS SupplierID,
+			CAST(pl.SupplierID AS TEXT) AS SupplierID,
 			pl.Description AS Description,
 			pl.LastUpdateAt AS LastUpdateAt
 		FROM PriceList pl
 		INNER JOIN Supplier s ON pl.SupplierID = s.SupplierID
-		WHERE pl.PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER)`,
+		WHERE pl.PriceListID = CAST(@priceListID AS UUID)`,
 		sql.Named("priceListID", priceListID),
 	).Take(&info).Error
 	if err != nil {
@@ -817,19 +826,21 @@ func (s *Server) handleGetPriceListItems(w http.ResponseWriter, r *http.Request)
 	_ = g.Raw(
 		`SELECT
 			COUNT(*) AS Total,
-			ISNULL(SUM(CASE WHEN sp.GUID_ES IS NOT NULL AND CAST(sp.GUID_ES AS NVARCHAR(50)) != '' THEN 1 ELSE 0 END), 0) AS Matched,
-			ISNULL(SUM(CASE WHEN sp.GUID_ES IS NULL OR CAST(sp.GUID_ES AS NVARCHAR(50)) = '' THEN 1 ELSE 0 END), 0) AS Unmatched
+			COALESCE(SUM(CASE WHEN sp.GUID_ES IS NOT NULL AND CAST(sp.GUID_ES AS TEXT) != '' THEN 1 ELSE 0 END), 0) AS Matched,
+			COALESCE(SUM(CASE WHEN sp.GUID_ES IS NULL OR CAST(sp.GUID_ES AS TEXT) = '' THEN 1 ELSE 0 END), 0) AS Unmatched
 		FROM SupplierPrice sp
 		WHERE sp.InvoiceImportID = (
-			SELECT TOP 1 ii.InvoiceImportID
+			SELECT ii.InvoiceImportID
 			FROM InvoiceImport ii
 			WHERE ii.ImportPointID = (
 				SELECT pl.ImportPointID FROM PriceList pl
-				WHERE pl.PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER)
+				WHERE pl.PriceListID = CAST(@priceListID AS UUID)
 			)
 			AND ii.ImportStatus = 'COMPLETED'
 			ORDER BY ii.CompletedAt DESC
-		)`,
+		)
+LIMIT 1
+`,
 		sql.Named("priceListID", priceListID),
 	).Take(&stats).Error
 
@@ -880,19 +891,21 @@ func (s *Server) handleGetPriceListItems(w http.ResponseWriter, r *http.Request)
 		if limitVal <= 0 {
 			limitVal = 1000000
 		}
-		pagination = fmt.Sprintf(" OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", offsetVal, limitVal)
+		pagination = fmt.Sprintf(" OFFSET %d LIMIT %d", offsetVal, limitVal)
 	}
 
 	itemsWhere := `sp.InvoiceImportID = (
-		SELECT TOP 1 ii.InvoiceImportID
+		SELECT ii.InvoiceImportID
 		FROM InvoiceImport ii
 		WHERE ii.ImportPointID = (
 			SELECT pl2.ImportPointID FROM PriceList pl2
-			WHERE pl2.PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER)
+			WHERE pl2.PriceListID = CAST(@priceListID AS UUID)
 		)
 		AND ii.ImportStatus = 'COMPLETED'
 		ORDER BY ii.CompletedAt DESC
-	)`
+		LIMIT 1
+	)
+`
 
 	type priceItemRow struct {
 		ID              string
@@ -916,32 +929,32 @@ func (s *Server) handleGetPriceListItems(w http.ResponseWriter, r *http.Request)
 
 	itemsQuery := fmt.Sprintf(`
 		SELECT
-			CAST(sp.SupplierPriceID AS NVARCHAR(50)) AS ID,
+			CAST(sp.SupplierPriceID AS TEXT) AS ID,
 			sp.ItemCode AS ItemCode,
 			sp.ItemName AS ItemName,
-			CASE WHEN sp.GUID_ES IS NULL THEN NULL ELSE CAST(sp.GUID_ES AS NVARCHAR(50)) END AS GuidES,
+			CASE WHEN sp.GUID_ES IS NULL THEN NULL ELSE CAST(sp.GUID_ES AS TEXT) END AS GuidES,
 			ef2.NAME AS DrugName,
 			ef2.INN_NAME_RUS AS INN,
 			ep.PRODUCER_NAME AS Producer,
 			sp.Price AS Price,
-			sp.Price * (1 + ISNULL(sp.MarkupPct, 0) / 100.0) AS FinalPrice,
+			sp.Price * (1 + COALESCE(sp.MarkupPct, 0) / 100.0) AS FinalPrice,
 			sp.Quantity AS Quantity,
 			sp.BatchNumber AS BatchNumber,
 			sp.ExpiryDate AS ExpiryDate,
 			sp.MatchMethod AS MatchMethod,
 			sp.MatchConfidence AS MatchConfidence,
-			CAST(sp.RegionID AS NVARCHAR(50)) AS RegionID,
+			CAST(sp.RegionID AS TEXT) AS RegionID,
 			r.Name AS RegionName,
 			sp.CreatedAt AS CreatedAt
 		FROM SupplierPrice sp
 		LEFT JOIN es_ef2 ef2 ON sp.GUID_ES = ef2.GUID_ES
 		LEFT JOIN Region r ON sp.RegionID = r.RegionID
-		OUTER APPLY (
-			SELECT TOP 1 PRODUCER_NAME FROM es_producer ep WHERE ep.KOD_PRODUCER = ef2.PRODUCER_COD
-		) ep
+		LEFT JOIN LATERAL (
+			SELECT PRODUCER_NAME FROM es_producer ep WHERE ep.KOD_PRODUCER = ef2.PRODUCER_COD
+		) ep ON true
 		WHERE %s AND sp.IsActive = 1%s
 		ORDER BY ef2.NAME, sp.ItemName%s
-	`, itemsWhere, matchFilter, pagination)
+`, itemsWhere, matchFilter, pagination)
 
 	var rows []priceItemRow
 	err = g.Raw(itemsQuery, sql.Named("priceListID", priceListID)).Scan(&rows).Error
@@ -1037,8 +1050,8 @@ func (s *Server) handleForceFetchPriceList(w http.ResponseWriter, r *http.Reques
 
 	res := s.database.GORMWith(ctx).Exec(`
 		UPDATE PriceList
-		SET NextUpdateAt = DATEADD(hour, -1, GETUTCDATE())
-		WHERE PriceListID = CAST(@id AS UNIQUEIDENTIFIER)
+		SET NextUpdateAt = DATEADD(hour, -1, (NOW() AT TIME ZONE 'utc'))
+		WHERE PriceListID = CAST(@id AS UUID)
 		  AND IsActive = 1
 		  AND ScheduleCron IS NOT NULL AND ScheduleCron != ''`,
 		sql.Named("id", priceListID),

@@ -1,0 +1,46 @@
+# Пример es_api_service.cfg для физического сервера (PostgreSQL локально)
+# Скопируйте рядом с es_api_service.exe и поправьте пароли.
+
+http:
+  addr: "0.0.0.0"
+  port: 8080
+  read_timeout_sec: 30
+  write_timeout_sec: 120
+  idle_timeout_sec: 120
+
+# второй порт под ClienElf2 — раскомментируйте при необходимости
+# http2:
+#   addr: "0.0.0.0"
+#   port: 8081
+#   static_dir: "C:\\es_api_service\\ClienElf2"
+
+auth:
+  issuer: "es-api"
+  jwt_secret: "CHANGE_ME_LONG_RANDOM_SECRET"
+  token_ttl_minutes: 1440
+  users: []
+
+db:
+  server: "127.0.0.1"
+  port: 5432
+  user: "es_api"
+  password: "CHANGE_ME_STRONG_PASSWORD"
+  database: "elfisa"
+  sslmode: "disable"
+  max_open_conns: 100
+  max_idle_conns: 25
+
+source_db:
+  server: "127.0.0.1"
+  port: 5432
+  user: "es_api"
+  password: "CHANGE_ME_STRONG_PASSWORD"
+  database: "eplus_work"
+  sslmode: "disable"
+  max_open_conns: 20
+  max_idle_conns: 5
+
+logging:
+  level: "info"
+  log_dir: "logs"
+  enabled: true

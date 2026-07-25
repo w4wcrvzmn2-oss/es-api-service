@@ -167,7 +167,7 @@ func (a *AuthService) findSupplierByCredentials(ctx context.Context, login, pass
 	}
 	err := a.database.GORMWith(ctx).
 		Table("Supplier").
-		Select("CAST(SupplierID AS NVARCHAR(50)) AS SupplierID, Password").
+		Select("CAST(SupplierID AS TEXT) AS SupplierID, Password").
 		Where("Login = ? AND IsActive = ?", login, true).
 		Take(&supplier).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -204,7 +204,7 @@ func (a *AuthService) findBuyerUserByCredentials(ctx context.Context, login, pas
 	}
 	err := a.database.GORMWith(ctx).
 		Table("BuyerUser").
-		Select("CAST(BuyerUserID AS NVARCHAR(50)) AS BuyerUserID, Password").
+		Select("CAST(BuyerUserID AS TEXT) AS BuyerUserID, Password").
 		Where("Email = ? AND IsActive = ?", login, true).
 		Take(&bu).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -249,7 +249,7 @@ func (a *AuthService) upgradeSupplierPasswordHash(ctx context.Context, supplierI
 		Where("SupplierID = ?", db.UUIDParam(supplierID)).
 		Updates(map[string]interface{}{
 			"Password":  hashed,
-			"UpdatedAt": gorm.Expr("GETUTCDATE()"),
+			"UpdatedAt": gorm.Expr("(NOW() AT TIME ZONE 'utc')"),
 		}).Error
 }
 
@@ -333,7 +333,6 @@ func (a *AuthService) ValidateToken(tokenString string) (*Claims, error) {
 // JWTMiddleware создаёт middleware для проверки JWT токенов
 func (a *AuthService) JWTMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Обработка паник в middleware
 		defer func() {
 			if rec := recover(); rec != nil {
 				if a.logger != nil {
@@ -345,78 +344,36 @@ func (a *AuthService) JWTMiddleware(next http.Handler) http.Handler {
 			}
 		}()
 
-		// Пропускаем OPTIONS запросы (preflight для CORS)
 		if r.Method == http.MethodOptions {
-			if a.logger != nil {
-				a.logger.Info("JWTMiddleware: пропускаем OPTIONS запрос для %s", r.URL.Path)
-			}
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		if a.logger != nil {
-			a.logger.Info("JWTMiddleware: начало обработки запроса %s %s от %s", r.Method, r.URL.Path, r.RemoteAddr)
-		}
-
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			if a.logger != nil {
-				a.logger.Warn("Запрос без заголовка Authorization от %s к %s", r.RemoteAddr, r.URL.Path)
-			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(ErrorResponse{Error: "Отсутствует заголовок Authorization"})
 			return
 		}
 
-		if a.logger != nil {
-			a.logger.Info("JWTMiddleware: заголовок Authorization найден, длина: %d", len(authHeader))
-		}
-
-		// Проверка формата "Bearer <token>"
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			if a.logger != nil {
-				a.logger.Warn("Неверный формат заголовка Authorization от %s к %s", r.RemoteAddr, r.URL.Path)
-			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(ErrorResponse{Error: "Неверный формат заголовка Authorization"})
 			return
 		}
 
-		tokenString := parts[1]
-		if a.logger != nil {
-			a.logger.Info("JWTMiddleware: начинаем валидацию токена, длина: %d", len(tokenString))
-		}
-
-		// Валидация токена
-		claims, err := a.ValidateToken(tokenString)
+		claims, err := a.ValidateToken(parts[1])
 		if err != nil {
-			if a.logger != nil {
-				a.logger.Warn("Неверный токен от %s к %s: %v", r.RemoteAddr, r.URL.Path, err)
-			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(ErrorResponse{Error: "Неверный токен"})
 			return
 		}
 
-		if a.logger != nil {
-			a.logger.Info("JWTMiddleware: токен валиден, пользователь: %s, передаем управление handler", claims.Username)
-		}
-
 		ctx := context.WithValue(r.Context(), claimsContextKey, claims)
-		r = r.WithContext(ctx)
-
-		if a.logger != nil {
-			a.logger.Info("JWTMiddleware: вызываем следующий handler для %s", r.URL.Path)
-		}
-
-		next.ServeHTTP(w, r)
-
-		if a.logger != nil {
-			a.logger.Info("JWTMiddleware: обработка запроса завершена для %s", r.URL.Path)
-		}
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

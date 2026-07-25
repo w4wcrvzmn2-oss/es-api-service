@@ -92,6 +92,8 @@ function buildCron() {
         }
         case 'interval': {
             const iv = document.getElementById('schedInterval').value;
+            if (iv === '5m') return '*/5 * * * *';
+            if (iv === '90m') return '@every 1h30m';
             return `0 */${iv} * * *`;
         }
         default:
@@ -100,10 +102,17 @@ function buildCron() {
 }
 
 function describeCron(cron) {
+    if (!cron) return '';
+    if (cron === '@every 1h30m') return 'Каждые 1 ч 30 мин';
+    if (cron.startsWith('@every ')) {
+        return 'Каждые ' + cron.slice(7);
+    }
+
     const parts = cron.split(' ');
     if (parts.length !== 5) return cron;
     const [min, hour, , , dow] = parts;
 
+    if (min.startsWith('*/') && hour === '*') return `Каждые ${min.slice(2)} мин.`;
     if (hour.startsWith('*/')) return `Каждые ${hour.slice(2)} ч.`;
 
     const time = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
@@ -122,6 +131,13 @@ function setCronToUI(cron) {
         return;
     }
 
+    if (cron === '@every 1h30m') {
+        document.getElementById('schedFrequency').value = 'interval';
+        document.getElementById('schedInterval').value = '90m';
+        onScheduleChange();
+        return;
+    }
+
     const parts = cron.split(' ');
     if (parts.length !== 5) {
         document.getElementById('schedFrequency').value = '';
@@ -131,7 +147,10 @@ function setCronToUI(cron) {
 
     const [min, hour, , , dow] = parts;
 
-    if (hour.startsWith('*/')) {
+    if (min.startsWith('*/') && hour === '*') {
+        document.getElementById('schedFrequency').value = 'interval';
+        document.getElementById('schedInterval').value = min.slice(2) + 'm';
+    } else if (hour.startsWith('*/')) {
         document.getElementById('schedFrequency').value = 'interval';
         document.getElementById('schedInterval').value = hour.slice(2);
     } else {

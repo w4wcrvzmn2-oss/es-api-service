@@ -60,7 +60,7 @@
                                     <option value="daily">Ежедневно</option>
                                     <option value="weekdays">Пн — Пт</option>
                                     <option value="custom_days">Выбрать дни</option>
-                                    <option value="interval">Каждые N часов</option>
+                                    <option value="interval">С интервалом</option>
                                 </select>
                                 <div id="schedTimeBlock" class="schedule-time" style="display:none">
                                     <span>в</span>
@@ -71,10 +71,15 @@
                                 <div id="schedIntervalBlock" class="schedule-time" style="display:none">
                                     <span>каждые</span>
                                     <select id="schedInterval" class="schedule-select schedule-select-sm">
-                                        <option value="2">2</option><option value="3">3</option><option value="4">4</option>
-                                        <option value="6">6</option><option value="8">8</option><option value="12">12</option>
+                                        <option value="5m">5 мин</option>
+                                        <option value="90m">1 ч 30 мин</option>
+                                        <option value="2">2 ч</option>
+                                        <option value="3">3 ч</option>
+                                        <option value="4">4 ч</option>
+                                        <option value="6">6 ч</option>
+                                        <option value="8">8 ч</option>
+                                        <option value="12">12 ч</option>
                                     </select>
-                                    <span>ч.</span>
                                 </div>
                             </div>
                             <div id="schedDaysBlock" class="schedule-days" style="display:none">
@@ -103,9 +108,9 @@
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">Маппинг полей</h5>
                 <div class="d-flex gap-2">
-                    <input type="file" id="dbfFileInput" accept=".dbf,.DBF" style="display:none" onchange="uploadAndAnalyze(this)">
+                    <input type="file" id="dbfFileInput" accept=".dbf,.DBF,.zip,.ZIP" style="display:none" onchange="uploadAndAnalyze(this)">
                     <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('dbfFileInput').click()" id="btnUpload"><i class="bi bi-upload"></i> Загрузить образец</button>
-                    <input type="file" id="importFileInput" accept=".dbf,.DBF" style="display:none" onchange="uploadAndImport(this)">
+                    <input type="file" id="importFileInput" accept=".dbf,.DBF,.zip,.ZIP" style="display:none" onchange="uploadAndImport(this)">
                     <button class="btn btn-success btn-sm" onclick="runImportNow()" id="btnImportNow"><i class="bi bi-play-fill"></i> Импортировать сейчас</button>
                     <button class="btn btn-primary btn-sm" onclick="saveAllMappings()"><i class="bi bi-save"></i> Сохранить маппинг</button>
                 </div>
@@ -157,7 +162,6 @@
 
     <script src="../vendor/bootstrap.bundle.min.js"></script>
     <script src="../vendor/simple-datatables.js"></script>
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
     <script src="../js/elf-table.js"></script>
     <script src="../js/api.js"></script>
     <script src="../js/toast.js"></script>

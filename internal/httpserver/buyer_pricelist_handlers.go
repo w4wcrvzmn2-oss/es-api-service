@@ -34,11 +34,11 @@ func (s *Server) handleGetBuyerPriceLists(w http.ResponseWriter, r *http.Request
 	}
 	rows := []row{}
 	err := s.database.GORMWith(ctx).Raw(`
-		SELECT CAST(pl.PriceListID AS NVARCHAR(50)) AS PriceListID,
+		SELECT CAST(pl.PriceListID AS TEXT) AS PriceListID,
 		       pl.Name AS Name,
-		       ISNULL(sup.Name, '') AS SupplierName,
-		       CAST(ISNULL(bpl.MarkupPct, 0) AS FLOAT) AS MarkupPct,
-		       CAST(ISNULL(pl.DefaultMarkupPct, 0) AS FLOAT) AS DefaultMarkupPct
+		       COALESCE(sup.Name, '') AS SupplierName,
+		       CAST(COALESCE(bpl.MarkupPct, 0) AS FLOAT) AS MarkupPct,
+		       CAST(COALESCE(pl.DefaultMarkupPct, 0) AS FLOAT) AS DefaultMarkupPct
 		FROM BuyerPriceList bpl
 		INNER JOIN PriceList pl ON pl.PriceListID = bpl.PriceListID
 		LEFT JOIN Supplier sup ON sup.SupplierID = pl.SupplierID
@@ -155,10 +155,10 @@ func (s *Server) handleGetPriceListBuyers(w http.ResponseWriter, r *http.Request
 	}
 	rows := []row{}
 	err := s.database.GORMWith(ctx).Raw(`
-		SELECT CAST(b.BuyerID AS NVARCHAR(50)) AS BuyerID,
+		SELECT CAST(b.BuyerID AS TEXT) AS BuyerID,
 		       b.Name AS Name,
-		       ISNULL(b.INN, '') AS INN,
-		       ISNULL(r.Name, '') AS RegionName
+		       COALESCE(b.INN, '') AS INN,
+		       COALESCE(r.Name, '') AS RegionName
 		FROM BuyerPriceList bpl
 		INNER JOIN Buyer b ON b.BuyerID = bpl.BuyerID
 		LEFT JOIN Region r ON r.RegionID = b.RegionID

@@ -76,7 +76,7 @@ func (s *Server) handleGetAuditLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query += " ORDER BY CreatedAt DESC"
-	query += fmt.Sprintf(" OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", offset, limit)
+	query += fmt.Sprintf(" OFFSET %d LIMIT %d", offset, limit)
 
 	var logs []models.AuditLog
 	err := s.database.GORMWith(ctx).Raw(query, args...).Scan(&logs).Error
@@ -145,7 +145,7 @@ func (s *Server) handleGetAuditLogStats(w http.ResponseWriter, r *http.Request) 
 	err := s.database.GORMWith(ctx).Raw(
 		`SELECT LogLevel, COUNT(*) AS Count
 		 FROM AuditLog
-		 WHERE CreatedAt >= DATEADD(day, -7, GETUTCDATE())
+		 WHERE CreatedAt >= DATEADD(day, -7, (NOW() AT TIME ZONE 'utc'))
 		 GROUP BY LogLevel
 		 ORDER BY LogLevel`,
 	).Scan(&byLevel).Error
@@ -167,12 +167,14 @@ func (s *Server) handleGetAuditLogStats(w http.ResponseWriter, r *http.Request) 
 	}
 	var userStats []userStat
 	err = s.database.GORMWith(ctx).Raw(
-		`SELECT TOP 10 Username, COUNT(*) AS Count
+		`SELECT Username, COUNT(*) AS Count
 		 FROM AuditLog
-		 WHERE CreatedAt >= DATEADD(day, -7, GETUTCDATE())
+		 WHERE CreatedAt >= DATEADD(day, -7, (NOW() AT TIME ZONE 'utc'))
 		   AND Username IS NOT NULL
 		 GROUP BY Username
-		 ORDER BY COUNT(*) DESC`,
+		 ORDER BY COUNT(*) DESC
+LIMIT 10
+`,
 	).Scan(&userStats).Error
 	if err != nil {
 		// Не критично — отдадим только by_level.

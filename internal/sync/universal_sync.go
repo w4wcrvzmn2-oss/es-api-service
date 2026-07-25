@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/microsoft/go-mssqldb"
 	"github.com/robfig/cron/v3"
 )
 
@@ -338,8 +337,8 @@ func (us *UniversalSync) fetchTableData(ctx context.Context, tableName string, t
 	// Строим SELECT запрос
 	columns := make([]string, 0, len(tableInfo.Columns))
 	for _, col := range tableInfo.Columns {
-		if col.DataType == "uniqueidentifier" {
-			columns = append(columns, fmt.Sprintf("CAST(%s AS NVARCHAR(50)) as %s", col.Name, col.Name))
+		if col.DataType == "uniqueidentifier" || col.DataType == "uuid" {
+			columns = append(columns, fmt.Sprintf("CAST(%s AS TEXT) as %s", col.Name, col.Name))
 		} else {
 			columns = append(columns, col.Name)
 		}
@@ -411,9 +410,9 @@ func (us *UniversalSync) updateTableData(ctx context.Context, tableName string, 
 		return nil
 	}
 
-	// Для ES_EF2 используем MERGE вместо DELETE, чтобы не нарушать внешние ключи
+	// Для ES_EF2 используем INSERT ... ON CONFLICT вместо DELETE, чтобы не нарушать внешние ключи
 	if strings.ToUpper(tableName) == "ES_EF2" {
-		return us.updateES_EF2WithMerge(ctx, tableName, data, tableInfo)
+		return us.updateES_EF2WithUpsert(ctx, tableName, data, tableInfo)
 	}
 
 	tx, err := us.targetDB.BeginTx(ctx, nil)
@@ -424,7 +423,7 @@ func (us *UniversalSync) updateTableData(ctx context.Context, tableName string, 
 
 	// Для остальных таблиц используем стандартный подход: DELETE + INSERT
 	// Очистка и вставка выполняются в одной транзакции, чтобы не оставить таблицу частично заполненной.
-	_, err = tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s", tableName))
+	_, err = db.ExecRaw(ctx, tx, fmt.Sprintf("DELETE FROM %s", db.QuoteIdent(tableName)))
 	if err != nil {
 		return fmt.Errorf("ошибка очистки таблицы %s: %w", tableName, err)
 	}
@@ -450,21 +449,21 @@ func (us *UniversalSync) updateTableData(ctx context.Context, tableName string, 
 			continue // created_at, updated_at, is_active добавляются отдельно
 		}
 
-		columns = append(columns, col.Name)
-		if col.DataType == "uniqueidentifier" {
-			placeholders = append(placeholders, fmt.Sprintf("CAST(@%s AS UNIQUEIDENTIFIER)", col.Name))
+		columns = append(columns, db.QuoteIdent(col.Name))
+		if col.DataType == "uniqueidentifier" || col.DataType == "uuid" {
+			placeholders = append(placeholders, fmt.Sprintf("CAST(@%s AS UUID)", col.Name))
 		} else {
 			placeholders = append(placeholders, fmt.Sprintf("@%s", col.Name))
 		}
 	}
 
 	// Добавляем служебные поля
-	columns = append(columns, "created_at", "updated_at", "is_active")
-	placeholders = append(placeholders, "GETUTCDATE()", "GETUTCDATE()", "1")
+	columns = append(columns, db.QuoteIdent("created_at"), db.QuoteIdent("updated_at"), db.QuoteIdent("is_active"))
+	placeholders = append(placeholders, "(NOW() AT TIME ZONE 'utc')", "(NOW() AT TIME ZONE 'utc')", "TRUE")
 
 	insertQuery := fmt.Sprintf(
 		"INSERT INTO %s (%s) VALUES (%s)",
-		tableName,
+		db.QuoteIdent(tableName),
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "),
 	)
@@ -479,14 +478,14 @@ func (us *UniversalSync) updateTableData(ctx context.Context, tableName string, 
 
 		batch := data[i:end]
 
-		batchStmt, err := tx.PrepareContext(ctx, insertQuery)
+		batchStmt, err := db.PrepareRaw(ctx, tx, insertQuery)
 		if err != nil {
 			return fmt.Errorf("ошибка подготовки запроса для батча: %w", err)
 		}
 
 		for _, row := range batch {
 			// Подготавливаем параметры для запроса
-			args := make([]sql.NamedArg, 0, len(tableInfo.Columns))
+			args := make([]interface{}, 0, len(tableInfo.Columns))
 			for _, col := range tableInfo.Columns {
 				// Исключаем те же колонки, что и в INSERT
 				if col.Name == "TS" || col.Name == "timestamp" {
@@ -498,12 +497,7 @@ func (us *UniversalSync) updateTableData(ctx context.Context, tableName string, 
 				args = append(args, sql.Named(col.Name, row[col.Name]))
 			}
 
-			// Преобразуем []sql.NamedArg в []interface{}
-			interfaceArgs := make([]interface{}, len(args))
-			for i, arg := range args {
-				interfaceArgs[i] = arg
-			}
-			_, err := batchStmt.ExecContext(ctx, interfaceArgs...)
+			_, err := batchStmt.ExecContext(ctx, args...)
 			if err != nil {
 				batchStmt.Close()
 				return fmt.Errorf("ошибка вставки записи в таблицу %s: %w", tableName, err)
@@ -522,15 +516,15 @@ func (us *UniversalSync) updateTableData(ctx context.Context, tableName string, 
 	return nil
 }
 
-// updateES_EF2WithMerge обновляет ES_EF2 используя MERGE вместо DELETE
+// updateES_EF2WithUpsert обновляет ES_EF2 используя INSERT ... ON CONFLICT вместо DELETE
 // Это необходимо, чтобы не нарушать внешние ключи из таблицы SupplierPrice
-func (us *UniversalSync) updateES_EF2WithMerge(ctx context.Context, tableName string, data []map[string]interface{}, tableInfo *TableInfo) error {
+func (us *UniversalSync) updateES_EF2WithUpsert(ctx context.Context, tableName string, data []map[string]interface{}, tableInfo *TableInfo) error {
 	if len(data) == 0 {
 		us.logger.Info("Таблица %s пуста, пропускаем синхронизацию", tableName)
 		return nil
 	}
 
-	// Строим списки колонок для MERGE
+	// Строим списки колонок для UPSERT
 	updateColumns := make([]string, 0)
 	insertColumns := make([]string, 0)
 	insertValues := make([]string, 0)
@@ -541,10 +535,10 @@ func (us *UniversalSync) updateES_EF2WithMerge(ctx context.Context, tableName st
 			continue
 		}
 		if col.Name == "GUID_ES" {
-			// GUID_ES используется только для сравнения в MERGE, не обновляется
-			insertColumns = append(insertColumns, col.Name)
-			if col.DataType == "uniqueidentifier" {
-				insertValues = append(insertValues, "CAST(@GUID_ES AS UNIQUEIDENTIFIER)")
+			// GUID_ES используется только для ON CONFLICT, не обновляется
+			insertColumns = append(insertColumns, `"GUID_ES"`)
+			if col.DataType == "uniqueidentifier" || col.DataType == "uuid" {
+				insertValues = append(insertValues, "CAST(@GUID_ES AS UUID)")
 			} else {
 				insertValues = append(insertValues, "@GUID_ES")
 			}
@@ -555,33 +549,28 @@ func (us *UniversalSync) updateES_EF2WithMerge(ctx context.Context, tableName st
 			continue
 		}
 
-		// Добавляем в UPDATE
-		updateColumns = append(updateColumns, fmt.Sprintf("%s = @%s", col.Name, col.Name))
+		// Добавляем в UPDATE (через EXCLUDED)
+		updateColumns = append(updateColumns, fmt.Sprintf(`"%s" = EXCLUDED."%s"`, col.Name, col.Name))
 
 		// Добавляем в INSERT
-		insertColumns = append(insertColumns, col.Name)
-		if col.DataType == "uniqueidentifier" {
-			insertValues = append(insertValues, fmt.Sprintf("CAST(@%s AS UNIQUEIDENTIFIER)", col.Name))
+		insertColumns = append(insertColumns, fmt.Sprintf(`"%s"`, col.Name))
+		if col.DataType == "uniqueidentifier" || col.DataType == "uuid" {
+			insertValues = append(insertValues, fmt.Sprintf("CAST(@%s AS UUID)", col.Name))
 		} else {
 			insertValues = append(insertValues, fmt.Sprintf("@%s", col.Name))
 		}
 	}
 
 	// Добавляем служебные поля
-	updateColumns = append(updateColumns, "updated_at = GETUTCDATE()", "is_active = 1")
-	insertColumns = append(insertColumns, "created_at", "updated_at", "is_active")
-	insertValues = append(insertValues, "GETUTCDATE()", "GETUTCDATE()", "1")
+	updateColumns = append(updateColumns, `"updated_at" = (NOW() AT TIME ZONE 'utc')`, `"is_active" = TRUE`)
+	insertColumns = append(insertColumns, `"created_at"`, `"updated_at"`, `"is_active"`)
+	insertValues = append(insertValues, "(NOW() AT TIME ZONE 'utc')", "(NOW() AT TIME ZONE 'utc')", "TRUE")
 
-	// Строим MERGE запрос
-	mergeQuery := fmt.Sprintf(`
-		MERGE %s AS target
-		USING (SELECT @GUID_ES AS GUID_ES) AS source
-		ON target.GUID_ES = source.GUID_ES
-		WHEN MATCHED THEN
-			UPDATE SET %s
-		WHEN NOT MATCHED THEN
-			INSERT (%s) VALUES (%s);
-	`, tableName, strings.Join(updateColumns, ", "), strings.Join(insertColumns, ", "), strings.Join(insertValues, ", "))
+	// Строим UPSERT запрос
+	upsertQuery := fmt.Sprintf(`
+		INSERT INTO "%s" (%s) VALUES (%s)
+		ON CONFLICT ("GUID_ES") DO UPDATE SET %s;
+	`, tableName, strings.Join(insertColumns, ", "), strings.Join(insertValues, ", "), strings.Join(updateColumns, ", "))
 
 	// Обрабатываем данные батчами по 1000 записей
 	// Для ES_EF2 используем минимальный батч и меньше потоков, чтобы не блокировать запросы сводного прайса
@@ -619,17 +608,17 @@ func (us *UniversalSync) updateES_EF2WithMerge(ctx context.Context, tableName st
 			return fmt.Errorf("ошибка начала транзакции для батча %d-%d: %w", batch.start+1, batch.end, err)
 		}
 
-		batchStmt, err := tx.PrepareContext(ctx, mergeQuery)
+		batchStmt, err := db.PrepareRaw(ctx, tx, upsertQuery)
 		if err != nil {
 			tx.Rollback()
-			return fmt.Errorf("ошибка подготовки MERGE запроса для батча %d-%d: %w", batch.start+1, batch.end, err)
+			return fmt.Errorf("ошибка подготовки UPSERT запроса для батча %d-%d: %w", batch.start+1, batch.end, err)
 		}
 
 		for _, row := range batch.data {
 			// Подготавливаем параметры для запроса
 			args := make([]interface{}, 0)
 			for _, col := range tableInfo.Columns {
-				// Исключаем те же колонки, что и в MERGE
+				// Исключаем те же колонки, что и в UPSERT
 				if col.Name == "TS" || col.Name == "timestamp" {
 					continue
 				}
@@ -642,7 +631,7 @@ func (us *UniversalSync) updateES_EF2WithMerge(ctx context.Context, tableName st
 			_, err := batchStmt.ExecContext(ctx, args...)
 			if err != nil {
 				tx.Rollback()
-				return fmt.Errorf("ошибка выполнения MERGE для записи %v в батче %d-%d: %w", row["GUID_ES"], batch.start+1, batch.end, err)
+				return fmt.Errorf("ошибка выполнения UPSERT для записи %v в батче %d-%d: %w", row["GUID_ES"], batch.start+1, batch.end, err)
 			}
 		}
 
@@ -657,7 +646,7 @@ func (us *UniversalSync) updateES_EF2WithMerge(ctx context.Context, tableName st
 			time.Sleep(150 * time.Millisecond) // 150мс пауза между батчами для минимизации блокировок
 		}
 
-		us.logger.Info("Обработан батч %d-%d из %d записей для таблицы %s (MERGE)", batch.start+1, batch.end, len(data), tableName)
+		us.logger.Info("Обработан батч %d-%d из %d записей для таблицы %s (UPSERT)", batch.start+1, batch.end, len(data), tableName)
 		return nil
 	}
 

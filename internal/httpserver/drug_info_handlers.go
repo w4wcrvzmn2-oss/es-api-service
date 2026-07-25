@@ -50,7 +50,7 @@ func (s *Server) handleGetDrugAnalogsAndSynonyms(w http.ResponseWriter, r *http.
 	getDrugQuery := `
 		SELECT INN_NAME_RUS, TRN_NAME_RUS
 		FROM es_ef2
-		WHERE GUID_ES = CAST(@guidES AS UNIQUEIDENTIFIER)
+		WHERE GUID_ES = CAST(@guidES AS UUID)
 		  AND DELETED IS NULL
 	`
 	err := s.database.GORMWith(ctx).Raw(getDrugQuery, sql.Named("guidES", guidES)).Row().Scan(&currentINN, &currentTRN)
@@ -82,8 +82,7 @@ func (s *Server) handleGetDrugAnalogsAndSynonyms(w http.ResponseWriter, r *http.
 	// Получаем аналоги (препараты с таким же МНН, но другой GUID_ES)
 	if currentINN.Valid && currentINN.String != "" && strings.TrimSpace(currentINN.String) != "" {
 		analogsQuery := `
-			SELECT TOP 20
-				CAST(ef2.GUID_ES AS NVARCHAR(50)) AS GUID_ES,
+			SELECT CAST(ef2.GUID_ES AS TEXT) AS GUID_ES,
 				ef2.NAME,
 				ef2.TRN_NAME_RUS,
 				ef2.INN_NAME_RUS,
@@ -97,10 +96,11 @@ func (s *Server) handleGetDrugAnalogsAndSynonyms(w http.ResponseWriter, r *http.
 			LEFT JOIN es_producer ep ON ef2.PRODUCER_COD = ep.KOD_PRODUCER
 			LEFT JOIN SupplierPrice sp ON ef2.GUID_ES = sp.GUID_ES AND sp.IsActive = 1
 			WHERE ef2.INN_NAME_RUS = @innName
-			  AND ef2.GUID_ES != CAST(@guidES AS UNIQUEIDENTIFIER)
+			  AND ef2.GUID_ES != CAST(@guidES AS UUID)
 			  AND (ef2.DELETED IS NULL)
 			ORDER BY ef2.NAME, ep.PRODUCER_NAME
-		`
+LIMIT 20
+`
 		
 		if s.logger != nil {
 			s.logger.Debug("Поиск аналогов для МНН: %s, GUID_ES: %s", currentINN.String, guidES)
@@ -160,8 +160,7 @@ func (s *Server) handleGetDrugAnalogsAndSynonyms(w http.ResponseWriter, r *http.
 	if currentTRN.Valid && currentTRN.String != "" {
 		// Ищем по торговому наименованию (TRN_NAME_RUS)
 		synonymsQuery := `
-			SELECT TOP 20
-				CAST(ef2.GUID_ES AS NVARCHAR(50)) AS GUID_ES,
+			SELECT CAST(ef2.GUID_ES AS TEXT) AS GUID_ES,
 				ef2.NAME,
 				ef2.TRN_NAME_RUS,
 				ef2.INN_NAME_RUS,
@@ -179,12 +178,13 @@ func (s *Server) handleGetDrugAnalogsAndSynonyms(w http.ResponseWriter, r *http.
 				(ef2.TRN_NAME_RUS IS NOT NULL AND ef2.TRN_NAME_RUS LIKE @trnPattern)
 				OR (ef2.NAME LIKE @namePattern)
 			)
-			  AND ef2.GUID_ES != CAST(@guidES AS UNIQUEIDENTIFIER)
+			  AND ef2.GUID_ES != CAST(@guidES AS UUID)
 			  AND ef2.DELETED IS NULL
 			ORDER BY 
 				CASE WHEN ef2.TRN_NAME_RUS = @currentTRN THEN 1 ELSE 2 END,
 				ef2.NAME
-		`
+LIMIT 20
+`
 		
 		// Создаем паттерны для поиска
 		trnPattern := strings.TrimSpace(currentTRN.String) + "%"
@@ -244,11 +244,10 @@ func (s *Server) handleGetDrugAnalogsAndSynonyms(w http.ResponseWriter, r *http.
 	// Если не нашли синонимы по торговому наименованию, ищем по похожему названию
 	if len(synonyms) == 0 {
 		var currentName sql.NullString
-		getNameQuery := `SELECT NAME FROM es_ef2 WHERE GUID_ES = CAST(@guidES AS UNIQUEIDENTIFIER)`
+		getNameQuery := `SELECT NAME FROM es_ef2 WHERE GUID_ES = CAST(@guidES AS UUID)`
 		if err := s.database.GORMWith(ctx).Raw(getNameQuery, sql.Named("guidES", guidES)).Row().Scan(&currentName); err == nil && currentName.Valid {
 			synonymsQuery := `
-				SELECT TOP 10
-					CAST(ef2.GUID_ES AS NVARCHAR(50)) AS GUID_ES,
+				SELECT CAST(ef2.GUID_ES AS TEXT) AS GUID_ES,
 					ef2.NAME,
 					ef2.TRN_NAME_RUS,
 					ef2.INN_NAME_RUS,
@@ -262,10 +261,11 @@ func (s *Server) handleGetDrugAnalogsAndSynonyms(w http.ResponseWriter, r *http.
 				LEFT JOIN es_producer ep ON ef2.PRODUCER_COD = ep.KOD_PRODUCER
 				LEFT JOIN SupplierPrice sp ON ef2.GUID_ES = sp.GUID_ES AND sp.IsActive = 1
 				WHERE ef2.NAME LIKE @namePattern
-				  AND ef2.GUID_ES != CAST(@guidES AS UNIQUEIDENTIFIER)
+				  AND ef2.GUID_ES != CAST(@guidES AS UUID)
 				  AND ef2.DELETED IS NULL
 				ORDER BY ef2.NAME
-			`
+LIMIT 10
+`
 			
 			namePattern := "%" + strings.TrimSpace(currentName.String) + "%"
 			rows, err := s.database.GORMWith(ctx).Raw(synonymsQuery,
@@ -344,7 +344,7 @@ func (s *Server) handleGetInstruction(w http.ResponseWriter, r *http.Request) {
 
 	query := `
 		SELECT 
-			CAST(GUID_INSTRUCTION AS NVARCHAR(50)) AS GUID_INSTRUCTION,
+			CAST(GUID_INSTRUCTION AS TEXT) AS GUID_INSTRUCTION,
 			ID_INSTRUCTION,
 			INSTRUCTION,
 			COMPOSITION,
@@ -360,7 +360,7 @@ func (s *Server) handleGetInstruction(w http.ResponseWriter, r *http.Request) {
 			GOODS_DESC,
 			STORING_CONDITION
 		FROM ES_INSTRUCTION
-		WHERE GUID_INSTRUCTION = CAST(@guid AS UNIQUEIDENTIFIER)
+		WHERE GUID_INSTRUCTION = CAST(@guid AS UUID)
 		  AND (DELETED IS NULL OR DELETED = '1900-01-01')
 	`
 

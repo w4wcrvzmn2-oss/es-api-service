@@ -962,7 +962,7 @@ func (di *DBFImporter) convertValue(value interface{}, dataType string) (interfa
 // Helper функции для работы с БД
 func (di *DBFImporter) getSupplierIDFromImportPoint(ctx context.Context, importPointID string) (string, error) {
 	// Сначала пробуем из ImportPoint напрямую
-	query := `SELECT CAST(SupplierID AS NVARCHAR(50)) AS SupplierID FROM ImportPoint WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER) AND SupplierID IS NOT NULL`
+	query := `SELECT CAST(SupplierID AS TEXT) AS SupplierID FROM ImportPoint WHERE ImportPointID = CAST(@importPointID AS UUID) AND SupplierID IS NOT NULL`
 	var supplierID string
 	err := di.database.QueryRowContext(ctx, query, sql.Named("importPointID", importPointID)).Scan(&supplierID)
 	if err == nil {
@@ -970,7 +970,9 @@ func (di *DBFImporter) getSupplierIDFromImportPoint(ctx context.Context, importP
 	}
 
 	// Если SupplierID не задан в ImportPoint, берём из связанного PriceList
-	queryPL := `SELECT TOP 1 CAST(pl.SupplierID AS NVARCHAR(50)) FROM PriceList pl WHERE pl.ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER) AND pl.IsActive = 1`
+	queryPL := `SELECT CAST(pl.SupplierID AS TEXT) FROM PriceList pl WHERE pl.ImportPointID = CAST(@importPointID AS UUID) AND pl.IsActive = 1
+LIMIT 1
+`
 	err = di.database.QueryRowContext(ctx, queryPL, sql.Named("importPointID", importPointID)).Scan(&supplierID)
 	if err != nil {
 		return "", fmt.Errorf("SupplierID не найден ни в ImportPoint, ни в связанных PriceList для ImportPointID=%s", importPointID)
@@ -985,7 +987,7 @@ func (di *DBFImporter) saveInvoiceImport(ctx context.Context, invoiceImport *mod
 		 RecordsProcessed, RecordsSkipped, RecordsError, ImportStatus, ErrorMessage, 
 		 StartedAt, CompletedAt, CreatedAt, CreatedBy)
 		VALUES 
-		(CAST(@invoiceImportID AS UNIQUEIDENTIFIER), CAST(@importPointID AS UNIQUEIDENTIFIER), 
+		(CAST(@invoiceImportID AS UUID), CAST(@importPointID AS UUID), 
 		 @fileName, @filePath, @fileSize, @recordsTotal, @recordsProcessed, @recordsSkipped, 
 		 @recordsError, @importStatus, @errorMessage, @startedAt, @completedAt, @createdAt, @createdBy)
 	`
@@ -1015,7 +1017,7 @@ func (di *DBFImporter) updateInvoiceImport(ctx context.Context, invoiceImport *m
 		UPDATE InvoiceImport 
 		SET RecordsProcessed = @recordsProcessed, RecordsSkipped = @recordsSkipped, RecordsError = @recordsError,
 		    ImportStatus = @importStatus, ErrorMessage = @errorMessage, StartedAt = @startedAt, CompletedAt = @completedAt
-		WHERE InvoiceImportID = CAST(@invoiceImportID AS UNIQUEIDENTIFIER)
+		WHERE InvoiceImportID = CAST(@invoiceImportID AS UUID)
 	`
 
 	_, err := di.database.ExecContext(ctx, query,
@@ -1039,8 +1041,8 @@ func (di *DBFImporter) saveInvoiceData(ctx context.Context, invoiceData *models.
 		 Manufacturer, Country,
 		 Barcode, RawData, IsProcessed, CreatedAt)
 		VALUES 
-		(CAST(@invoiceDataID AS UNIQUEIDENTIFIER), CAST(@invoiceImportID AS UNIQUEIDENTIFIER), 
-		 CAST(@supplierID AS UNIQUEIDENTIFIER), @invoiceNumber, @invoiceDate,
+		(CAST(@invoiceDataID AS UUID), CAST(@invoiceImportID AS UUID), 
+		 CAST(@supplierID AS UUID), @invoiceNumber, @invoiceDate,
 		 @itemCode, @itemName, @quantity, @price, @batchNumber, @expiryDate,
 		 @manufacturer, @country,
 		 @barcode, @rawData, @isProcessed, @createdAt)
@@ -1088,38 +1090,32 @@ func (di *DBFImporter) saveInvoiceDataBatch(ctx context.Context, batch []*models
 		 Manufacturer, Country,
 		 Barcode, RawData, IsProcessed, CreatedAt)
 		VALUES 
-		(CAST(@invoiceDataID AS UNIQUEIDENTIFIER), CAST(@invoiceImportID AS UNIQUEIDENTIFIER), 
-		 CAST(@supplierID AS UNIQUEIDENTIFIER), @invoiceNumber, @invoiceDate,
-		 @itemCode, @itemName, @quantity, @price, @batchNumber, @expiryDate,
-		 @manufacturer, @country,
-		 @barcode, @rawData, @isProcessed, @createdAt)
+		(CAST(? AS UUID), CAST(? AS UUID), 
+		 CAST(? AS UUID), ?, ?,
+		 ?, ?, ?, ?, ?, ?,
+		 ?, ?,
+		 ?, ?, ?, ?)
 	`
 
-	stmt, err := tx.PrepareContext(ctx, query)
-	if err != nil {
-		return fmt.Errorf("ошибка подготовки запроса: %w", err)
-	}
-	defer stmt.Close()
-
 	for _, invoiceData := range batch {
-		_, err := stmt.ExecContext(ctx,
-			sql.Named("invoiceDataID", invoiceData.InvoiceDataID),
-			sql.Named("invoiceImportID", invoiceData.InvoiceImportID),
-			sql.Named("supplierID", invoiceData.SupplierID),
-			sql.Named("invoiceNumber", invoiceData.InvoiceNumber),
-			sql.Named("invoiceDate", invoiceData.InvoiceDate),
-			sql.Named("itemCode", invoiceData.ItemCode),
-			sql.Named("itemName", invoiceData.ItemName),
-			sql.Named("quantity", invoiceData.Quantity),
-			sql.Named("price", invoiceData.Price),
-			sql.Named("batchNumber", invoiceData.BatchNumber),
-			sql.Named("expiryDate", invoiceData.ExpiryDate),
-			sql.Named("manufacturer", invoiceData.Manufacturer),
-			sql.Named("country", invoiceData.Country),
-			sql.Named("barcode", invoiceData.Barcode),
-			sql.Named("rawData", invoiceData.RawData),
-			sql.Named("isProcessed", invoiceData.IsProcessed),
-			sql.Named("createdAt", invoiceData.CreatedAt))
+		_, err := db.ExecRaw(ctx, tx, query,
+			invoiceData.InvoiceDataID,
+			invoiceData.InvoiceImportID,
+			invoiceData.SupplierID,
+			invoiceData.InvoiceNumber,
+			invoiceData.InvoiceDate,
+			invoiceData.ItemCode,
+			invoiceData.ItemName,
+			invoiceData.Quantity,
+			invoiceData.Price,
+			invoiceData.BatchNumber,
+			invoiceData.ExpiryDate,
+			invoiceData.Manufacturer,
+			invoiceData.Country,
+			invoiceData.Barcode,
+			invoiceData.RawData,
+			invoiceData.IsProcessed,
+			invoiceData.CreatedAt)
 		if err != nil {
 			return fmt.Errorf("ошибка вставки записи в батч: %w", err)
 		}

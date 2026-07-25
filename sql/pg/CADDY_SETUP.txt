@@ -1,0 +1,32 @@
+# Reverse proxy: 24pharmdata.ru → :8080, phd.24pharmdata.ru → :8081
+#
+# 1) Скачать Caddy (Windows amd64) https://caddyserver.com/download
+#    Положить caddy.exe в C:\es_api_service\caddy\
+#
+# 2) Скопировать Caddyfile в C:\es_api_service\Caddyfile
+#
+# 3) Оператору сменить проброс:
+#      195.14.114.171:80  → 192.168.95.81:80
+#      195.14.114.171:443 → 192.168.95.81:443   (уже так — ок)
+#    (сейчас у вас 80→8080 — это мешает proxy)
+#
+# 4) Файрвол (админ PowerShell):
+#      New-NetFirewallRule -DisplayName "Caddy HTTP" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow
+#      New-NetFirewallRule -DisplayName "Caddy HTTPS" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow
+#
+# 5) Убедиться что порт 80 свободен (не занят IIS/httpd):
+#      Get-NetTCPConnection -LocalPort 80 -State Listen
+#
+# 6) Запуск вручную (проверка):
+#      cd C:\es_api_service
+#      C:\es_api_service\caddy\caddy.exe run --config C:\es_api_service\Caddyfile
+#
+# 7) Проверка:
+#      http://24pharmdata.ru/        → ClientWeb
+#      http://phd.24pharmdata.ru/    → ClienElf2 (без :8081)
+#
+# 8) Служба Windows (после успешной проверки):
+#      C:\es_api_service\caddy\caddy.exe install --config C:\es_api_service\Caddyfile --api-port 2019
+#      # или через nssm / sc — как удобнее
+#
+# es_api_service.cfg НЕ менять: http 8080 + http2 8081 как сейчас.

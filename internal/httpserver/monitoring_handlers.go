@@ -43,8 +43,8 @@ func (s *Server) handleMonitoring(w http.ResponseWriter, r *http.Request) {
 	var matched, unmatched int64
 	_ = g.Raw(`
 		SELECT
-			COUNT(CASE WHEN sp.GUID_ES IS NOT NULL AND CAST(sp.GUID_ES AS NVARCHAR(50)) <> '' THEN 1 END),
-			COUNT(CASE WHEN sp.GUID_ES IS NULL OR CAST(sp.GUID_ES AS NVARCHAR(50)) = '' THEN 1 END)
+			COUNT(CASE WHEN sp.GUID_ES IS NOT NULL AND CAST(sp.GUID_ES AS TEXT) <> '' THEN 1 END),
+			COUNT(CASE WHEN sp.GUID_ES IS NULL OR CAST(sp.GUID_ES AS TEXT) = '' THEN 1 END)
 		FROM SupplierPrice sp WHERE sp.IsActive = 1
 	`).Row().Scan(&matched, &unmatched)
 
@@ -53,9 +53,9 @@ func (s *Server) handleMonitoring(w http.ResponseWriter, r *http.Request) {
 	var ordersSum float64
 	_ = g.Raw(`
 		SELECT COUNT(*),
-		       SUM(CASE WHEN o.CreatedAt >= CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END),
-		       ISNULL(SUM(o.TotalAmount), 0)
-		FROM [Order] o
+		       SUM(CASE WHEN o.CreatedAt >= CAST((NOW() AT TIME ZONE 'utc') AS DATE) THEN 1 ELSE 0 END),
+		       COALESCE(SUM(o.TotalAmount), 0)
+		FROM "Order" o
 	`).Row().Scan(&ordersTotal, &ordersToday, &ordersSum)
 
 	// Заказы по статусам.
@@ -66,8 +66,8 @@ func (s *Server) handleMonitoring(w http.ResponseWriter, r *http.Request) {
 	}
 	byStatus := []statusRow{}
 	_ = g.Raw(`
-		SELECT ISNULL(os.Name, N'Без статуса') AS Status, COUNT(*) AS Count, ISNULL(SUM(o.TotalAmount),0) AS Sum
-		FROM [Order] o
+		SELECT COALESCE(os.Name, 'Без статуса') AS Status, COUNT(*) AS Count, COALESCE(SUM(o.TotalAmount),0) AS Sum
+		FROM "Order" o
 		LEFT JOIN OrderStatus os ON os.OrderStatusID = o.OrderStatusID
 		GROUP BY os.Name
 		ORDER BY COUNT(*) DESC
@@ -82,18 +82,18 @@ func (s *Server) handleMonitoring(w http.ResponseWriter, r *http.Request) {
 	}
 	recent := []recentRow{}
 	_ = g.Raw(`
-		SELECT TOP 10
-			CAST(o.OrderID AS NVARCHAR(50)) AS OrderID,
+		SELECT CAST(o.OrderID AS TEXT) AS OrderID,
 			o.CreatedAt AS CreatedAt,
 			b.Name AS BuyerName,
 			os.Name AS Status,
-			ISNULL(o.TotalAmount, 0) AS Total
-		FROM [Order] o
+			COALESCE(o.TotalAmount, 0) AS Total
+		FROM "Order" o
 		JOIN BuyerUser bu ON bu.BuyerUserID = o.BuyerUserID
 		JOIN Buyer b ON b.BuyerID = bu.BuyerID
 		LEFT JOIN OrderStatus os ON os.OrderStatusID = o.OrderStatusID
 		ORDER BY o.CreatedAt DESC
-	`).Scan(&recent)
+LIMIT 10
+`).Scan(&recent)
 
 	// Топ-500 наименований по заказанному количеству.
 	type topItemRow struct {
@@ -104,16 +104,16 @@ func (s *Server) handleMonitoring(w http.ResponseWriter, r *http.Request) {
 	}
 	topItems := []topItemRow{}
 	_ = g.Raw(`
-		SELECT TOP 500
-			COALESCE(NULLIF(LTRIM(RTRIM(p.Name)), ''), N'—') AS ItemName,
+		SELECT COALESCE(NULLIF(LTRIM(RTRIM(p.Name)), ''), '—') AS ItemName,
 			COUNT(DISTINCT oi.OrderID) AS OrdersCount,
-			ISNULL(SUM(oi.Qty), 0) AS TotalQty,
-			ISNULL(SUM(oi.Qty * oi.UnitPrice), 0) AS TotalSum
+			COALESCE(SUM(oi.Qty), 0) AS TotalQty,
+			COALESCE(SUM(oi.Qty * oi.UnitPrice), 0) AS TotalSum
 		FROM OrderItem oi
 		LEFT JOIN Product p ON p.ProductID = oi.ProductID
-		GROUP BY COALESCE(NULLIF(LTRIM(RTRIM(p.Name)), ''), N'—')
+		GROUP BY COALESCE(NULLIF(LTRIM(RTRIM(p.Name)), ''), '—')
 		ORDER BY SUM(oi.Qty) DESC, SUM(oi.Qty * oi.UnitPrice) DESC
-	`).Scan(&topItems)
+LIMIT 500
+`).Scan(&topItems)
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"suppliers":   suppliers,

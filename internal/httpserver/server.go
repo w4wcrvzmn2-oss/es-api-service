@@ -53,11 +53,12 @@ func NewServer(cfg *config.Config, database *db.Database, fileLogger *logger.Log
 	server.setupRoutes(mux)
 
 	server.server = &http.Server{
-		Addr:         cfg.GetAddress(),
-		Handler:      server.recoveryMiddleware(mux),
-		ReadTimeout:  cfg.GetReadTimeout(),
-		WriteTimeout: cfg.GetWriteTimeout(),
-		IdleTimeout:  cfg.GetIdleTimeout(),
+		Addr:              cfg.GetAddress(),
+		Handler:           server.recoveryMiddleware(server.gzipMiddleware(mux)),
+		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       cfg.GetReadTimeout(),
+		WriteTimeout:      cfg.GetWriteTimeout(),
+		IdleTimeout:       cfg.GetIdleTimeout(),
 	}
 
 	// Создаем второй HTTP сервер для ClienElf2 если настроен
@@ -66,11 +67,12 @@ func NewServer(cfg *config.Config, database *db.Database, fileLogger *logger.Log
 		server.setupRoutes2(mux2)
 
 		server.server2 = &http.Server{
-			Addr:         cfg.GetAddress2(),
-			Handler:      server.recoveryMiddleware(mux2),
-			ReadTimeout:  cfg.GetReadTimeout(),
-			WriteTimeout: cfg.GetWriteTimeout(),
-			IdleTimeout:  cfg.GetIdleTimeout(),
+			Addr:              cfg.GetAddress2(),
+			Handler:           server.recoveryMiddleware(server.gzipMiddleware(mux2)),
+			ReadHeaderTimeout: 15 * time.Second,
+			ReadTimeout:       cfg.GetReadTimeout(),
+			WriteTimeout:      cfg.GetWriteTimeout(),
+			IdleTimeout:       cfg.GetIdleTimeout(),
 		}
 	}
 
@@ -89,7 +91,10 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 
 // setupStaticFiles настраивает раздачу статических файлов из папки ClientWeb
 func (s *Server) setupStaticFiles(mux *http.ServeMux) {
-	staticDir := "./ClientWeb"
+	staticDir := s.config.HTTP.StaticDir
+	if staticDir == "" {
+		staticDir = "./ClientWeb"
+	}
 
 	// Обработчик для статических файлов
 	staticHandler := func(w http.ResponseWriter, r *http.Request) {
@@ -556,27 +561,71 @@ func (s *Server) healthCheck(w http.ResponseWriter, r *http.Request) {
 // GzipResponseWriter обёртка для gzip сжатия ответов
 type GzipResponseWriter struct {
 	http.ResponseWriter
-	writer *gzip.Writer
+	writer  *gzip.Writer
+	skipped bool
 }
 
-// Write записывает данные через gzip компрессор
+// SkipCompression отключает gzip (для отдачи уже сжатого price_cache/*.json.gz).
+func (w *GzipResponseWriter) SkipCompression() {
+	w.skipped = true
+	w.Header().Del("Content-Encoding")
+}
+
+// Write записывает данные через gzip компрессор (или напрямую при Skip).
 func (w *GzipResponseWriter) Write(data []byte) (int, error) {
+	if w.skipped {
+		return w.ResponseWriter.Write(data)
+	}
+	if w.writer == nil {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.writer = gzip.NewWriter(w.ResponseWriter)
+	}
 	return w.writer.Write(data)
 }
 
-// NewGzipResponseWriter создаёт ResponseWriter с gzip сжатием
-func NewGzipResponseWriter(w http.ResponseWriter) *GzipResponseWriter {
-	gzWriter := gzip.NewWriter(w)
-
-	return &GzipResponseWriter{
-		ResponseWriter: w,
-		writer:         gzWriter,
+// Flush сбрасывает gzip и underlying flusher (стриминг больших прайсов).
+func (w *GzipResponseWriter) Flush() {
+	if w.writer != nil {
+		_ = w.writer.Flush()
 	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w *GzipResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// NewGzipResponseWriter создаёт ResponseWriter с ленивым gzip
+func NewGzipResponseWriter(w http.ResponseWriter) *GzipResponseWriter {
+	return &GzipResponseWriter{ResponseWriter: w}
 }
 
 // Close закрывает gzip writer
 func (w *GzipResponseWriter) Close() error {
-	return w.writer.Close()
+	if w.writer != nil {
+		return w.writer.Close()
+	}
+	return nil
+}
+
+// gzipMiddleware сжимает ответы при Accept-Encoding: gzip (~92MB прайс → ~10–15MB).
+func (s *Server) gzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead || r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Add("Vary", "Accept-Encoding")
+		gz := NewGzipResponseWriter(w)
+		defer gz.Close()
+		next.ServeHTTP(gz, r)
+	})
 }
 
 // corsMiddleware добавляет CORS заголовки
@@ -590,7 +639,8 @@ func (s *Server) corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-Requested-With")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-Requested-With, If-None-Match, Accept-Encoding")
+		w.Header().Set("Access-Control-Expose-Headers", "ETag, Content-Encoding, X-Price-Delta")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 
 		// Обрабатываем preflight запросы - возвращаем ответ сразу, не вызывая next
@@ -630,90 +680,53 @@ func (s *Server) timeoutMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// loggingMiddleware логирует все HTTP запросы
+// loggingMiddleware логирует HTTP без блокировки UI лишним AuditLog/двойным JWT.
 func (s *Server) loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		if s.logger != nil {
-			s.logger.Info("HTTP запрос: %s %s от %s", r.Method, r.URL.Path, r.RemoteAddr)
-		}
-
-		// Извлекаем информацию о пользователе из JWT токена, если есть
-		var userID, username *string
-		authHeader := r.Header.Get("Authorization")
-		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
-			token := strings.TrimPrefix(authHeader, "Bearer ")
-			// Используем ValidateToken из authService
-			if claims, err := s.authService.ValidateToken(token); err == nil {
-				if claims.Username != "" {
-					username = &claims.Username
-					userID = &claims.Username
-				}
-			}
-		}
-
-		// Устанавливаем контекст пользователя для dbLogger
 		ipAddr := r.RemoteAddr
 		userAgent := r.Header.Get("User-Agent")
 		if s.dbLogger != nil {
-			s.dbLogger.SetUserContext(userID, username, &ipAddr, &userAgent)
+			s.dbLogger.SetUserContext(nil, nil, &ipAddr, &userAgent)
 		}
 
-		// Создаём ResponseWriter для отслеживания статуса ответа
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-
 		next.ServeHTTP(wrapped, r)
 
 		duration := time.Since(start)
+		status := wrapped.statusCode
+
 		if s.logger != nil {
-			s.logger.Info("HTTP ответ: %s %s -> %d (%v)", r.Method, r.URL.Path, wrapped.statusCode, duration)
+			if status >= 500 {
+				s.logger.Error("HTTP %s %s -> %d (%v)", r.Method, r.URL.Path, status, duration)
+			} else if status >= 400 {
+				s.logger.Warn("HTTP %s %s -> %d (%v)", r.Method, r.URL.Path, status, duration)
+			} else if duration >= 500*time.Millisecond {
+				s.logger.Info("HTTP медленно: %s %s -> %d (%v)", r.Method, r.URL.Path, status, duration)
+			}
 		}
 
-		// Записываем лог в базу данных
 		if s.dbLogger != nil {
-			ctx := r.Context()
-			executionTimeMs := int(duration.Milliseconds())
 			requestPath := r.URL.Path
 			requestMethod := r.Method
-
-			// Определяем категорию и действие на основе пути запроса
 			category := "HTTP_REQUEST"
 			action := requestMethod + "_" + strings.TrimPrefix(requestPath, "/api/")
 			if strings.HasPrefix(requestPath, "/api/") {
-				// Убираем /api/ и берем первую часть как действие
 				pathParts := strings.Split(strings.TrimPrefix(requestPath, "/api/"), "/")
 				if len(pathParts) > 0 && pathParts[0] != "" {
 					action = requestMethod + "_" + pathParts[0]
 				}
-			} else {
-				action = requestMethod + "_" + requestPath
 			}
-
-			message := fmt.Sprintf("%s %s", requestMethod, requestPath)
 			level := "INFO"
-			if wrapped.statusCode >= 400 && wrapped.statusCode < 500 {
+			if status >= 400 && status < 500 {
 				level = "WARN"
-			} else if wrapped.statusCode >= 500 {
+			} else if status >= 500 {
 				level = "ERROR"
 			}
-
-			var errorMsg *string
-			if wrapped.statusCode >= 400 {
-				errMsg := fmt.Sprintf("HTTP %d", wrapped.statusCode)
-				errorMsg = &errMsg
-			}
-
-			_ = s.dbLogger.RequestLog(ctx, level, category, action, message,
-				requestMethod, requestPath, wrapped.statusCode, executionTimeMs, nil)
-			if errorMsg != nil && s.dbLogger != nil {
-				// Дополнительно логируем ошибки
-				_ = s.dbLogger.Error(ctx, category, action+"_ERROR", message, nil, errorMsg)
-			}
-		}
-
-		// Очищаем контекст пользователя
-		if s.dbLogger != nil {
+			message := fmt.Sprintf("%s %s", requestMethod, requestPath)
+			s.dbLogger.RequestLogFast(level, category, action, message,
+				requestMethod, requestPath, status, int(duration.Milliseconds()))
 			s.dbLogger.ClearUserContext()
 		}
 	}
@@ -728,6 +741,16 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
 }
 
 // handleTableData обрабатывает запросы к таблицам с потоковой выдачей
@@ -920,14 +943,16 @@ func (s *Server) streamTableDataWithCompression(w http.ResponseWriter, r *http.R
 	var writer io.Writer = w
 	var closer io.Closer
 
-	// Проверяем поддержку сжатия клиентом
-	acceptEncoding := r.Header.Get("Accept-Encoding")
-	if strings.Contains(acceptEncoding, "gzip") {
-		w.Header().Set("Content-Encoding", "gzip")
-		gzWriter := NewGzipResponseWriter(w)
-		writer = gzWriter
-		closer = gzWriter
-		defer closer.Close()
+	// Если уже сжимает gzipMiddleware — не оборачиваем второй раз.
+	if _, already := unwrapGzip(w); !already {
+		acceptEncoding := r.Header.Get("Accept-Encoding")
+		if strings.Contains(acceptEncoding, "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			gzWriter := NewGzipResponseWriter(w)
+			writer = gzWriter
+			closer = gzWriter
+			defer closer.Close()
+		}
 	}
 
 	// Создаём JSON streamer

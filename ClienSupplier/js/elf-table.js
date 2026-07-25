@@ -153,10 +153,38 @@ var ElfTable = (function () {
         _download(csv, name + '.csv', 'text/csv;charset=utf-8;');
     }
 
+    function _xlsxUrl() {
+        var path = (window.location && window.location.pathname) || '';
+        if (path.indexOf('/pages/') !== -1) return '../vendor/xlsx.full.min.js';
+        return 'vendor/xlsx.full.min.js';
+    }
+
+    var _xlsxPromise = null;
+    function _ensureXlsx() {
+        if (typeof XLSX !== 'undefined') return Promise.resolve();
+        if (_xlsxPromise) return _xlsxPromise;
+        _xlsxPromise = new Promise(function (resolve, reject) {
+            var s = document.createElement('script');
+            s.src = _xlsxUrl();
+            s.async = true;
+            s.onload = function () { resolve(); };
+            s.onerror = function () {
+                _xlsxPromise = null;
+                reject(new Error('Не удалось загрузить SheetJS'));
+            };
+            document.head.appendChild(s);
+        });
+        return _xlsxPromise;
+    }
+
     function _exportExcel(tableEl, name) {
-        if (typeof XLSX === 'undefined') { Toast.error('Ошибка', 'Библиотека SheetJS не загружена'); return; }
-        var wb = XLSX.utils.table_to_book(tableEl, { sheet: 'Данные', raw: false });
-        XLSX.writeFile(wb, name + '.xlsx');
+        _ensureXlsx().then(function () {
+            var wb = XLSX.utils.table_to_book(tableEl, { sheet: 'Данные', raw: false });
+            XLSX.writeFile(wb, name + '.xlsx');
+        }).catch(function (err) {
+            if (typeof Toast !== 'undefined') Toast.error('Ошибка', err.message || 'Библиотека SheetJS не загружена');
+            else alert(err.message || 'Библиотека SheetJS не загружена');
+        });
     }
 
     function _exportPDF(tableEl, name) {

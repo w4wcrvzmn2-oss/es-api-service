@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"time"
 
-	_ "github.com/microsoft/go-mssqldb"
 	"github.com/robfig/cron/v3"
 )
 
@@ -76,7 +75,7 @@ func (ds *DrugSyncSimple) fetchSourceData(ctx context.Context) ([]map[string]int
 	// Получаем только основные поля для упрощения
 	query := `
 		SELECT 
-			CAST(GUID_ES AS NVARCHAR(50)) as GUID_ES, NAME, BARCODE, CUREFORM_COD, CUREFORM_NAME, INN_NAME_RUS, INN_NAME_LAT,
+			CAST(GUID_ES AS TEXT) as GUID_ES, NAME, BARCODE, CUREFORM_COD, CUREFORM_NAME, INN_NAME_RUS, INN_NAME_LAT,
 			PRODUCER_COD, TRN_NAME_RUS, TRN_NAME_LAT, UPAK_COD, DATA_AN, DATA_REG, DOSAGE,
 			KOD_ES, NDS_RATE, ID_ES, DISCRIBE, RATING, UPDATED
 		FROM es_ef2 
@@ -127,48 +126,43 @@ func (ds *DrugSyncSimple) fetchSourceData(ctx context.Context) ([]map[string]int
 }
 
 func (ds *DrugSyncSimple) updateTargetData(ctx context.Context, data []map[string]interface{}) error {
-	// Используем MERGE для обновления существующих и вставки новых записей
+	// Используем INSERT ... ON CONFLICT для обновления существующих и вставки новых записей
 	// Это безопасно, так как не нарушает внешние ключи
-	mergeQuery := `
-		MERGE es_ef2 AS target
-		USING (SELECT @GUID_ES AS GUID_ES) AS source
-		ON target.GUID_ES = source.GUID_ES
-		WHEN MATCHED THEN
-			UPDATE SET
-				NAME = @NAME,
-				BARCODE = @BARCODE,
-				CUREFORM_COD = @CUREFORM_COD,
-				CUREFORM_NAME = @CUREFORM_NAME,
-				INN_NAME_RUS = @INN_NAME_RUS,
-				INN_NAME_LAT = @INN_NAME_LAT,
-				PRODUCER_COD = @PRODUCER_COD,
-				TRN_NAME_RUS = @TRN_NAME_RUS,
-				TRN_NAME_LAT = @TRN_NAME_LAT,
-				UPAK_COD = @UPAK_COD,
-				DATA_AN = @DATA_AN,
-				DATA_REG = @DATA_REG,
-				DOSAGE = @DOSAGE,
-				KOD_ES = @KOD_ES,
-				NDS_RATE = @NDS_RATE,
-				ID_ES = @ID_ES,
-				DISCRIBE = @DISCRIBE,
-				RATING = @RATING,
-				UPDATED = @UPDATED,
-				updated_at = GETUTCDATE(),
-				is_active = 1
-		WHEN NOT MATCHED THEN
-			INSERT (
-				GUID_ES, NAME, BARCODE, CUREFORM_COD, CUREFORM_NAME, INN_NAME_RUS, INN_NAME_LAT,
-				PRODUCER_COD, TRN_NAME_RUS, TRN_NAME_LAT, UPAK_COD, DATA_AN, DATA_REG, DOSAGE,
-				KOD_ES, NDS_RATE, ID_ES, DISCRIBE, RATING, UPDATED,
-				created_at, updated_at, is_active
-			) VALUES (
-				CAST(@GUID_ES AS UNIQUEIDENTIFIER), @NAME, @BARCODE, @CUREFORM_COD, @CUREFORM_NAME, @INN_NAME_RUS, @INN_NAME_LAT,
-				@PRODUCER_COD, @TRN_NAME_RUS, @TRN_NAME_LAT, @UPAK_COD, @DATA_AN, @DATA_REG, @DOSAGE,
-				@KOD_ES, @NDS_RATE, @ID_ES, @DISCRIBE, @RATING, @UPDATED,
-				GETUTCDATE(), GETUTCDATE(), 1
-			);
-	`
+	upsertQuery := `
+		INSERT INTO "es_ef2" (
+			"GUID_ES", "NAME", "BARCODE", "CUREFORM_COD", "CUREFORM_NAME", "INN_NAME_RUS", "INN_NAME_LAT",
+			"PRODUCER_COD", "TRN_NAME_RUS", "TRN_NAME_LAT", "UPAK_COD", "DATA_AN", "DATA_REG", "DOSAGE",
+			"KOD_ES", "NDS_RATE", "ID_ES", "DISCRIBE", "RATING", "UPDATED",
+			"created_at", "updated_at", "is_active"
+		) VALUES (
+			CAST(@GUID_ES AS UUID), @NAME, @BARCODE, @CUREFORM_COD, @CUREFORM_NAME, @INN_NAME_RUS, @INN_NAME_LAT,
+			@PRODUCER_COD, @TRN_NAME_RUS, @TRN_NAME_LAT, @UPAK_COD, @DATA_AN, @DATA_REG, @DOSAGE,
+			@KOD_ES, @NDS_RATE, @ID_ES, @DISCRIBE, @RATING, @UPDATED,
+			(NOW() AT TIME ZONE 'utc'), (NOW() AT TIME ZONE 'utc'), TRUE
+		)
+		ON CONFLICT ("GUID_ES") DO UPDATE SET
+			"NAME" = EXCLUDED."NAME",
+			"BARCODE" = EXCLUDED."BARCODE",
+			"CUREFORM_COD" = EXCLUDED."CUREFORM_COD",
+			"CUREFORM_NAME" = EXCLUDED."CUREFORM_NAME",
+			"INN_NAME_RUS" = EXCLUDED."INN_NAME_RUS",
+			"INN_NAME_LAT" = EXCLUDED."INN_NAME_LAT",
+			"PRODUCER_COD" = EXCLUDED."PRODUCER_COD",
+			"TRN_NAME_RUS" = EXCLUDED."TRN_NAME_RUS",
+			"TRN_NAME_LAT" = EXCLUDED."TRN_NAME_LAT",
+			"UPAK_COD" = EXCLUDED."UPAK_COD",
+			"DATA_AN" = EXCLUDED."DATA_AN",
+			"DATA_REG" = EXCLUDED."DATA_REG",
+			"DOSAGE" = EXCLUDED."DOSAGE",
+			"KOD_ES" = EXCLUDED."KOD_ES",
+			"NDS_RATE" = EXCLUDED."NDS_RATE",
+			"ID_ES" = EXCLUDED."ID_ES",
+			"DISCRIBE" = EXCLUDED."DISCRIBE",
+			"RATING" = EXCLUDED."RATING",
+			"UPDATED" = EXCLUDED."UPDATED",
+			"updated_at" = (NOW() AT TIME ZONE 'utc'),
+			"is_active" = TRUE;
+`
 
 	// Обрабатываем данные батчами по 1000 записей
 	batchSize := 1000
@@ -186,7 +180,7 @@ func (ds *DrugSyncSimple) updateTargetData(ctx context.Context, data []map[strin
 			return fmt.Errorf("ошибка начала транзакции для батча: %w", err)
 		}
 
-		batchStmt, err := tx.PrepareContext(ctx, mergeQuery)
+		batchStmt, err := db.PrepareRaw(ctx, tx, upsertQuery)
 		if err != nil {
 			tx.Rollback()
 			return fmt.Errorf("ошибка подготовки запроса для батча: %w", err)

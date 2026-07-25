@@ -265,10 +265,10 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 	var rows []row
 	err := s.database.GORMWith(ctx).Raw(`
 		SELECT
-			CAST(o.OrderID AS NVARCHAR(50)) AS OrderID,
+			CAST(o.OrderID AS TEXT) AS OrderID,
 			o.CreatedAt AS OrderDate,
 			b.Name AS Buyer,
-			ISNULL(bl.Address, '') AS Address,
+			COALESCE(bl.Address, '') AS Address,
 			COALESCE(NULLIF(LTRIM(RTRIM(oi.ItemCode)), ''), sp.ItemCode, spfb.ItemCode) AS Code,
 			COALESCE(
 				NULLIF(LTRIM(RTRIM(oi.ItemName)), ''),
@@ -277,7 +277,7 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 				NULLIF(LTRIM(RTRIM(spfb.ItemName)), ''),
 				NULLIF(LTRIM(RTRIM(spfb.SupplierItemName)), ''),
 				p.Name,
-				N''
+				''
 			) AS Name,
 			COALESCE(sp.SupplierItemName, spfb.SupplierItemName) AS SuppName,
 			COALESCE(NULLIF(LTRIM(RTRIM(oi.Barcode)), ''), sp.Barcode, spfb.Barcode) AS Barcode,
@@ -289,33 +289,33 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 			oi.Qty AS Qty,
 			oi.UnitPrice AS Price
 		FROM OrderItem oi
-		INNER JOIN [Order] o ON o.OrderID = oi.OrderID
+		INNER JOIN "Order" o ON o.OrderID = oi.OrderID
 		INNER JOIN BuyerUser bu ON bu.BuyerUserID = o.BuyerUserID
 		INNER JOIN Buyer b ON b.BuyerID = bu.BuyerID
 		LEFT JOIN BuyerLocation bl ON bl.BuyerLocationID = o.BuyerLocationID
 		LEFT JOIN Product p ON p.ProductID = oi.ProductID
 		LEFT JOIN SupplierPrice sp ON sp.SupplierPriceID = oi.SupplierPriceID
-		OUTER APPLY (
-			SELECT TOP 1
-				spx.ItemCode, spx.ItemName, spx.SupplierItemName, spx.Barcode,
+		LEFT JOIN LATERAL (
+			SELECT spx.ItemCode, spx.ItemName, spx.SupplierItemName, spx.Barcode,
 				spx.Manufacturer, spx.Country, spx.Series, spx.BatchNumber, spx.ExpiryDate
 			FROM SupplierPrice spx
 			WHERE sp.SupplierPriceID IS NULL
 			  AND spx.SupplierID = oi.SupplierID
 			  AND (
 			    (oi.ProductID IS NOT NULL AND spx.GUID_ES = oi.ProductID)
-			    OR ABS(ISNULL(spx.FinalPrice, spx.Price) - oi.UnitPrice) < 0.05
+			    OR ABS(COALESCE(spx.FinalPrice, spx.Price) - oi.UnitPrice) < 0.05
 			  )
 			ORDER BY
 			  CASE WHEN oi.ProductID IS NOT NULL AND spx.GUID_ES = oi.ProductID THEN 0 ELSE 1 END,
-			  ABS(ISNULL(spx.FinalPrice, spx.Price) - oi.UnitPrice),
+			  ABS(COALESCE(spx.FinalPrice, spx.Price) - oi.UnitPrice),
 			  spx.UpdatedAt DESC
 		) spfb
-		WHERE oi.SupplierID = CAST(@sid AS UNIQUEIDENTIFIER)
+		WHERE oi.SupplierID = CAST(@sid AS UUID)
 		  AND o.CreatedAt >= @from
 		  AND o.CreatedAt < DATEADD(day, 1, CAST(@to AS DATE))
 		ORDER BY o.CreatedAt, o.OrderID
-	`, sql.Named("sid", sid), sql.Named("from", from), sql.Named("to", to)).Scan(&rows).Error
+LIMIT 1
+`, sql.Named("sid", sid), sql.Named("from", from), sql.Named("to", to)).Scan(&rows).Error
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Error("Ошибка выборки заказов для выгрузки: %v", err)

@@ -8,7 +8,7 @@ import (
 // AuditLog представляет запись аудит-лога
 type AuditLog struct {
 	LogID           int64     `json:"log_id" gorm:"primaryKey;autoIncrement"`
-	UserID          *string   `json:"user_id,omitempty" gorm:"type:uniqueidentifier"`
+	UserID          *string   `json:"user_id,omitempty" gorm:"type:uuid"`
 	Username        *string   `json:"username,omitempty"`
 	LogLevel        string    `json:"log_level"`
 	Category        *string   `json:"category,omitempty"`
@@ -22,7 +22,7 @@ type AuditLog struct {
 	ResponseStatus  *int      `json:"response_status,omitempty"`
 	ExecutionTimeMs *int      `json:"execution_time_ms,omitempty"`
 	ErrorMessage    *string   `json:"error_message,omitempty"`
-	CreatedAt       time.Time `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
+	CreatedAt       time.Time `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
 }
 
 // AuditLogRequest представляет запрос на получение логов

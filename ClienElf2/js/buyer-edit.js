@@ -288,10 +288,25 @@ async function addLocation() {
 
 async function deleteLocation(id) {
     if (!confirm('Удалить эту точку доставки?')) return;
+    const list = document.getElementById('locationsList');
+    const btn = list ? list.querySelector(`button[onclick="deleteLocation('${id}')"]`) : null;
+    const row = btn ? btn.closest('div') : null;
+    if (row) {
+        row.style.opacity = '0.35';
+        row.style.pointerEvents = 'none';
+    }
     try {
         await API.delete(`/api/buyer-locations/${id}`);
-        await loadLocations(currentBuyerId);
+        if (row) row.remove();
+        if (list && !list.querySelector('button[onclick^="deleteLocation"]')) {
+            list.innerHTML = '<div class="text-muted">Точек доставки нет. Добавьте ниже — появится Location ID.</div>';
+        }
+        Toast.success('Удалено', 'Точка доставки удалена');
     } catch (err) {
+        if (row) {
+            row.style.opacity = '';
+            row.style.pointerEvents = '';
+        }
         Toast.error('Ошибка', err.message || 'Не удалось удалить точку');
     }
 }

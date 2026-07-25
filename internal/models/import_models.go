@@ -7,7 +7,7 @@ import (
 
 // Supplier представляет поставщика
 type Supplier struct {
-	SupplierID     string    `json:"supplier_id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
+	SupplierID     string    `json:"supplier_id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	Name           string    `json:"name"`
 	Address        *string   `json:"address,omitempty"`
 	Contacts       *string   `json:"contacts,omitempty"`
@@ -16,14 +16,14 @@ type Supplier struct {
 	Login          *string   `json:"login,omitempty"`
 	Password       *string   `json:"password,omitempty"`
 	IsActive       bool      `json:"is_active"`
-	CreatedAt      time.Time `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
-	UpdatedAt      time.Time `json:"updated_at" gorm:"autoUpdateTime:false;default:GETUTCDATE()"`
+	CreatedAt      time.Time `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
+	UpdatedAt      time.Time `json:"updated_at" gorm:"autoUpdateTime:false;default:(NOW() AT TIME ZONE 'utc')"`
 }
 
 // ImportPoint представляет точку импорта (настройки источника прайса)
 type ImportPoint struct {
-	ImportPointID  string    `json:"import_point_id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
-	SupplierID     *string   `json:"supplier_id,omitempty" gorm:"type:uniqueidentifier"`
+	ImportPointID  string    `json:"import_point_id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	SupplierID     *string   `json:"supplier_id,omitempty" gorm:"type:uuid"`
 	SupplierName   *string   `json:"supplier_name,omitempty" gorm:"-"`
 	Name           string    `json:"name"`
 	Description    *string   `json:"description,omitempty"`
@@ -36,14 +36,14 @@ type ImportPoint struct {
 	FtpPassword    *string   `json:"ftp_password,omitempty"`
 	FtpRemotePath  *string   `json:"ftp_remote_path,omitempty"`
 	IsActive       bool      `json:"is_active"`
-	CreatedAt      time.Time `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
-	UpdatedAt      time.Time `json:"updated_at" gorm:"autoUpdateTime:false;default:GETUTCDATE()"`
+	CreatedAt      time.Time `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
+	UpdatedAt      time.Time `json:"updated_at" gorm:"autoUpdateTime:false;default:(NOW() AT TIME ZONE 'utc')"`
 }
 
 // DBFFieldMapping представляет маппинг поля DBF на поле базы данных
 type DBFFieldMapping struct {
-	MappingID       string    `json:"mapping_id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
-	ImportPointID   string    `json:"import_point_id" gorm:"type:uniqueidentifier"`
+	MappingID       string    `json:"mapping_id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	ImportPointID   string    `json:"import_point_id" gorm:"type:uuid"`
 	DBFFieldName    string    `json:"dbf_field_name"`
 	TargetFieldName string    `json:"target_field_name"`
 	DataType        string    `json:"data_type"`
@@ -51,14 +51,14 @@ type DBFFieldMapping struct {
 	DefaultValue    *string   `json:"default_value,omitempty"`
 	TransformRule   *string   `json:"transform_rule,omitempty"`
 	DisplayOrder    int       `json:"display_order"`
-	CreatedAt       time.Time `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
-	UpdatedAt       time.Time `json:"updated_at" gorm:"autoUpdateTime:false;default:GETUTCDATE()"`
+	CreatedAt       time.Time `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
+	UpdatedAt       time.Time `json:"updated_at" gorm:"autoUpdateTime:false;default:(NOW() AT TIME ZONE 'utc')"`
 }
 
 // InvoiceImport представляет историю импорта накладной
 type InvoiceImport struct {
-	InvoiceImportID  string     `json:"invoice_import_id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
-	ImportPointID    string     `json:"import_point_id" gorm:"type:uniqueidentifier"`
+	InvoiceImportID  string     `json:"invoice_import_id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	ImportPointID    string     `json:"import_point_id" gorm:"type:uuid"`
 	FileName         string     `json:"file_name"`
 	FilePath         string     `json:"file_path"`
 	FileSize         *int64     `json:"file_size,omitempty"`
@@ -70,15 +70,15 @@ type InvoiceImport struct {
 	ErrorMessage     *string    `json:"error_message,omitempty"`
 	StartedAt        *time.Time `json:"started_at,omitempty"`
 	CompletedAt      *time.Time `json:"completed_at,omitempty"`
-	CreatedAt        time.Time  `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
+	CreatedAt        time.Time  `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
 	CreatedBy        *string    `json:"created_by,omitempty"`
 }
 
 // InvoiceData представляет импортированные данные накладной
 type InvoiceData struct {
-	InvoiceDataID   string     `json:"invoice_data_id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
-	InvoiceImportID string     `json:"invoice_import_id" gorm:"type:uniqueidentifier"`
-	SupplierID      string     `json:"supplier_id" gorm:"type:uniqueidentifier"`
+	InvoiceDataID   string     `json:"invoice_data_id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	InvoiceImportID string     `json:"invoice_import_id" gorm:"type:uuid"`
+	SupplierID      string     `json:"supplier_id" gorm:"type:uuid"`
 	InvoiceNumber   *string    `json:"invoice_number,omitempty"`
 	InvoiceDate     *time.Time `json:"invoice_date,omitempty"`
 	ItemCode        *string    `json:"item_code,omitempty"`
@@ -94,7 +94,7 @@ type InvoiceData struct {
 	IsProcessed     bool       `json:"is_processed"`
 	ProcessedAt     *time.Time `json:"processed_at,omitempty"`
 	ErrorMessage    *string    `json:"error_message,omitempty"`
-	CreatedAt       time.Time  `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
+	CreatedAt       time.Time  `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
 }
 
 // SupplierRequest представляет запрос на создание/обновление поставщика
@@ -147,39 +147,39 @@ type ImportFileRequest struct {
 
 // Buyer представляет покупателя
 type Buyer struct {
-	BuyerID   string    `json:"buyer_id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
+	BuyerID   string    `json:"buyer_id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	Name      string    `json:"name"`
 	INN       *string   `json:"inn,omitempty"`
-	RegionID  *string   `json:"region_id,omitempty" gorm:"type:uniqueidentifier"`
+	RegionID  *string   `json:"region_id,omitempty" gorm:"type:uuid"`
 	Code      *string   `json:"code,omitempty"`
 	Phone     *string   `json:"phone,omitempty"`
 	Address   *string   `json:"address,omitempty"`
 	Email     *string   `json:"email,omitempty"`
 	IsActive  bool      `json:"is_active"`
-	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
 }
 
 // BuyerLocation представляет адрес покупателя
 type BuyerLocation struct {
-	BuyerLocationID string    `json:"buyer_location_id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
-	BuyerID         string    `json:"buyer_id" gorm:"type:uniqueidentifier"`
+	BuyerLocationID string    `json:"buyer_location_id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	BuyerID         string    `json:"buyer_id" gorm:"type:uuid"`
 	Address         string    `json:"address"`
-	RegionID        *string   `json:"region_id,omitempty" gorm:"type:uniqueidentifier"`
+	RegionID        *string   `json:"region_id,omitempty" gorm:"type:uuid"`
 	IsDefault       bool      `json:"is_default"`
-	CreatedAt       time.Time `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
+	CreatedAt       time.Time `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
 }
 
 // BuyerUser представляет пользователя покупателя
 type BuyerUser struct {
-	BuyerUserID string    `json:"buyer_user_id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
-	BuyerID     string    `json:"buyer_id" gorm:"type:uniqueidentifier"`
+	BuyerUserID string    `json:"buyer_user_id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	BuyerID     string    `json:"buyer_id" gorm:"type:uuid"`
 	FullName    string    `json:"full_name"`
 	Email       string    `json:"email"`
 	Phone       *string   `json:"phone,omitempty"`
 	Role        *string   `json:"role,omitempty"`
 	IsActive    bool      `json:"is_active"`
 	Password    *string   `json:"-"`
-	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
+	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
 }
 
 // BuyerRequest представляет запрос на создание/обновление покупателя
@@ -219,7 +219,7 @@ type BuyerLocationRequest struct {
 
 // OrderStatus представляет статус заказа
 type OrderStatus struct {
-	OrderStatusID string  `json:"order_status_id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
+	OrderStatusID string  `json:"order_status_id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	Name          string  `json:"name"`
 	Description   *string `json:"description,omitempty"`
 	IsActive      bool    `json:"is_active"`
@@ -229,12 +229,12 @@ type OrderStatus struct {
 // Таблица называется [Order] — зарезервированное слово MS SQL, GORM-driver sqlserver
 // квотирует его автоматически через TableName().
 type Order struct {
-	OrderID            string     `json:"order_id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
-	BuyerUserID        string     `json:"buyer_user_id" gorm:"type:uniqueidentifier"`
-	BuyerApplicationID string     `json:"buyer_application_id" gorm:"type:uniqueidentifier"`
-	BuyerLocationID    *string    `json:"buyer_location_id,omitempty" gorm:"type:uniqueidentifier"`
-	OrderStatusID      string     `json:"order_status_id" gorm:"type:uniqueidentifier"`
-	CreatedAt          time.Time  `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
+	OrderID            string     `json:"order_id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	BuyerUserID        string     `json:"buyer_user_id" gorm:"type:uuid"`
+	BuyerApplicationID string     `json:"buyer_application_id" gorm:"type:uuid"`
+	BuyerLocationID    *string    `json:"buyer_location_id,omitempty" gorm:"type:uuid"`
+	OrderStatusID      string     `json:"order_status_id" gorm:"type:uuid"`
+	CreatedAt          time.Time  `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
 	PlacedAt           *time.Time `json:"placed_at,omitempty"`
 	TotalAmount        *float64   `json:"total_amount,omitempty"`
 	Comment            *string    `json:"comment,omitempty"`
@@ -255,20 +255,20 @@ func (Order) TableName() string { return "Order" }
 // После миграции alter_order_item_relax_nullability.sql:
 // SupplierItemID/ProductID/RegionID допускают NULL.
 type OrderItem struct {
-	OrderLineID    string    `json:"order_line_id" gorm:"primaryKey;type:uniqueidentifier;default:NEWID()"`
-	OrderID        string    `json:"order_id" gorm:"type:uniqueidentifier"`
-	SupplierID      string    `json:"supplier_id" gorm:"type:uniqueidentifier"`
-	SupplierItemID  *string   `json:"supplier_item_id,omitempty" gorm:"type:uniqueidentifier"`
-	SupplierPriceID *string   `json:"supplier_price_id,omitempty" gorm:"type:uniqueidentifier"`
-	ProductID       *string   `json:"product_id,omitempty" gorm:"type:uniqueidentifier"`
-	RegionID        *string   `json:"region_id,omitempty" gorm:"type:uniqueidentifier"`
+	OrderLineID    string    `json:"order_line_id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	OrderID        string    `json:"order_id" gorm:"type:uuid"`
+	SupplierID      string    `json:"supplier_id" gorm:"type:uuid"`
+	SupplierItemID  *string   `json:"supplier_item_id,omitempty" gorm:"type:uuid"`
+	SupplierPriceID *string   `json:"supplier_price_id,omitempty" gorm:"type:uuid"`
+	ProductID       *string   `json:"product_id,omitempty" gorm:"type:uuid"`
+	RegionID        *string   `json:"region_id,omitempty" gorm:"type:uuid"`
 	ItemName        *string   `json:"item_name,omitempty"`
 	ItemCode        *string   `json:"item_code,omitempty"`
 	Barcode         *string   `json:"barcode,omitempty"`
 	Qty             float64   `json:"qty"`
 	UnitPrice      float64   `json:"unit_price"`
-	PriceListID    *string   `json:"price_list_id,omitempty" gorm:"type:uniqueidentifier"`
-	CreatedAt      time.Time `json:"created_at" gorm:"autoCreateTime:false;default:GETUTCDATE()"`
+	PriceListID    *string   `json:"price_list_id,omitempty" gorm:"type:uuid"`
+	CreatedAt      time.Time `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
 	// Расширенные поля для отображения — не в БД.
 	SupplierName     *string `json:"supplier_name,omitempty" gorm:"-"`
 	SupplierItemName *string `json:"supplier_item_name,omitempty" gorm:"-"`

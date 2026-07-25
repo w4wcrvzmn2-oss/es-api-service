@@ -148,7 +148,7 @@ func (s *ESAPIService) Start(srv service.Service) error {
 			UPDATE InvoiceImport 
 			SET ImportStatus = 'FAILED',
 			    ErrorMessage = 'Импорт прерван из-за перезапуска сервиса',
-			    CompletedAt = GETUTCDATE()
+			    CompletedAt = (NOW() AT TIME ZONE 'utc')
 			WHERE ImportStatus = 'PROCESSING'
 		`
 		result, err := s.database.ExecContext(ctx, cleanupQuery)

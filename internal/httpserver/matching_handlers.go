@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"es_api_service/internal/matching"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -123,7 +124,7 @@ func (s *Server) handleSupplierPricesRouter(w http.ResponseWriter, r *http.Reque
 
 // handleGetSupplierPrices возвращает список прайсов поставщика
 func (s *Server) handleGetSupplierPrices(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 180*time.Second)
 	defer cancel()
 
 	supplierID := r.URL.Query().Get("supplier_id")
@@ -131,42 +132,20 @@ func (s *Server) handleGetSupplierPrices(w http.ResponseWriter, r *http.Request)
 		s.writeError(w, http.StatusBadRequest, "Не указан supplier_id")
 		return
 	}
-
-	// Валидация UUID для защиты от SQL injection
 	if _, err := uuid.Parse(supplierID); err != nil {
-		if s.logger != nil {
-			s.logger.Warn("Недопустимый формат supplier_id: %s", supplierID)
-		}
 		s.writeError(w, http.StatusBadRequest, "Недопустимый формат supplier_id")
 		return
 	}
 
-	// Валидация UUID для защиты от SQL injection
-	if _, err := uuid.Parse(supplierID); err != nil {
-		if s.logger != nil {
-			s.logger.Warn("Недопустимый формат supplier_id: %s", supplierID)
-		}
-		s.writeError(w, http.StatusBadRequest, "Недопустимый формат supplier_id")
-		return
-	}
-
-	// Проверяем фильтр по региону
 	regionID := r.URL.Query().Get("region_id")
 	if regionID != "" {
-		// Валидация UUID для региона
 		if _, err := uuid.Parse(regionID); err != nil {
-			if s.logger != nil {
-				s.logger.Warn("Недопустимый формат region_id: %s", regionID)
-			}
 			s.writeError(w, http.StatusBadRequest, "Недопустимый формат region_id")
 			return
 		}
 	}
 
-	// Параметр для включения неактивных записей (для страницы сопоставления)
 	includeInactive := r.URL.Query().Get("include_inactive") == "true"
-
-	// Пагинация
 	limitVal := 0
 	offsetVal := 0
 	if lStr := r.URL.Query().Get("limit"); lStr != "" {
@@ -179,18 +158,28 @@ func (s *Server) handleGetSupplierPrices(w http.ResponseWriter, r *http.Request)
 			offsetVal = v
 		}
 	}
-
-	// Фильтр только по последнему импорту (по умолчанию true)
 	latestOnly := r.URL.Query().Get("latest_only") != "false"
 
-	// Определяем WHERE-условие: только последний импорт или все записи
-	supplierWhere := `sp.SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)`
+	var updatedSince *time.Time
+	if sinceStr := strings.TrimSpace(r.URL.Query().Get("updated_since")); sinceStr != "" {
+		t, err := time.Parse(time.RFC3339, sinceStr)
+		if err != nil {
+			t, err = time.Parse("2006-01-02T15:04:05", sinceStr)
+		}
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, "Недопустимый updated_since (нужен RFC3339)")
+			return
+		}
+		updatedSince = &t
+	}
+
+	supplierWhere := `sp.SupplierID = CAST(@supplierID AS UUID)`
 	if latestOnly {
 		supplierWhere = `sp.InvoiceImportID IN (
 			SELECT lii.InvoiceImportID FROM InvoiceImport lii
 			WHERE lii.ImportPointID IN (
 				SELECT pl.ImportPointID FROM PriceList pl
-				WHERE pl.SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER) AND pl.IsActive = 1
+				WHERE pl.SupplierID = CAST(@supplierID AS UUID) AND pl.IsActive = 1
 			)
 			AND lii.ImportStatus = 'COMPLETED'
 			AND lii.CompletedAt = (
@@ -200,11 +189,70 @@ func (s *Server) handleGetSupplierPrices(w http.ResponseWriter, r *http.Request)
 		)`
 	}
 
+	countWhere := supplierWhere
+	if !includeInactive {
+		countWhere += ` AND sp.IsActive = 1`
+	}
+	if regionID != "" {
+		countWhere += ` AND (sp.RegionID = CAST(@regionID AS UUID) OR sp.RegionID IS NULL)`
+	}
+	if updatedSince != nil {
+		countWhere += ` AND sp.UpdatedAt > @updatedSince`
+	}
+
+	argsMeta := []interface{}{sql.Named("supplierID", supplierID)}
+	if regionID != "" {
+		argsMeta = append(argsMeta, sql.Named("regionID", regionID))
+	}
+	if updatedSince != nil {
+		argsMeta = append(argsMeta, sql.Named("updatedSince", *updatedSince))
+	}
+
+	var totalInDB, totalNullGuid, totalEmptyGuid int
+	var maxUpdated sql.NullTime
+	statsQuery := fmt.Sprintf(`
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN sp.GUID_ES IS NULL THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN sp.GUID_ES IS NOT NULL AND CAST(sp.GUID_ES AS TEXT) = '' THEN 1 ELSE 0 END), 0),
+			MAX(sp.UpdatedAt)
+		FROM SupplierPrice sp
+		WHERE %s
+	`, countWhere)
+	if err := s.database.GORMWith(ctx).Raw(statsQuery, argsMeta...).Row().Scan(&totalInDB, &totalNullGuid, &totalEmptyGuid, &maxUpdated); err != nil {
+		if s.logger != nil {
+			s.logger.Error("Ошибка статистики прайсов: %v", err)
+		}
+		s.writeError(w, http.StatusInternalServerError, "Ошибка получения прайса")
+		return
+	}
+
+	maxUp := time.Time{}
+	if maxUpdated.Valid {
+		maxUp = maxUpdated.Time
+	}
+	etag := priceListETag(supplierID, totalInDB, maxUp)
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, must-revalidate")
+	if maxUpdated.Valid {
+		w.Header().Set("Last-Modified", maxUp.UTC().Format(http.TimeFormat))
+	}
+	if updatedSince != nil {
+		w.Header().Set("X-Price-Delta", "1")
+	}
+	if match := strings.TrimSpace(r.Header.Get("If-None-Match")); match != "" && match == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	if s.tryServePriceCache(w, r, supplierID, etag, totalInDB) {
+		return
+	}
+
 	query := fmt.Sprintf(`
 		SELECT
-			CAST(sp.SupplierPriceID AS NVARCHAR(50)) AS SupplierPriceID,
-			CAST(sp.SupplierID AS NVARCHAR(50)) AS SupplierID,
-			CASE WHEN sp.GUID_ES IS NULL THEN NULL ELSE CAST(sp.GUID_ES AS NVARCHAR(50)) END AS GUID_ES,
+			CAST(sp.SupplierPriceID AS TEXT) AS SupplierPriceID,
+			CAST(sp.SupplierID AS TEXT) AS SupplierID,
+			CASE WHEN sp.GUID_ES IS NULL THEN NULL ELSE CAST(sp.GUID_ES AS TEXT) END AS GUID_ES,
 			ef2.NAME AS DrugName,
 			ef2.INN_NAME_RUS AS INN,
 			ef2.CUREFORM_NAME AS CureForm,
@@ -221,39 +269,34 @@ func (s *Server) handleGetSupplierPrices(w http.ResponseWriter, r *http.Request)
 			sp.MatchConfidence,
 			sp.InvoiceDate AS LastPriceDate,
 			sp.IsActive,
-			CAST(sp.RegionID AS NVARCHAR(50)) AS RegionID,
+			CAST(sp.RegionID AS TEXT) AS RegionID,
 			r.Name AS RegionName,
-			ISNULL(sp.MarkupPct, 0) AS MarkupPct,
-			sp.Price * (1 + ISNULL(sp.MarkupPct, 0) / 100.0) AS FinalPrice,
+			COALESCE(sp.MarkupPct, 0) AS MarkupPct,
+			sp.Price * (1 + COALESCE(sp.MarkupPct, 0) / 100.0) AS FinalPrice,
 			sp.CreatedAt,
-			ep.PRODUCER_NAME AS ProducerName
+			CAST(NULL AS TEXT) AS ProducerName
 		FROM SupplierPrice sp
 		LEFT JOIN es_ef2 ef2 ON sp.GUID_ES = ef2.GUID_ES
 		LEFT JOIN Region r ON sp.RegionID = r.RegionID
-		OUTER APPLY (
-			SELECT TOP 1 PRODUCER_NAME
-			FROM es_producer ep
-			WHERE ep.KOD_PRODUCER = ef2.PRODUCER_COD
-		) ep
 		WHERE %s
-	`, supplierWhere)
+`, supplierWhere)
 
 	if !includeInactive {
 		query += ` AND sp.IsActive = 1`
 	}
-
-	var args []interface{}
-	args = append(args, sql.Named("supplierID", supplierID))
-
+	args := []interface{}{sql.Named("supplierID", supplierID)}
 	if regionID != "" {
-		query += ` AND (sp.RegionID = CAST(@regionID AS UNIQUEIDENTIFIER) OR sp.RegionID IS NULL)`
+		query += ` AND (sp.RegionID = CAST(@regionID AS UUID) OR sp.RegionID IS NULL)`
 		args = append(args, sql.Named("regionID", regionID))
 	}
-
+	if updatedSince != nil {
+		query += ` AND sp.UpdatedAt > @updatedSince`
+		args = append(args, sql.Named("updatedSince", *updatedSince))
+	}
 	query += `
-		ORDER BY 
+		ORDER BY
 			CASE WHEN ef2.NAME IS NULL THEN 1 ELSE 0 END,
-			ef2.NAME, 
+			ef2.NAME,
 			sp.ItemName,
 			sp.InvoiceDate DESC,
 			sp.Price DESC
@@ -262,92 +305,93 @@ func (s *Server) handleGetSupplierPrices(w http.ResponseWriter, r *http.Request)
 		if limitVal <= 0 {
 			limitVal = 1000000
 		}
-		query += fmt.Sprintf(" OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", offsetVal, limitVal)
-	}
-
-	if s.logger != nil {
-		s.logger.Info("Выполнение SQL запроса для получения прайсов поставщика: %s", supplierID)
-		s.logger.Debug("SQL запрос: %s", query)
-		s.logger.Debug("Параметры запроса: supplierID=%s, regionID=%s, includeInactive=%v", supplierID, regionID, includeInactive)
+		query += fmt.Sprintf(" OFFSET %d LIMIT %d", offsetVal, limitVal)
 	}
 
 	rows, err := s.database.GORMWith(ctx).Raw(query, args...).Rows()
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Error("Ошибка выполнения SQL запроса для прайсов: %v", err)
+			s.logger.Error("Ошибка SQL прайсов: %v", err)
 		}
 		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка получения прайса: %v", err))
 		return
 	}
 	defer rows.Close()
 
-	// Статистика — используем тот же фильтр что и основной запрос
-	countWhere := supplierWhere
-	if !includeInactive {
-		countWhere += ` AND sp.IsActive = 1`
-	}
-
-	var totalInDB, totalNullGuid, totalEmptyGuid int
-	statsQuery := fmt.Sprintf(`
-		SELECT
-			COUNT(*),
-			ISNULL(SUM(CASE WHEN sp.GUID_ES IS NULL THEN 1 ELSE 0 END), 0),
-			ISNULL(SUM(CASE WHEN sp.GUID_ES IS NOT NULL AND CAST(sp.GUID_ES AS NVARCHAR(50)) = '' THEN 1 ELSE 0 END), 0)
-		FROM SupplierPrice sp
-		WHERE %s
-	`, countWhere)
-	countErr := s.database.GORMWith(ctx).Raw(statsQuery, sql.Named("supplierID", supplierID)).Row().Scan(&totalInDB, &totalNullGuid, &totalEmptyGuid)
-	if countErr != nil && s.logger != nil {
-		s.logger.Error("Ошибка подсчета записей: %v", countErr)
-	} else if s.logger != nil {
-		s.logger.Info("Статистика для поставщика %s: всего=%d, NULL GUID=%d, пустых GUID=%d", supplierID, totalInDB, totalNullGuid, totalEmptyGuid)
-	}
-
-	// Счетчики для статистики
-	rowCount := 0
-	matchedCount := 0
-	unmatchedCount := 0
-	nullGuidCount := 0
-	emptyGuidCount := 0
-
 	type SupplierPriceView struct {
-		SupplierPriceID  string  `json:"supplier_price_id"`
-		SupplierID       string  `json:"supplier_id"`
-		GUID_ES          *string `json:"guid_es,omitempty"`
-		DrugName         *string `json:"drug_name,omitempty"`
-		INN              *string `json:"inn,omitempty"`
-		CureForm         *string `json:"cure_form,omitempty"`
-		Barcode          *string `json:"barcode,omitempty"`
-		ProducerName     *string `json:"producer_name,omitempty"`
-		SupplierItemCode *string `json:"supplier_item_code,omitempty"`
-		SupplierItemName *string `json:"supplier_item_name,omitempty"`
-		// Price убран - используется FinalPrice с учетом наценки
-		Quantity        *float64 `json:"quantity,omitempty"`
-		InvoiceNumber   *string  `json:"invoice_number,omitempty"`
-		InvoiceDate     *string  `json:"invoice_date,omitempty"`
-		BatchNumber     *string  `json:"batch_number,omitempty"`
-		ExpiryDate      *string  `json:"expiry_date,omitempty"`
-		MatchMethod     *string  `json:"match_method,omitempty"`
-		MatchConfidence *float64 `json:"match_confidence,omitempty"`
-		IsActive        bool     `json:"is_active"`
-		RegionID        *string  `json:"region_id,omitempty"`
-		RegionName      *string  `json:"region_name,omitempty"`
-		// MarkupPct не передается клиенту для безопасности - расчеты только на сервере
-		// FinalPrice также не передается - используется только FinalPrice
-		FinalPrice    *float64 `json:"price"` // Финальная цена (рассчитана на сервере с учетом наценки)
-		LastPriceDate *string  `json:"last_price_date,omitempty"`
-		CreatedAt     string   `json:"created_at"`
+		SupplierPriceID  string   `json:"supplier_price_id"`
+		SupplierID       string   `json:"supplier_id"`
+		GUID_ES          *string  `json:"guid_es,omitempty"`
+		DrugName         *string  `json:"drug_name,omitempty"`
+		INN              *string  `json:"inn,omitempty"`
+		CureForm         *string  `json:"cure_form,omitempty"`
+		Barcode          *string  `json:"barcode,omitempty"`
+		ProducerName     *string  `json:"producer_name,omitempty"`
+		SupplierItemCode *string  `json:"supplier_item_code,omitempty"`
+		SupplierItemName *string  `json:"supplier_item_name,omitempty"`
+		Quantity         *float64 `json:"quantity,omitempty"`
+		InvoiceNumber    *string  `json:"invoice_number,omitempty"`
+		InvoiceDate      *string  `json:"invoice_date,omitempty"`
+		BatchNumber      *string  `json:"batch_number,omitempty"`
+		ExpiryDate       *string  `json:"expiry_date,omitempty"`
+		MatchMethod      *string  `json:"match_method,omitempty"`
+		MatchConfidence  *float64 `json:"match_confidence,omitempty"`
+		IsActive         bool     `json:"is_active"`
+		RegionID         *string  `json:"region_id,omitempty"`
+		RegionName       *string  `json:"region_name,omitempty"`
+		FinalPrice       *float64 `json:"price"`
+		LastPriceDate    *string  `json:"last_price_date,omitempty"`
+		CreatedAt        string   `json:"created_at"`
 	}
 
-	var prices []SupplierPriceView
-	processedCount := 0
-	skippedCount := 0
+	dbUnmatched := totalNullGuid + totalEmptyGuid
+	dbMatched := totalInDB - dbUnmatched
 
+	expectedReturned := totalInDB
+	if limitVal > 0 {
+		expectedReturned = limitVal
+		if offsetVal >= totalInDB {
+			expectedReturned = 0
+		} else if offsetVal+limitVal > totalInDB {
+			expectedReturned = totalInDB - offsetVal
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Price-Cache", "MISS")
+	w.WriteHeader(http.StatusOK)
+
+	var out io.Writer = w
+	var cacheWC *priceCacheWriteCloser
+	cacheable := updatedSince == nil && regionID == "" && !includeInactive && latestOnly && limitVal == 0 && offsetVal == 0
+	if cacheable {
+		if wc, _, err := openPriceCacheWriter(supplierID); err == nil {
+			if c, ok := wc.(*priceCacheWriteCloser); ok {
+				cacheWC = c
+				out = io.MultiWriter(w, cacheWC)
+			}
+		}
+	}
+
+	if _, err := fmt.Fprintf(out, `{"supplier_id":%s,"total_prices":%d,"stats":{"total_in_db":%d,"matched_final":%d,"unmatched_final":%d,"prices_returned":%d},"prices":`,
+		strconv.Quote(supplierID), expectedReturned, totalInDB, dbMatched, dbUnmatched, expectedReturned,
+	); err != nil {
+		if cacheWC != nil {
+			cacheWC.Abort()
+		}
+		return
+	}
+
+	streamer := NewJSONStreamer(out)
+	if err := streamer.WriteArrayStart(); err != nil {
+		return
+	}
+
+	returned := 0
 	for rows.Next() {
-		processedCount++
 		var sp SupplierPriceView
 		var guidES, drugName, inn, cureForm, barcode, producerName, supplierItemCode, supplierItemName sql.NullString
-		var invoiceNumber, batchNumber, matchMethod, regionID, regionName sql.NullString
+		var invoiceNumber, batchNumber, matchMethod, regionIDNull, regionName sql.NullString
 		var invoiceDate, expiryDate, lastPriceDate sql.NullTime
 		var quantity, matchConfidence sql.NullFloat64
 		var basePrice, finalPrice sql.NullFloat64
@@ -372,34 +416,18 @@ func (s *Server) handleGetSupplierPrices(w http.ResponseWriter, r *http.Request)
 			&matchConfidence,
 			&lastPriceDate,
 			&sp.IsActive,
-			&regionID,
+			&regionIDNull,
 			&regionName,
-			&sql.NullFloat64{}, // MarkupPct - пропускаем, не передаем клиенту
+			&sql.NullFloat64{},
 			&finalPrice,
 			&sp.CreatedAt,
-			&producerName, // Производитель из es_producer
+			&producerName,
 		)
 		if err != nil {
-			if s.logger != nil {
-				s.logger.Warn("Ошибка сканирования SupplierPrice: %v", err)
-			}
 			continue
 		}
-
-		rowCount++
-		// Проверяем, есть ли GUID_ES (не NULL и не пустая строка)
-		if !guidES.Valid {
-			// GUID_ES NULL в базе данных - это точно несопоставленная запись
-			nullGuidCount++
-			unmatchedCount++
-		} else if strings.TrimSpace(guidES.String) == "" {
-			// GUID_ES пустая строка - тоже несопоставленная
-			emptyGuidCount++
-			unmatchedCount++
-		} else {
-			// GUID_ES есть и не пустой - сопоставленная запись
+		if guidES.Valid && strings.TrimSpace(guidES.String) != "" {
 			sp.GUID_ES = &guidES.String
-			matchedCount++
 		}
 		if drugName.Valid {
 			sp.DrugName = &drugName.String
@@ -421,11 +449,6 @@ func (s *Server) handleGetSupplierPrices(w http.ResponseWriter, r *http.Request)
 		}
 		if supplierItemName.Valid {
 			sp.SupplierItemName = &supplierItemName.String
-		}
-		// BasePrice - базовая цена (для внутреннего использования, не передается клиенту)
-		// Price - финальная цена с учетом наценки (передается клиенту)
-		if basePrice.Valid {
-			// Не передаем basePrice клиенту для безопасности
 		}
 		if quantity.Valid {
 			q := quantity.Float64
@@ -452,87 +475,53 @@ func (s *Server) handleGetSupplierPrices(w http.ResponseWriter, r *http.Request)
 		if lastPriceDate.Valid {
 			sp.LastPriceDate = stringPtr(lastPriceDate.Time.Format(time.RFC3339))
 		}
-		if regionID.Valid {
-			sp.RegionID = &regionID.String
+		if regionIDNull.Valid {
+			sp.RegionID = &regionIDNull.String
 		}
 		if regionName.Valid {
 			sp.RegionName = &regionName.String
 		}
-		// MarkupPct не передается клиенту - расчеты только на сервере
 		if finalPrice.Valid {
-			sp.FinalPrice = &finalPrice.Float64 // Только финальная цена передается клиенту
+			sp.FinalPrice = &finalPrice.Float64
 		}
 
-		prices = append(prices, sp)
-	}
-
-	if prices == nil {
-		prices = []SupplierPriceView{}
-	}
-
-	if s.logger != nil {
-		s.logger.Info("Обработка завершена: обработано строк=%d, пропущено=%d, добавлено в результат=%d",
-			processedCount, skippedCount, len(prices))
-		if processedCount != rowCount {
-			s.logger.Warn("Расхождение: rowCount=%d, но processedCount=%d", rowCount, processedCount)
+		if err := streamer.WriteItem(sp); err != nil {
+			if cacheWC != nil {
+				cacheWC.Abort()
+			}
+			return
+		}
+		returned++
+		if returned%2000 == 0 {
+			flushWriter(w)
 		}
 	}
+	_ = streamer.WriteArrayEnd()
+	_, _ = out.Write([]byte("}"))
+	flushWriter(w)
 
-	// Логируем статистику по сопоставленным/несопоставленным
-	matchedCountFinal := 0
-	unmatchedCountFinal := 0
-	for _, p := range prices {
-		if p.GUID_ES != nil && strings.TrimSpace(*p.GUID_ES) != "" {
-			matchedCountFinal++
+	if cacheWC != nil {
+		if err := cacheWC.Close(); err != nil {
+			cacheWC.Abort()
 		} else {
-			unmatchedCountFinal++
+			_ = writePriceCacheMeta(supplierID, priceCacheMeta{
+				ETag:      etag,
+				Total:     totalInDB,
+				UpdatedAt: maxUp,
+				BuiltAt:   time.Now().UTC(),
+			})
 		}
-	}
-	if s.logger != nil {
-		s.logger.Info("Строк обработано из БД: %d (сопоставлено: %d, не сопоставлено: %d, из них NULL: %d, пустых: %d)",
-			rowCount, matchedCount, unmatchedCount, nullGuidCount, emptyGuidCount)
-		s.logger.Info("Записей в результате: всего %d, сопоставлено %d, не сопоставлено %d", len(prices), matchedCountFinal, unmatchedCountFinal)
-		if rowCount != len(prices) {
-			s.logger.Warn("Расхождение: обработано строк %d, но в результате %d записей", rowCount, len(prices))
-		}
-		if matchedCount != matchedCountFinal || unmatchedCount != unmatchedCountFinal {
-			s.logger.Warn("Расхождение в подсчете: при сканировании (сопоставлено: %d, не сопоставлено: %d), в результате (сопоставлено: %d, не сопоставлено: %d)",
-				matchedCount, unmatchedCount, matchedCountFinal, unmatchedCountFinal)
-		}
-	}
-
-	dbUnmatched := totalNullGuid + totalEmptyGuid
-	dbMatched := totalInDB - dbUnmatched
-
-	responseData := map[string]interface{}{
-		"supplier_id":  supplierID,
-		"total_prices": len(prices),
-		"prices":       prices,
-		"stats": map[string]interface{}{
-			"total_in_db":      totalInDB,
-			"matched_final":    dbMatched,
-			"unmatched_final":  dbUnmatched,
-			"prices_returned":  len(prices),
-		},
+	} else if cacheable {
+		s.scheduleRebuildPriceCache(supplierID)
 	}
 
 	if s.logger != nil {
-		s.logger.Info("Ответ handleGetSupplierPrices: всего в БД=%d, обработано=%d, возвращено=%d, сопоставлено=%d, не сопоставлено=%d",
-			totalInDB, rowCount, len(prices), matchedCountFinal, unmatchedCountFinal)
-		if totalInDB != len(prices) {
-			s.logger.Warn("ВНИМАНИЕ: В БД записей=%d, но возвращено только=%d. Возможна проблема с запросом или фильтрацией!",
-				totalInDB, len(prices))
-		}
+		s.logger.Info("handleGetSupplierPrices stream: supplier=%s total_in_db=%d returned=%d delta=%v",
+			supplierID, totalInDB, returned, updatedSince != nil)
 	}
-
-	s.writeJSON(w, http.StatusOK, responseData)
 }
 
-// handleGetSupplierPriceByID возвращает одну запись SupplierPrice по её ID.
-// ID извлекается роутером handleSupplierPricesRouter из пути /api/supplier-prices/{id}
-// и кладётся в контекст под ключом "priceID".
-// В отличие от handleGetSupplierPrices возвращает запись независимо от IsActive —
-// клиент явно указал ID и должен увидеть конкретную запись (в т.ч. отключённую).
+
 func (s *Server) handleGetSupplierPriceByID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
@@ -559,9 +548,9 @@ func (s *Server) handleGetSupplierPriceByID(w http.ResponseWriter, r *http.Reque
 
 	query := `
 		SELECT
-			CAST(sp.SupplierPriceID AS NVARCHAR(50)) AS SupplierPriceID,
-			CAST(sp.SupplierID AS NVARCHAR(50)) AS SupplierID,
-			CASE WHEN sp.GUID_ES IS NULL THEN NULL ELSE CAST(sp.GUID_ES AS NVARCHAR(50)) END AS GUID_ES,
+			CAST(sp.SupplierPriceID AS TEXT) AS SupplierPriceID,
+			CAST(sp.SupplierID AS TEXT) AS SupplierID,
+			CASE WHEN sp.GUID_ES IS NULL THEN NULL ELSE CAST(sp.GUID_ES AS TEXT) END AS GUID_ES,
 			ef2.NAME AS DrugName,
 			ef2.INN_NAME_RUS AS INN,
 			ef2.CUREFORM_NAME AS CureForm,
@@ -578,22 +567,18 @@ func (s *Server) handleGetSupplierPriceByID(w http.ResponseWriter, r *http.Reque
 			sp.MatchConfidence,
 			sp.InvoiceDate AS LastPriceDate,
 			sp.IsActive,
-			CAST(sp.RegionID AS NVARCHAR(50)) AS RegionID,
+			CAST(sp.RegionID AS TEXT) AS RegionID,
 			r.Name AS RegionName,
-			ISNULL(sp.MarkupPct, 0) AS MarkupPct,
-			sp.Price * (1 + ISNULL(sp.MarkupPct, 0) / 100.0) AS FinalPrice,
+			COALESCE(sp.MarkupPct, 0) AS MarkupPct,
+			sp.Price * (1 + COALESCE(sp.MarkupPct, 0) / 100.0) AS FinalPrice,
 			sp.CreatedAt,
-			ep.PRODUCER_NAME AS ProducerName
-		FROM SupplierPrice sp WITH (NOLOCK)
-		LEFT JOIN es_ef2 ef2 WITH (NOLOCK) ON sp.GUID_ES = ef2.GUID_ES
-		LEFT JOIN Region r WITH (NOLOCK) ON sp.RegionID = r.RegionID
-		OUTER APPLY (
-			SELECT TOP 1 PRODUCER_NAME
-			FROM es_producer ep WITH (NOLOCK)
-			WHERE ep.KOD_PRODUCER = ef2.PRODUCER_COD
-		) ep
-		WHERE sp.SupplierPriceID = CAST(@priceID AS UNIQUEIDENTIFIER)
-	`
+			CAST(NULL AS TEXT) AS ProducerName
+		FROM SupplierPrice sp 
+		LEFT JOIN es_ef2 ef2  ON sp.GUID_ES = ef2.GUID_ES
+		LEFT JOIN Region r  ON sp.RegionID = r.RegionID
+		WHERE sp.SupplierPriceID = CAST(@priceID AS UUID)
+LIMIT 1
+`
 
 	type SupplierPriceView struct {
 		SupplierPriceID  string   `json:"supplier_price_id"`
@@ -741,8 +726,8 @@ func (s *Server) handleGlobalStats(w http.ResponseWriter, r *http.Request) {
 	var matched, unmatched int
 	err := s.database.GORMWith(ctx).Raw(`
 		SELECT
-			COUNT(CASE WHEN sp.GUID_ES IS NOT NULL AND CAST(sp.GUID_ES AS NVARCHAR(50)) <> '' THEN 1 END),
-			COUNT(CASE WHEN sp.GUID_ES IS NULL OR CAST(sp.GUID_ES AS NVARCHAR(50)) = '' THEN 1 END)
+			COUNT(CASE WHEN sp.GUID_ES IS NOT NULL AND CAST(sp.GUID_ES AS TEXT) <> '' THEN 1 END),
+			COUNT(CASE WHEN sp.GUID_ES IS NULL OR CAST(sp.GUID_ES AS TEXT) = '' THEN 1 END)
 		FROM SupplierPrice sp
 		WHERE sp.IsActive = 1
 	`).Row().Scan(&matched, &unmatched)
@@ -835,8 +820,8 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 	if limitVal <= 0 {
 		limitVal = 5000 // по умолчанию (совместимо со старым клиентом)
 	}
-	if limitVal > 200000 {
-		limitVal = 200000 // явный большой лимит разрешаем: весь прайс одним запросом
+	if limitVal > 500000 {
+		limitVal = 500000 // весь прайс (~230k+) одним запросом
 	}
 	if offsetVal < 0 {
 		offsetVal = 0
@@ -868,21 +853,21 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 					sp.MatchMethod,
 					sp.MatchConfidence,
 					sp.RegionID,
-					ISNULL(sp.MarkupPct, 0) AS MarkupPct,
-					sp.Price * (1 + ISNULL(sp.MarkupPct, 0) / 100.0) AS FinalPrice,
+					COALESCE(sp.MarkupPct, 0) AS MarkupPct,
+					sp.Price * (1 + COALESCE(sp.MarkupPct, 0) / 100.0) AS FinalPrice,
 					-- Группируем по GUID_ES, BatchNumber, ExpiryDate, Manufacturer, Country для разделения партий
 					-- Если поля NULL, считаем их как отдельную группу
 					ROW_NUMBER() OVER (
 						PARTITION BY 
 							sp.GUID_ES, 
-							ISNULL(sp.BatchNumber, ''), 
-							ISNULL(CAST(sp.ExpiryDate AS NVARCHAR(50)), ''),
-							ISNULL(sp.Manufacturer, ''),
-							ISNULL(sp.Country, '')
+							COALESCE(sp.BatchNumber, ''), 
+							COALESCE(CAST(sp.ExpiryDate AS TEXT), ''),
+							COALESCE(sp.Manufacturer, ''),
+							COALESCE(sp.Country, '')
 						ORDER BY sp.InvoiceDate DESC, sp.Price DESC
 					) AS rn
-				FROM SupplierPrice sp WITH (NOLOCK)
-				WHERE sp.SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)
+				FROM SupplierPrice sp 
+				WHERE sp.SupplierID = CAST(@supplierID AS UUID)
 				  AND sp.IsActive = 1
 				  AND sp.GUID_ES IS NOT NULL
 				  -- Если запись сопоставлена (GUID_ES IS NOT NULL), включаем её в сводный прайс независимо от состояния PriceList
@@ -895,8 +880,8 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 		query += `
 			)
 			SELECT
-				CAST(lp.GUID_ES AS NVARCHAR(50)) AS GUID_ES,
-				CAST(lp.SupplierPriceID AS NVARCHAR(50)) AS SupplierPriceID,
+				CAST(lp.GUID_ES AS TEXT) AS GUID_ES,
+				CAST(lp.SupplierPriceID AS TEXT) AS SupplierPriceID,
 				NULL AS SupplierID,
 				NULL AS SupplierName,
 				ef2.NAME AS DrugName,
@@ -918,7 +903,7 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				ef2.TRN_NAME_RUS AS TradeName,
 				ef2.DOSAGE AS Dosage,
 				ef2.REESTR_PRICE AS RegistryPrice,
-				CAST(ef2.C_INSTRUCTION AS NVARCHAR(50)) AS InstructionGUID,
+				CAST(ef2.C_INSTRUCTION AS TEXT) AS InstructionGUID,
 				ef2.DISCRIBE AS Description,
 				ef2.STORING_CONDITION AS StoringCondition,
 				ef2.SROK_SAVED AS ExpiryPeriod,
@@ -927,17 +912,17 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				ef2.KOD_ES AS ES_Code,
 				ef2.REGISTR_STATUS AS RegistryStatus
 			FROM LatestPrices lp
-			LEFT JOIN es_ef2 ef2 WITH (NOLOCK) ON lp.GUID_ES = ef2.GUID_ES
+			LEFT JOIN es_ef2 ef2  ON lp.GUID_ES = ef2.GUID_ES
 			-- Region не используется в сводном прайсе
 			LEFT JOIN (
 				SELECT KOD_PRODUCER, MIN(PRODUCER_NAME) AS PRODUCER_NAME
-				FROM es_producer WITH (NOLOCK)
+				FROM es_producer 
 				GROUP BY KOD_PRODUCER
 			) ep ON ep.KOD_PRODUCER = ef2.PRODUCER_COD
 			WHERE lp.rn = 1
-			  AND (@q = N'' OR ef2.NAME LIKE @q)
-			ORDER BY ISNULL(ef2.NAME, ''), ef2.NAME, ISNULL(lp.BatchNumber, ''), lp.ExpiryDate
-			OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+			  AND (@q = '' OR ef2.NAME LIKE @q)
+			ORDER BY COALESCE(ef2.NAME, ''), ef2.NAME, COALESCE(lp.BatchNumber, ''), lp.ExpiryDate
+			OFFSET @offset LIMIT @limit
 		`
 	} else {
 		// Сводный прайс для всех поставщиков (группировка по препарату и поставщику)
@@ -957,20 +942,20 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 					sp.MatchMethod,
 					sp.MatchConfidence,
 					sp.RegionID,
-					ISNULL(sp.MarkupPct, 0) AS MarkupPct,
-					sp.Price * (1 + ISNULL(sp.MarkupPct, 0) / 100.0) AS FinalPrice,
+					COALESCE(sp.MarkupPct, 0) AS MarkupPct,
+					sp.Price * (1 + COALESCE(sp.MarkupPct, 0) / 100.0) AS FinalPrice,
 					-- Группируем по GUID_ES, SupplierID, BatchNumber, ExpiryDate, Series, Manufacturer, Country для разделения партий
 					ROW_NUMBER() OVER (
 						PARTITION BY 
 							sp.GUID_ES, 
 							sp.SupplierID,
-							ISNULL(sp.BatchNumber, ''), 
-							ISNULL(CAST(sp.ExpiryDate AS NVARCHAR(50)), ''),
-							ISNULL(sp.Manufacturer, ''),
-							ISNULL(sp.Country, '')
+							COALESCE(sp.BatchNumber, ''), 
+							COALESCE(CAST(sp.ExpiryDate AS TEXT), ''),
+							COALESCE(sp.Manufacturer, ''),
+							COALESCE(sp.Country, '')
 						ORDER BY sp.InvoiceDate DESC, sp.Price DESC
 					) AS rn
-				FROM SupplierPrice sp WITH (NOLOCK)
+				FROM SupplierPrice sp 
 				WHERE sp.IsActive = 1
 				  AND sp.GUID_ES IS NOT NULL
 				  -- Если запись сопоставлена (GUID_ES IS NOT NULL), включаем её в сводный прайс независимо от состояния PriceList
@@ -983,9 +968,9 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 		query += `
 			)
 			SELECT
-				CAST(lp.GUID_ES AS NVARCHAR(50)) AS GUID_ES,
-				CAST(lp.SupplierPriceID AS NVARCHAR(50)) AS SupplierPriceID,
-				CAST(lp.SupplierID AS NVARCHAR(50)) AS SupplierID,
+				CAST(lp.GUID_ES AS TEXT) AS GUID_ES,
+				CAST(lp.SupplierPriceID AS TEXT) AS SupplierPriceID,
+				CAST(lp.SupplierID AS TEXT) AS SupplierID,
 				s.Name AS SupplierName,
 				ef2.NAME AS DrugName,
 				ef2.INN_NAME_RUS AS INN,
@@ -1006,7 +991,7 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				ef2.TRN_NAME_RUS AS TradeName,
 				ef2.DOSAGE AS Dosage,
 				ef2.REESTR_PRICE AS RegistryPrice,
-				CAST(ef2.C_INSTRUCTION AS NVARCHAR(50)) AS InstructionGUID,
+				CAST(ef2.C_INSTRUCTION AS TEXT) AS InstructionGUID,
 				ef2.DISCRIBE AS Description,
 				ef2.STORING_CONDITION AS StoringCondition,
 				ef2.SROK_SAVED AS ExpiryPeriod,
@@ -1015,18 +1000,18 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				ef2.KOD_ES AS ES_Code,
 				ef2.REGISTR_STATUS AS RegistryStatus
 			FROM LatestPrices lp
-			LEFT JOIN es_ef2 ef2 WITH (NOLOCK) ON lp.GUID_ES = ef2.GUID_ES
-			LEFT JOIN Supplier s WITH (NOLOCK) ON lp.SupplierID = s.SupplierID AND s.IsActive = 1
+			LEFT JOIN es_ef2 ef2  ON lp.GUID_ES = ef2.GUID_ES
+			LEFT JOIN Supplier s  ON lp.SupplierID = s.SupplierID AND s.IsActive = 1
 			-- Region не используется в сводном прайсе - все данные о препарате из ЕС
 			LEFT JOIN (
 				SELECT KOD_PRODUCER, MIN(PRODUCER_NAME) AS PRODUCER_NAME
-				FROM es_producer WITH (NOLOCK)
+				FROM es_producer 
 				GROUP BY KOD_PRODUCER
 			) ep ON ep.KOD_PRODUCER = ef2.PRODUCER_COD
 			WHERE lp.rn = 1
-			  AND (@q = N'' OR ef2.NAME LIKE @q)
-			ORDER BY ISNULL(ef2.NAME, ''), ef2.NAME, s.Name, ISNULL(lp.BatchNumber, ''), lp.ExpiryDate, lp.FinalPrice
-			OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+			  AND (@q = '' OR ef2.NAME LIKE @q)
+			ORDER BY COALESCE(ef2.NAME, ''), ef2.NAME, s.Name, COALESCE(lp.BatchNumber, ''), lp.ExpiryDate, lp.FinalPrice
+			OFFSET @offset LIMIT @limit
 		`
 	}
 

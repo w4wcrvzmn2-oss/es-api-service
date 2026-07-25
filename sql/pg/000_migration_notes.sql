@@ -1,0 +1,34 @@
+-- PostgreSQL schema notes for elfisa + eplus_work
+-- Tables are NOT auto-created by es_api_service.
+--
+-- Recommended migration path:
+-- 1) Install PostgreSQL 16+ on the new server
+-- 2) CREATE DATABASE elfisa; CREATE DATABASE eplus_work;
+-- 3) Use pgloader (or similar) from MSSQL FULL backup / live instance:
+--      pgloader mssql://user:pass@host/elfisa postgresql://user:pass@localhost/elfisa
+--      pgloader mssql://user:pass@host/eplus_work postgresql://user:pass@localhost/eplus_work
+-- 4) Ensure PascalCase identifiers are quoted (pgloader option: quote identifiers)
+-- 5) Add UNIQUE constraints required by ON CONFLICT upserts:
+--      "SupplierItemMapping" ("SupplierID", "ItemCode")
+--      "PriceListRegion" ("PriceListID", "RegionID")
+--      "DBFFieldMapping" ("ImportPointID", "DBFFieldName")
+--      "es_ef2" ("GUID_ES")  -- usually already PK
+-- 6) Point es_api_service.cfg db + source_db to Postgres (port 5432, sslmode disable/prefer)
+--
+-- Example cfg fragment:
+-- db:
+--   server: 127.0.0.1
+--   port: 5432
+--   user: postgres
+--   password: "***"
+--   database: elfisa
+--   sslmode: disable
+-- source_db:
+--   server: 127.0.0.1
+--   port: 5432
+--   user: postgres
+--   password: "***"
+--   database: eplus_work
+--   sslmode: disable
+
+SELECT 1;

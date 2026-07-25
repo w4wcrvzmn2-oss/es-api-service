@@ -45,13 +45,14 @@ func (pm *PriceMatcher) MatchInvoiceData(ctx context.Context, invoiceImportID st
 	// Кэшируем PriceListID один раз в начале обработки, чтобы не делать запрос для каждой записи
 	var cachedPriceListID sql.NullString
 	queryPriceList := `
-		SELECT TOP 1 CAST(pl.PriceListID AS NVARCHAR(50))
+		SELECT CAST(pl.PriceListID AS TEXT)
 		FROM InvoiceImport ii
 		INNER JOIN ImportPoint ip ON ii.ImportPointID = ip.ImportPointID
 		LEFT JOIN PriceList pl ON ip.ImportPointID = pl.ImportPointID AND pl.IsActive = 1
-		WHERE ii.InvoiceImportID = CAST(@invoiceImportID AS UNIQUEIDENTIFIER)
+		WHERE ii.InvoiceImportID = CAST(@invoiceImportID AS UUID)
 		  AND pl.PriceListID IS NOT NULL
-	`
+LIMIT 1
+`
 	// Используем короткий таймаут для кэширования, чтобы не блокировать весь процесс
 	cacheCtx, cacheCancel := context.WithTimeout(ctx, 45*time.Second)
 	err = pm.database.QueryRowContext(cacheCtx, queryPriceList, sql.Named("invoiceImportID", invoiceImportID)).Scan(&cachedPriceListID)
@@ -66,14 +67,14 @@ func (pm *PriceMatcher) MatchInvoiceData(ctx context.Context, invoiceImportID st
 
 	// Получаем все неподтвержденные записи из InvoiceData для этого импорта
 	query := `
-		SELECT CAST(InvoiceDataID AS NVARCHAR(50)) AS InvoiceDataID,
-		       CAST(SupplierID AS NVARCHAR(50)) AS SupplierID,
-		       CAST(InvoiceImportID AS NVARCHAR(50)) AS InvoiceImportID,
+		SELECT CAST(InvoiceDataID AS TEXT) AS InvoiceDataID,
+		       CAST(SupplierID AS TEXT) AS SupplierID,
+		       CAST(InvoiceImportID AS TEXT) AS InvoiceImportID,
 		       ItemCode, ItemName, Barcode, Price, Quantity,
 		       InvoiceNumber, InvoiceDate, BatchNumber, ExpiryDate,
 		       Manufacturer, Country
 		FROM InvoiceData
-		WHERE InvoiceImportID = CAST(@invoiceImportID AS UNIQUEIDENTIFIER)
+		WHERE InvoiceImportID = CAST(@invoiceImportID AS UUID)
 		  AND IsProcessed = 0
 	`
 
@@ -214,11 +215,11 @@ func (pm *PriceMatcher) MatchInvoiceData(ctx context.Context, invoiceImportID st
 		cacheQuery := `
 			SELECT 
 				ItemCode,
-				CAST(GUID_ES AS NVARCHAR(50)) AS GUID_ES,
+				CAST(GUID_ES AS TEXT) AS GUID_ES,
 				MatchMethod,
 				MatchConfidence
 			FROM SupplierItemMapping
-			WHERE SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)
+			WHERE SupplierID = CAST(@supplierID AS UUID)
 			ORDER BY UseCount DESC, LastUsedAt DESC
 		`
 		cacheRows, err := pm.database.QueryContext(ctx, cacheQuery, sql.Named("supplierID", supplierIDForCache))
@@ -592,10 +593,10 @@ func (pm *PriceMatcher) loadDrugIndexes(ctx context.Context) *DrugIndexes {
 
 	query := `
 		SELECT 
-			CAST(GUID_ES AS NVARCHAR(50)) AS GUID_ES,
-			ISNULL(NAME, '') AS NAME,
-			ISNULL(BARCODE, '') AS BARCODE,
-			CAST(ISNULL(KOD_ES, '') AS NVARCHAR(50)) AS KOD_ES
+			CAST(GUID_ES AS TEXT) AS GUID_ES,
+			COALESCE(NAME, '') AS NAME,
+			COALESCE(BARCODE, '') AS BARCODE,
+			CAST(COALESCE(KOD_ES, '') AS TEXT) AS KOD_ES
 		FROM es_ef2
 		WHERE is_active = 1
 		  AND DELETED IS NULL
@@ -861,11 +862,10 @@ func (pm *PriceMatcher) matchByBarcode(ctx context.Context, barcode string) *Mat
 		return nil
 	}
 
-	// Оптимизированный запрос - один запрос вместо двух, используем TOP 1 для быстрого результата
+	// Оптимизированный запрос - один запрос вместо двух, используем для быстрого результата
 	// Используем вычисляемое поле для нормализации прямо в запросе, но сначала пробуем точное совпадение
 	query := `
-		SELECT TOP 1 
-			CAST(GUID_ES AS NVARCHAR(50)) AS GUID_ES, 
+		SELECT CAST(GUID_ES AS TEXT) AS GUID_ES, 
 			NAME, 
 			BARCODE
 		FROM es_ef2
@@ -873,23 +873,24 @@ func (pm *PriceMatcher) matchByBarcode(ctx context.Context, barcode string) *Mat
 		  AND DELETED IS NULL
 		  AND (
 			-- Точное совпадение с исходным штрихкодом
-			LTRIM(RTRIM(ISNULL(BARCODE, ''))) = @barcode 
+			LTRIM(RTRIM(COALESCE(BARCODE, ''))) = @barcode 
 			-- Точное совпадение с нормализованным штрихкодом
-			OR LTRIM(RTRIM(ISNULL(BARCODE, ''))) = @normalizedBarcode
+			OR LTRIM(RTRIM(COALESCE(BARCODE, ''))) = @normalizedBarcode
 			-- Нормализованное сравнение (убираем все нецифровые символы)
 			OR (
 				LEN(BARCODE) > 0 
-				AND LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(BARCODE, ''), ' ', ''), '-', ''), '.', ''), '_', ''), ' ', ''))) = @normalizedBarcode
+				AND LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(BARCODE, ''), ' ', ''), '-', ''), '.', ''), '_', ''), ' ', ''))) = @normalizedBarcode
 			)
 		)
 		ORDER BY 
 			-- Приоритет: сначала точное совпадение, потом нормализованное
 			CASE 
-				WHEN LTRIM(RTRIM(ISNULL(BARCODE, ''))) = @barcode THEN 1
-				WHEN LTRIM(RTRIM(ISNULL(BARCODE, ''))) = @normalizedBarcode THEN 2
+				WHEN LTRIM(RTRIM(COALESCE(BARCODE, ''))) = @barcode THEN 1
+				WHEN LTRIM(RTRIM(COALESCE(BARCODE, ''))) = @normalizedBarcode THEN 2
 				ELSE 3
 			END
-	`
+LIMIT 1
+`
 
 	var guidES, name, dbBarcode string
 	err := pm.database.QueryRowContext(ctx, query,
@@ -951,9 +952,9 @@ func (pm *PriceMatcher) matchByCode(ctx context.Context, itemCode string) *Match
 
 	// Проверяем, является ли код числовым
 	query := `
-		SELECT CAST(GUID_ES AS NVARCHAR(50)) AS GUID_ES, NAME
+		SELECT CAST(GUID_ES AS TEXT) AS GUID_ES, NAME
 		FROM es_ef2
-		WHERE CAST(KOD_ES AS NVARCHAR(50)) = @code
+		WHERE CAST(KOD_ES AS TEXT) = @code
 		  AND is_active = 1
 		  AND DELETED IS NULL
 	`
@@ -970,9 +971,9 @@ func (pm *PriceMatcher) matchByCode(ctx context.Context, itemCode string) *Match
 
 	// Пытаемся найти по ID_ES
 	query = `
-		SELECT CAST(GUID_ES AS NVARCHAR(50)) AS GUID_ES, NAME
+		SELECT CAST(GUID_ES AS TEXT) AS GUID_ES, NAME
 		FROM es_ef2
-		WHERE CAST(ID_ES AS NVARCHAR(50)) = @code
+		WHERE CAST(ID_ES AS TEXT) = @code
 		  AND is_active = 1
 		  AND DELETED IS NULL
 	`
@@ -1068,12 +1069,13 @@ func (pm *PriceMatcher) matchByName(ctx context.Context, itemName string) *Match
 
 	// Ищем точное совпадение (SQL Server не поддерживает TRIM напрямую, используем LTRIM/RTRIM)
 	query := `
-		SELECT TOP 1 CAST(GUID_ES AS NVARCHAR(50)) AS GUID_ES, NAME
+		SELECT CAST(GUID_ES AS TEXT) AS GUID_ES, NAME
 		FROM es_ef2
 		WHERE UPPER(LTRIM(RTRIM(NAME))) = @name
 		  AND is_active = 1
 		  AND DELETED IS NULL
-	`
+LIMIT 1
+`
 
 	var guidES, name string
 	err := pm.database.QueryRowContext(ctx, query, sql.Named("name", normalizedName)).Scan(&guidES, &name)
@@ -1092,13 +1094,14 @@ func (pm *PriceMatcher) matchByName(ctx context.Context, itemName string) *Match
 	if len(words) >= 2 {
 		searchPattern := words[0] + "%" + words[1] + "%"
 		query = `
-			SELECT TOP 1 CAST(GUID_ES AS NVARCHAR(50)) AS GUID_ES, NAME
+			SELECT CAST(GUID_ES AS TEXT) AS GUID_ES, NAME
 			FROM es_ef2
 			WHERE UPPER(NAME) LIKE @pattern
 			  AND is_active = 1
 			  AND DELETED IS NULL
 			ORDER BY LEN(NAME) ASC
-		`
+LIMIT 1
+`
 		err = pm.database.QueryRowContext(ctx, query, sql.Named("pattern", searchPattern)).Scan(&guidES, &name)
 		if err == nil {
 			return &MatchResult{
@@ -1145,11 +1148,11 @@ func (pm *PriceMatcher) saveSupplierPrice(ctx context.Context, invoiceData model
 	var importPointID string
 	var priceListID sql.NullString
 	importPointQuery := `
-		SELECT CAST(ii.ImportPointID AS NVARCHAR(50)) AS ImportPointID,
-		       CAST(pl.PriceListID AS NVARCHAR(50)) AS PriceListID
+		SELECT CAST(ii.ImportPointID AS TEXT) AS ImportPointID,
+		       CAST(pl.PriceListID AS TEXT) AS PriceListID
 		FROM InvoiceImport ii
 		LEFT JOIN PriceList pl ON pl.ImportPointID = ii.ImportPointID AND pl.IsActive = 1
-		WHERE ii.InvoiceImportID = CAST(@invoiceImportID AS UNIQUEIDENTIFIER)
+		WHERE ii.InvoiceImportID = CAST(@invoiceImportID AS UUID)
 	`
 	err = pm.database.QueryRowContext(ctx, importPointQuery, sql.Named("invoiceImportID", invoiceData.InvoiceImportID)).Scan(&importPointID, &priceListID)
 	if err != nil {
@@ -1167,19 +1170,19 @@ func (pm *PriceMatcher) saveSupplierPrice(ctx context.Context, invoiceData model
 	if importPointID != "" {
 		// Ищем по SupplierID + GUID_ES + ImportPointID (или ItemCode, если GUID_ES отсутствует)
 		findExistingQuery := `
-			SELECT TOP 1 
-				CAST(sp.SupplierPriceID AS NVARCHAR(50)) AS SupplierPriceID,
+			SELECT CAST(sp.SupplierPriceID AS TEXT) AS SupplierPriceID,
 				sp.Price
 			FROM SupplierPrice sp
 			INNER JOIN InvoiceImport ii ON sp.InvoiceImportID = ii.InvoiceImportID
-			WHERE sp.SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)
-			  AND ii.ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)
+			WHERE sp.SupplierID = CAST(@supplierID AS UUID)
+			  AND ii.ImportPointID = CAST(@importPointID AS UUID)
 			  AND sp.IsActive = 1
-		`
+LIMIT 1
+`
 
 		// Если есть GUID_ES, ищем по нему, иначе по ItemCode
 		if match.GUID_ES != "" {
-			findExistingQuery += ` AND sp.GUID_ES = CAST(@guidES AS UNIQUEIDENTIFIER)`
+			findExistingQuery += ` AND sp.GUID_ES = CAST(@guidES AS UUID)`
 		} else if invoiceData.ItemCode != nil && *invoiceData.ItemCode != "" {
 			findExistingQuery += ` AND sp.ItemCode = @itemCode`
 		} else {
@@ -1215,7 +1218,7 @@ func (pm *PriceMatcher) saveSupplierPrice(ctx context.Context, invoiceData model
 		getOldValuesQuery := `
 			SELECT ItemName, ItemCode, Barcode, Quantity, BatchNumber, ExpiryDate, InvoiceNumber, InvoiceDate
 			FROM SupplierPrice
-			WHERE SupplierPriceID = CAST(@supplierPriceID AS UNIQUEIDENTIFIER)
+			WHERE SupplierPriceID = CAST(@supplierPriceID AS UUID)
 		`
 		err = pm.database.QueryRowContext(ctx, getOldValuesQuery,
 			sql.Named("supplierPriceID", existingSupplierPriceID.String),
@@ -1233,8 +1236,8 @@ func (pm *PriceMatcher) saveSupplierPrice(ctx context.Context, invoiceData model
 		// Обновляем прайс
 		updateQuery := `
 			UPDATE SupplierPrice 
-			SET InvoiceImportID = CAST(@invoiceImportID AS UNIQUEIDENTIFIER),
-			    InvoiceDataID = CAST(@invoiceDataID AS UNIQUEIDENTIFIER),
+			SET InvoiceImportID = CAST(@invoiceImportID AS UUID),
+			    InvoiceDataID = CAST(@invoiceDataID AS UUID),
 			    ItemCode = @itemCode,
 			    ItemName = @itemName,
 			    SupplierItemName = @supplierItemName,
@@ -1249,9 +1252,9 @@ func (pm *PriceMatcher) saveSupplierPrice(ctx context.Context, invoiceData model
 			    Country = @country,
 			    MatchMethod = @matchMethod,
 			    MatchConfidence = @matchConfidence,
-			    PriceListID = CASE WHEN @priceListID IS NOT NULL AND @priceListID != '' THEN CAST(@priceListID AS UNIQUEIDENTIFIER) ELSE NULL END,
-			    UpdatedAt = GETUTCDATE()
-			WHERE SupplierPriceID = CAST(@supplierPriceID AS UNIQUEIDENTIFIER)
+			    PriceListID = CASE WHEN @priceListID IS NOT NULL AND @priceListID != '' THEN CAST(@priceListID AS UUID) ELSE NULL END,
+			    UpdatedAt = (NOW() AT TIME ZONE 'utc')
+			WHERE SupplierPriceID = CAST(@supplierPriceID AS UUID)
 		`
 
 		args := []interface{}{
@@ -1303,12 +1306,13 @@ func (pm *PriceMatcher) saveSupplierPrice(ctx context.Context, invoiceData model
 	if priceListID.Valid && priceListID.String != "" && invoiceData.ItemCode != nil && *invoiceData.ItemCode != "" {
 		var existingPriceID sql.NullString
 		checkUniqueQuery := `
-			SELECT TOP 1 CAST(SupplierPriceID AS NVARCHAR(50))
+			SELECT CAST(SupplierPriceID AS TEXT)
 			FROM SupplierPrice
-			WHERE PriceListID = CAST(@priceListID AS UNIQUEIDENTIFIER)
+			WHERE PriceListID = CAST(@priceListID AS UUID)
 			  AND ItemCode = @itemCode
 			  AND IsActive = 1
-		`
+LIMIT 1
+`
 		err = pm.database.QueryRowContext(ctx, checkUniqueQuery,
 			sql.Named("priceListID", priceListID.String),
 			sql.Named("itemCode", *invoiceData.ItemCode),
@@ -1324,7 +1328,7 @@ func (pm *PriceMatcher) saveSupplierPrice(ctx context.Context, invoiceData model
 			getOldValuesQuery := `
 				SELECT Price, ItemName, ItemCode, Barcode, Quantity, BatchNumber, ExpiryDate, InvoiceNumber, InvoiceDate
 				FROM SupplierPrice
-				WHERE SupplierPriceID = CAST(@supplierPriceID AS UNIQUEIDENTIFIER)
+				WHERE SupplierPriceID = CAST(@supplierPriceID AS UUID)
 			`
 			err = pm.database.QueryRowContext(ctx, getOldValuesQuery,
 				sql.Named("supplierPriceID", existingPriceID.String),
@@ -1342,8 +1346,8 @@ func (pm *PriceMatcher) saveSupplierPrice(ctx context.Context, invoiceData model
 			// Обновляем существующий
 			updateQuery := `
 				UPDATE SupplierPrice 
-				SET InvoiceImportID = CAST(@invoiceImportID AS UNIQUEIDENTIFIER),
-				    InvoiceDataID = CAST(@invoiceDataID AS UNIQUEIDENTIFIER),
+				SET InvoiceImportID = CAST(@invoiceImportID AS UUID),
+				    InvoiceDataID = CAST(@invoiceDataID AS UUID),
 				    ItemName = @itemName,
 				    SupplierItemName = @supplierItemName,
 				    Barcode = @barcode,
@@ -1357,8 +1361,8 @@ func (pm *PriceMatcher) saveSupplierPrice(ctx context.Context, invoiceData model
 				    Country = @country,
 				    MatchMethod = @matchMethod,
 				    MatchConfidence = @matchConfidence,
-				    UpdatedAt = GETUTCDATE()
-				WHERE SupplierPriceID = CAST(@supplierPriceID AS UNIQUEIDENTIFIER)
+				    UpdatedAt = (NOW() AT TIME ZONE 'utc')
+				WHERE SupplierPriceID = CAST(@supplierPriceID AS UUID)
 			`
 			_, err = pm.database.ExecContext(ctx, updateQuery,
 				sql.Named("supplierPriceID", existingPriceID.String),
@@ -1395,15 +1399,15 @@ func (pm *PriceMatcher) saveSupplierPrice(ctx context.Context, invoiceData model
 		 Manufacturer, Country,
 		 MatchMethod, MatchConfidence, IsActive, PriceListID, CreatedAt, UpdatedAt)
 		VALUES 
-		(CAST(@supplierPriceID AS UNIQUEIDENTIFIER), CAST(@supplierID AS UNIQUEIDENTIFIER),
-		 CAST(@invoiceImportID AS UNIQUEIDENTIFIER), CAST(@invoiceDataID AS UNIQUEIDENTIFIER),
-		 CASE WHEN @guidES IS NOT NULL AND @guidES != '' THEN CAST(@guidES AS UNIQUEIDENTIFIER) ELSE NULL END,
+		(CAST(@supplierPriceID AS UUID), CAST(@supplierID AS UUID),
+		 CAST(@invoiceImportID AS UUID), CAST(@invoiceDataID AS UUID),
+		 CASE WHEN @guidES IS NOT NULL AND @guidES != '' THEN CAST(@guidES AS UUID) ELSE NULL END,
 		 @itemCode, @itemName, @supplierItemName, @barcode, @price, @quantity,
 		 @invoiceNumber, @invoiceDate, @batchNumber, @expiryDate,
 		 @manufacturer, @country,
 		 @matchMethod, @matchConfidence, 1,
-		 CASE WHEN @priceListID IS NOT NULL AND @priceListID != '' THEN CAST(@priceListID AS UNIQUEIDENTIFIER) ELSE NULL END,
-		 GETUTCDATE(), GETUTCDATE())
+		 CASE WHEN @priceListID IS NOT NULL AND @priceListID != '' THEN CAST(@priceListID AS UUID) ELSE NULL END,
+		 (NOW() AT TIME ZONE 'utc'), (NOW() AT TIME ZONE 'utc'))
 	`
 
 	supplierPriceID := uuid.New().String()
@@ -1485,8 +1489,8 @@ func (pm *PriceMatcher) saveSupplierPriceWithoutMatch(ctx context.Context, invoi
 		 Manufacturer, Country,
 		 MatchMethod, MatchConfidence, IsActive, PriceListID, CreatedAt, UpdatedAt)
 		VALUES 
-		(CAST(@supplierPriceID AS UNIQUEIDENTIFIER), CAST(@supplierID AS UNIQUEIDENTIFIER),
-		 CAST(@invoiceImportID AS UNIQUEIDENTIFIER), CAST(@invoiceDataID AS UNIQUEIDENTIFIER),
+		(CAST(@supplierPriceID AS UUID), CAST(@supplierID AS UUID),
+		 CAST(@invoiceImportID AS UUID), CAST(@invoiceDataID AS UUID),
 		 NULL, -- GUID_ES NULL для несопоставленных записей
 		 @itemCode, @itemName, @supplierItemName, @barcode, @price, @quantity,
 		 @invoiceNumber, @invoiceDate, @batchNumber, @expiryDate,
@@ -1494,8 +1498,8 @@ func (pm *PriceMatcher) saveSupplierPriceWithoutMatch(ctx context.Context, invoi
 		 NULL, -- MatchMethod NULL
 		 NULL, -- MatchConfidence NULL
 		 1, -- IsActive = true
-		 CASE WHEN @priceListID IS NOT NULL AND @priceListID != '' THEN CAST(@priceListID AS UNIQUEIDENTIFIER) ELSE NULL END,
-		 GETUTCDATE(), GETUTCDATE())
+		 CASE WHEN @priceListID IS NOT NULL AND @priceListID != '' THEN CAST(@priceListID AS UUID) ELSE NULL END,
+		 (NOW() AT TIME ZONE 'utc'), (NOW() AT TIME ZONE 'utc'))
 	`
 
 	args := []interface{}{
@@ -1546,8 +1550,8 @@ func (pm *PriceMatcher) savePriceHistory(ctx context.Context, supplierPriceID st
 		INSERT INTO SupplierPriceHistory 
 		(PriceHistoryID, SupplierPriceID, OldPrice, NewPrice, ChangedAt, ChangedByInvoiceImportID, Reason, ChangeType)
 		VALUES 
-		(NEWID(), CAST(@supplierPriceID AS UNIQUEIDENTIFIER), @oldPrice, @newPrice, 
-		 GETUTCDATE(), CAST(@invoiceImportID AS UNIQUEIDENTIFIER), @reason, @changeType)
+		(gen_random_uuid(), CAST(@supplierPriceID AS UUID), @oldPrice, @newPrice, 
+		 (NOW() AT TIME ZONE 'utc'), CAST(@invoiceImportID AS UUID), @reason, @changeType)
 	`
 
 	reason := "PRICE_UPDATE"
@@ -1704,7 +1708,7 @@ func (pm *PriceMatcher) saveFullHistory(ctx context.Context, supplierPriceID str
 		 OldInvoiceDate, NewInvoiceDate,
 		 ChangedAt, ChangedByInvoiceImportID, ChangeType, Reason)
 		VALUES 
-		(NEWID(), CAST(@supplierPriceID AS UNIQUEIDENTIFIER),
+		(gen_random_uuid(), CAST(@supplierPriceID AS UUID),
 		 @oldPrice, @newPrice,
 		 @oldItemName, @newItemName,
 		 @oldItemCode, @newItemCode,
@@ -1714,7 +1718,7 @@ func (pm *PriceMatcher) saveFullHistory(ctx context.Context, supplierPriceID str
 		 @oldExpiryDate, @newExpiryDate,
 		 @oldInvoiceNumber, @newInvoiceNumber,
 		 @oldInvoiceDate, @newInvoiceDate,
-		 GETUTCDATE(), CAST(@invoiceImportID AS UNIQUEIDENTIFIER), @changeType, @reason)
+		 (NOW() AT TIME ZONE 'utc'), CAST(@invoiceImportID AS UUID), @changeType, @reason)
 	`
 
 	reason := "AUTO_UPDATE"
@@ -1754,15 +1758,15 @@ func (pm *PriceMatcher) saveFullHistory(ctx context.Context, supplierPriceID str
 // getCachedMatch получает сохраненное сопоставление из таблицы SupplierItemMapping
 func (pm *PriceMatcher) getCachedMatch(ctx context.Context, supplierID, itemCode string) *MatchResult {
 	query := `
-		SELECT TOP 1
-			CAST(GUID_ES AS NVARCHAR(50)) AS GUID_ES,
+		SELECT CAST(GUID_ES AS TEXT) AS GUID_ES,
 			MatchMethod,
 			MatchConfidence
 		FROM SupplierItemMapping
-		WHERE SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)
+		WHERE SupplierID = CAST(@supplierID AS UUID)
 		  AND ItemCode = @itemCode
 		ORDER BY UseCount DESC, LastUsedAt DESC
-	`
+LIMIT 1
+`
 
 	var guidES, matchMethod sql.NullString
 	var matchConfidence sql.NullFloat64
@@ -1788,12 +1792,13 @@ func (pm *PriceMatcher) getCachedMatch(ctx context.Context, supplierID, itemCode
 	if guidES.Valid && guidES.String != "" {
 		// Проверяем, что GUID_ES существует в справочнике
 		checkQuery := `
-			SELECT TOP 1 CAST(GUID_ES AS NVARCHAR(50)) AS GUID_ES
+			SELECT CAST(GUID_ES AS TEXT) AS GUID_ES
 			FROM es_ef2
-			WHERE GUID_ES = CAST(@guidES AS UNIQUEIDENTIFIER)
+			WHERE GUID_ES = CAST(@guidES AS UUID)
 			  AND is_active = 1
 			  AND DELETED IS NULL
-		`
+LIMIT 1
+`
 		var validGUID sql.NullString
 		err = pm.database.QueryRowContext(ctx, checkQuery, sql.Named("guidES", guidES.String)).Scan(&validGUID)
 		if err == nil && validGUID.Valid {
@@ -1874,28 +1879,27 @@ func (pm *PriceMatcher) saveMapping(ctx context.Context, supplierID, itemCode st
 		return
 	}
 
-	// Используем MERGE (UPSERT) для обновления или вставки
+	// Используем INSERT ... ON CONFLICT (UPSERT) для обновления или вставки
 	query := `
-		MERGE SupplierItemMapping AS target
-		USING (SELECT @supplierID AS SupplierID, @itemCode AS ItemCode) AS source
-		ON target.SupplierID = CAST(source.SupplierID AS UNIQUEIDENTIFIER)
-		   AND target.ItemCode = source.ItemCode
-		WHEN MATCHED THEN
-			UPDATE SET
-				GUID_ES = CAST(@guidES AS UNIQUEIDENTIFIER),
-				MatchMethod = @matchMethod,
-				MatchConfidence = @matchConfidence,
-				UseCount = UseCount + 1,
-				LastUsedAt = GETUTCDATE(),
-				UpdatedAt = GETUTCDATE()
-		WHEN NOT MATCHED THEN
-			INSERT (SupplierID, ItemCode, GUID_ES, MatchMethod, MatchConfidence, UseCount, LastUsedAt, CreatedAt, UpdatedAt)
-			VALUES (CAST(@supplierID AS UNIQUEIDENTIFIER), @itemCode, CAST(@guidES AS UNIQUEIDENTIFIER), 
-			        @matchMethod, @matchConfidence, 1, GETUTCDATE(), GETUTCDATE(), GETUTCDATE());
+		INSERT INTO "SupplierItemMapping" (
+			"SupplierID", "ItemCode", "GUID_ES", "MatchMethod", "MatchConfidence",
+			"UseCount", "LastUsedAt", "CreatedAt", "UpdatedAt"
+		) VALUES (
+			CAST(@supplierID AS UUID), @itemCode, CAST(@guidES AS UUID),
+			@matchMethod, @matchConfidence, 1,
+			(NOW() AT TIME ZONE 'utc'), (NOW() AT TIME ZONE 'utc'), (NOW() AT TIME ZONE 'utc')
+		)
+		ON CONFLICT ("SupplierID", "ItemCode") DO UPDATE SET
+			"GUID_ES" = EXCLUDED."GUID_ES",
+			"MatchMethod" = EXCLUDED."MatchMethod",
+			"MatchConfidence" = EXCLUDED."MatchConfidence",
+			"UseCount" = "SupplierItemMapping"."UseCount" + 1,
+			"LastUsedAt" = (NOW() AT TIME ZONE 'utc'),
+			"UpdatedAt" = (NOW() AT TIME ZONE 'utc');
 	`
 
 	if pm.logger != nil {
-		pm.logger.Debug("💾 Выполняем MERGE для SupplierItemMapping: SupplierID=%s, ItemCode='%s', GUID_ES=%s", supplierID, itemCode, match.GUID_ES)
+		pm.logger.Debug("💾 Выполняем UPSERT для SupplierItemMapping: SupplierID=%s, ItemCode='%s', GUID_ES=%s", supplierID, itemCode, match.GUID_ES)
 	}
 
 	result, err := pm.database.ExecContext(ctx, query,
@@ -1925,9 +1929,9 @@ func (pm *PriceMatcher) incrementMappingUseCount(ctx context.Context, supplierID
 	query := `
 		UPDATE SupplierItemMapping
 		SET UseCount = UseCount + 1,
-		    LastUsedAt = GETUTCDATE(),
-		    UpdatedAt = GETUTCDATE()
-		WHERE SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)
+		    LastUsedAt = (NOW() AT TIME ZONE 'utc'),
+		    UpdatedAt = (NOW() AT TIME ZONE 'utc')
+		WHERE SupplierID = CAST(@supplierID AS UUID)
 		  AND ItemCode = @itemCode
 	`
 
@@ -1958,24 +1962,23 @@ func (pm *PriceMatcher) SaveMappingForItem(ctx context.Context, supplierID, item
 		return fmt.Errorf("неправильный формат GUID_ES: %w", err)
 	}
 
-	// Используем MERGE (UPSERT) для обновления или вставки
+	// Используем INSERT ... ON CONFLICT (UPSERT) для обновления или вставки
 	query := `
-		MERGE SupplierItemMapping AS target
-		USING (SELECT @supplierID AS SupplierID, @itemCode AS ItemCode) AS source
-		ON target.SupplierID = CAST(source.SupplierID AS UNIQUEIDENTIFIER)
-		   AND target.ItemCode = source.ItemCode
-		WHEN MATCHED THEN
-			UPDATE SET
-				GUID_ES = CAST(@guidES AS UNIQUEIDENTIFIER),
-				MatchMethod = @matchMethod,
-				MatchConfidence = @matchConfidence,
-				UseCount = UseCount + 1,
-				LastUsedAt = GETUTCDATE(),
-				UpdatedAt = GETUTCDATE()
-		WHEN NOT MATCHED THEN
-			INSERT (SupplierID, ItemCode, GUID_ES, MatchMethod, MatchConfidence, UseCount, LastUsedAt, CreatedAt, UpdatedAt)
-			VALUES (CAST(@supplierID AS UNIQUEIDENTIFIER), @itemCode, CAST(@guidES AS UNIQUEIDENTIFIER), 
-			        @matchMethod, @matchConfidence, 1, GETUTCDATE(), GETUTCDATE(), GETUTCDATE());
+		INSERT INTO "SupplierItemMapping" (
+			"SupplierID", "ItemCode", "GUID_ES", "MatchMethod", "MatchConfidence",
+			"UseCount", "LastUsedAt", "CreatedAt", "UpdatedAt"
+		) VALUES (
+			CAST(@supplierID AS UUID), @itemCode, CAST(@guidES AS UUID),
+			@matchMethod, @matchConfidence, 1,
+			(NOW() AT TIME ZONE 'utc'), (NOW() AT TIME ZONE 'utc'), (NOW() AT TIME ZONE 'utc')
+		)
+		ON CONFLICT ("SupplierID", "ItemCode") DO UPDATE SET
+			"GUID_ES" = EXCLUDED."GUID_ES",
+			"MatchMethod" = EXCLUDED."MatchMethod",
+			"MatchConfidence" = EXCLUDED."MatchConfidence",
+			"UseCount" = "SupplierItemMapping"."UseCount" + 1,
+			"LastUsedAt" = (NOW() AT TIME ZONE 'utc'),
+			"UpdatedAt" = (NOW() AT TIME ZONE 'utc');
 	`
 
 	_, err = pm.database.ExecContext(ctx, query,
@@ -2006,8 +2009,8 @@ func (pm *PriceMatcher) SaveMappingForItem(ctx context.Context, supplierID, item
 func (pm *PriceMatcher) markAsProcessed(ctx context.Context, invoiceDataID string) error {
 	query := `
 		UPDATE InvoiceData 
-		SET IsProcessed = 1, ProcessedAt = GETUTCDATE()
-		WHERE InvoiceDataID = CAST(@invoiceDataID AS UNIQUEIDENTIFIER)
+		SET IsProcessed = 1, ProcessedAt = (NOW() AT TIME ZONE 'utc')
+		WHERE InvoiceDataID = CAST(@invoiceDataID AS UUID)
 	`
 
 	_, err := pm.database.ExecContext(ctx, query, sql.Named("invoiceDataID", invoiceDataID))
@@ -2033,12 +2036,12 @@ func (pm *PriceMatcher) markAsProcessedBatch(ctx context.Context, invoiceDataIDs
 		// Строим VALUES для batch
 		values := make([]string, len(batch))
 		for j, id := range batch {
-			values[j] = fmt.Sprintf("CAST('%s' AS UNIQUEIDENTIFIER)", id)
+			values[j] = fmt.Sprintf("CAST('%s' AS UUID)", id)
 		}
 
 		query := fmt.Sprintf(`
 			UPDATE InvoiceData 
-			SET IsProcessed = 1, ProcessedAt = GETUTCDATE()
+			SET IsProcessed = 1, ProcessedAt = (NOW() AT TIME ZONE 'utc')
 			WHERE InvoiceDataID IN (%s)
 		`, strings.Join(values, ","))
 
@@ -2089,18 +2092,18 @@ func (pm *PriceMatcher) saveSupplierPriceWithoutMatchBatch(ctx context.Context, 
 		 Manufacturer, Country,
 		 MatchMethod, MatchConfidence, IsActive, PriceListID, CreatedAt, UpdatedAt)
 		VALUES 
-		(CAST(@supplierPriceID AS UNIQUEIDENTIFIER), CAST(@supplierID AS UNIQUEIDENTIFIER),
-		 CAST(@invoiceImportID AS UNIQUEIDENTIFIER), CAST(@invoiceDataID AS UNIQUEIDENTIFIER),
+		(CAST(@supplierPriceID AS UUID), CAST(@supplierID AS UUID),
+		 CAST(@invoiceImportID AS UUID), CAST(@invoiceDataID AS UUID),
 		 NULL,
 		 @itemCode, @itemName, @supplierItemName, @barcode, @price, @quantity,
 		 @invoiceNumber, @invoiceDate, @batchNumber, @expiryDate,
 		 @manufacturer, @country,
-		 NULL, NULL, 1,
-		 CASE WHEN @priceListID IS NOT NULL AND @priceListID != '' THEN CAST(@priceListID AS UNIQUEIDENTIFIER) ELSE NULL END,
-		 GETUTCDATE(), GETUTCDATE())
+		 NULL, NULL, TRUE,
+		 CASE WHEN @priceListID IS NOT NULL AND @priceListID != '' THEN CAST(@priceListID AS UUID) ELSE NULL END,
+		 (NOW() AT TIME ZONE 'utc'), (NOW() AT TIME ZONE 'utc'))
 	`
 
-	stmt, err := tx.PrepareContext(ctx, query)
+	stmt, err := db.PrepareRaw(ctx, tx, query)
 	if err != nil {
 		return fmt.Errorf("ошибка подготовки запроса: %w", err)
 	}

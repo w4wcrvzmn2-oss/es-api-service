@@ -26,17 +26,13 @@ class API {
         }
         
         try {
-            console.log(`API Request: ${options.method || 'GET'} ${API_BASE}${endpoint}`);
-            
             const response = await fetch(`${API_BASE}${endpoint}`, {
                 ...options,
                 headers,
                 mode: 'cors',
                 credentials: 'omit'
             });
-            
-            console.log(`API Response: ${response.status} ${response.statusText}`);
-            
+
             if (response.status === 401) {
                 console.warn('401 Unauthorized - redirecting to login');
                 localStorage.removeItem('authToken');

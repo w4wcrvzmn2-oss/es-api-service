@@ -18,6 +18,7 @@ type Config struct {
 		ReadTimeoutSec  int    `yaml:"read_timeout_sec"`
 		WriteTimeoutSec int    `yaml:"write_timeout_sec"`
 		IdleTimeoutSec  int    `yaml:"idle_timeout_sec"`
+		StaticDir       string `yaml:"static_dir"` // ClientWeb; пусто = ./ClientWeb
 	} `yaml:"http"`
 
 	// Второй HTTP сервер для ClienElf2
@@ -35,20 +36,26 @@ type Config struct {
 	} `yaml:"auth"`
 
 	DB struct {
-		Server   string `yaml:"server"`
-		Port     int    `yaml:"port"`
-		User     string `yaml:"user"`
-		Password string `yaml:"password"`
-		Database string `yaml:"database"`
+		Server       string `yaml:"server"`
+		Port         int    `yaml:"port"`
+		User         string `yaml:"user"`
+		Password     string `yaml:"password"`
+		Database     string `yaml:"database"`
+		SSLMode      string `yaml:"sslmode"`
+		MaxOpenConns int    `yaml:"max_open_conns"` // пул PG; 0 → 100
+		MaxIdleConns int    `yaml:"max_idle_conns"` // 0 → max(25, MaxOpen/4)
 	} `yaml:"db"`
 
-	// База данных для синхронизации справочника препаратов
+	// База данных для синхронизации справочника препаратов (PostgreSQL)
 	SourceDB struct {
-		Server   string `yaml:"server"`
-		Port     int    `yaml:"port"`
-		User     string `yaml:"user"`
-		Password string `yaml:"password"`
-		Database string `yaml:"database"`
+		Server       string `yaml:"server"`
+		Port         int    `yaml:"port"`
+		User         string `yaml:"user"`
+		Password     string `yaml:"password"`
+		Database     string `yaml:"database"`
+		SSLMode      string `yaml:"sslmode"`
+		MaxOpenConns int    `yaml:"max_open_conns"` // 0 → 20
+		MaxIdleConns int    `yaml:"max_idle_conns"` // 0 → 5
 	} `yaml:"source_db"`
 
 	Logging struct {
@@ -97,10 +104,11 @@ func LoadConfig() (*Config, error) {
 		config.HTTP.Port = 8080
 	}
 	if config.HTTP.ReadTimeoutSec == 0 {
-		config.HTTP.ReadTimeoutSec = 15
+		// Крупные DBF (десятки МБ) через браузер не укладываются в 15с.
+		config.HTTP.ReadTimeoutSec = 300
 	}
 	if config.HTTP.WriteTimeoutSec == 0 {
-		config.HTTP.WriteTimeoutSec = 60
+		config.HTTP.WriteTimeoutSec = 600
 	}
 	if config.HTTP.IdleTimeoutSec == 0 {
 		config.HTTP.IdleTimeoutSec = 120
@@ -112,7 +120,35 @@ func LoadConfig() (*Config, error) {
 		config.Auth.TokenTTLMinutes = 1440
 	}
 	if config.DB.Port == 0 {
-		config.DB.Port = 1433
+		config.DB.Port = 5432
+	}
+	if config.DB.SSLMode == "" {
+		config.DB.SSLMode = "disable"
+	}
+	if config.DB.MaxOpenConns <= 0 {
+		config.DB.MaxOpenConns = 100
+	}
+	if config.DB.MaxIdleConns <= 0 {
+		idle := config.DB.MaxOpenConns / 4
+		if idle < 25 {
+			idle = 25
+		}
+		if idle > config.DB.MaxOpenConns {
+			idle = config.DB.MaxOpenConns
+		}
+		config.DB.MaxIdleConns = idle
+	}
+	if config.SourceDB.Port == 0 {
+		config.SourceDB.Port = 5432
+	}
+	if config.SourceDB.SSLMode == "" {
+		config.SourceDB.SSLMode = "disable"
+	}
+	if config.SourceDB.MaxOpenConns <= 0 {
+		config.SourceDB.MaxOpenConns = 20
+	}
+	if config.SourceDB.MaxIdleConns <= 0 {
+		config.SourceDB.MaxIdleConns = 5
 	}
 	if config.Logging.Level == "" {
 		config.Logging.Level = "info"

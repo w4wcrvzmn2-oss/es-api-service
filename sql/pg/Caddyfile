@@ -1,0 +1,25 @@
+# Путь на сервере: D:\Caddy\Caddyfile  (тот, что указан у службы)
+# es_api: 8080 = ClientWeb, 8081 = ClienElf2
+
+{
+	email admin@24pharmdata.ru
+}
+
+# Главный домен — отдельный сайт (отдельный сертификат)
+24pharmdata.ru {
+	reverse_proxy 127.0.0.1:8080
+}
+
+www.24pharmdata.ru {
+	redir https://24pharmdata.ru{uri} permanent
+}
+
+# Поддомен кабинета
+phd.24pharmdata.ru {
+	reverse_proxy 127.0.0.1:8081
+}
+
+# По IP — только HTTP
+http://195.14.114.171 {
+	reverse_proxy 127.0.0.1:8080
+}

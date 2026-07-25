@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -55,19 +56,20 @@ func (s *Server) handleCreateSupplierPrice(w http.ResponseWriter, r *http.Reques
 	// Используем существующий или создаем новый InvoiceImport
 	var invoiceImportID string
 	err := s.database.GORMWith(ctx).Raw(
-		"SELECT TOP 1 CAST(InvoiceImportID AS NVARCHAR(50)) FROM InvoiceImport WHERE SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER) ORDER BY CreatedAt DESC",
+		"SELECT CAST(InvoiceImportID AS TEXT) FROM InvoiceImport WHERE SupplierID = CAST(@supplierID AS UUID) ORDER BY CreatedAt DESC\nLIMIT 1\n",
 		sql.Named("supplierID", req.SupplierID),
 	).Row().Scan(&invoiceImportID)
 
 	if err != nil || invoiceImportID == "" {
+		invoiceImportID = uuid.New().String()
 		query := `
-			DECLARE @ImportID UNIQUEIDENTIFIER = NEWID();
 			INSERT INTO InvoiceImport (InvoiceImportID, SupplierID, FileName, ImportStatus, RecordsTotal, RecordsProcessed, CreatedAt)
-			VALUES (@ImportID, CAST(@supplierID AS UNIQUEIDENTIFIER), N'Manual Entry', N'COMPLETED', 0, 0, GETUTCDATE());
-			SELECT CAST(@ImportID AS NVARCHAR(50));
+			VALUES (CAST(@importID AS UUID), CAST(@supplierID AS UUID), 'Manual Entry', 'COMPLETED', 0, 0, (NOW() AT TIME ZONE 'utc'))
 		`
-		err = s.database.GORMWith(ctx).Raw(query, sql.Named("supplierID", req.SupplierID)).Row().Scan(&invoiceImportID)
-		if err != nil {
+		if err := s.database.GORMWith(ctx).Exec(query,
+			sql.Named("importID", invoiceImportID),
+			sql.Named("supplierID", req.SupplierID),
+		).Error; err != nil {
 			if s.logger != nil {
 				s.logger.Error("Ошибка создания импорта: %v", err)
 			}
@@ -79,7 +81,7 @@ func (s *Server) handleCreateSupplierPrice(w http.ResponseWriter, r *http.Reques
 	// Создаем InvoiceData если нужно
 	var invoiceDataID string
 	err = s.database.GORMWith(ctx).Raw(
-		"SELECT TOP 1 CAST(InvoiceDataID AS NVARCHAR(50)) FROM InvoiceData WHERE InvoiceImportID = CAST(@importID AS UNIQUEIDENTIFIER) ORDER BY CreatedAt DESC",
+		"SELECT CAST(InvoiceDataID AS TEXT) FROM InvoiceData WHERE InvoiceImportID = CAST(@importID AS UUID) ORDER BY CreatedAt DESC\nLIMIT 1\n",
 		sql.Named("importID", invoiceImportID),
 	).Row().Scan(&invoiceDataID)
 
@@ -96,48 +98,58 @@ func (s *Server) handleCreateSupplierPrice(w http.ResponseWriter, r *http.Reques
 		if req.Quantity != nil {
 			quantityVal = *req.Quantity
 		}
+		invoiceDataID = uuid.New().String()
 		query := `
-			DECLARE @DataID UNIQUEIDENTIFIER = NEWID();
 			INSERT INTO InvoiceData (InvoiceDataID, InvoiceImportID, ItemCode, ItemName, Price, Quantity, CreatedAt)
-			VALUES (@DataID, CAST(@importID AS UNIQUEIDENTIFIER),
-				@itemCode, @itemName, @price, @quantity, GETUTCDATE());
-			SELECT CAST(@DataID AS NVARCHAR(50));
+			VALUES (CAST(@dataID AS UUID), CAST(@importID AS UUID),
+				@itemCode, @itemName, @price, @quantity, (NOW() AT TIME ZONE 'utc'))
 		`
-		err = s.database.GORMWith(ctx).Raw(query,
+		if err := s.database.GORMWith(ctx).Exec(query,
+			sql.Named("dataID", invoiceDataID),
 			sql.Named("importID", invoiceImportID),
 			sql.Named("itemCode", itemCodeVal),
 			sql.Named("itemName", itemNameVal),
 			sql.Named("price", req.Price),
 			sql.Named("quantity", quantityVal),
-		).Row().Scan(&invoiceDataID)
-		if err != nil {
+		).Error; err != nil {
 			s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка создания данных: %v", err))
 			return
 		}
 	}
 
 	// Вставляем прайс и сразу возвращаем его расчётную цену
+	supplierPriceID := uuid.New().String()
+	var guidESArg interface{}
+	if req.GUID_ES != "" {
+		guidESArg = req.GUID_ES
+	}
+	var regionArg interface{}
+	if req.RegionID != nil && *req.RegionID != "" {
+		regionArg = *req.RegionID
+	}
+
 	query := `
 		INSERT INTO SupplierPrice (
-			SupplierID, InvoiceImportID, InvoiceDataID, GUID_ES,
+			SupplierPriceID, SupplierID, InvoiceImportID, InvoiceDataID, GUID_ES,
 			ItemCode, ItemName, Barcode, Price, Quantity,
 			InvoiceNumber, InvoiceDate, RegionID, MarkupPct,
 			IsActive, CreatedAt, UpdatedAt
 		)
-		OUTPUT
-			CAST(INSERTED.SupplierPriceID AS NVARCHAR(50)),
-			INSERTED.Price * (1 + ISNULL(INSERTED.MarkupPct, 0) / 100.0)
 		VALUES (
-			CAST(@supplierID AS UNIQUEIDENTIFIER),
-			CAST(@invoiceImportID AS UNIQUEIDENTIFIER),
-			CAST(@invoiceDataID AS UNIQUEIDENTIFIER),
-			CASE WHEN @guidES IS NOT NULL AND @guidES != '' THEN CAST(@guidES AS UNIQUEIDENTIFIER) ELSE NULL END,
-			@itemCode, @itemName, @barcode, @price, @quantity,
-			@invoiceNumber, @invoiceDate,
-			CASE WHEN @regionID IS NOT NULL AND @regionID != '' THEN CAST(@regionID AS UNIQUEIDENTIFIER) ELSE NULL END,
-			@markupPct, @isActive,
-			GETUTCDATE(), GETUTCDATE()
-		);
+			CAST(? AS UUID),
+			CAST(? AS UUID),
+			CAST(? AS UUID),
+			CAST(? AS UUID),
+			CAST(? AS UUID),
+			?, ?, ?, ?, ?,
+			?, ?,
+			CAST(? AS UUID),
+			?, ?,
+			(NOW() AT TIME ZONE 'utc'), (NOW() AT TIME ZONE 'utc')
+		)
+		RETURNING
+			CAST("SupplierPriceID" AS TEXT),
+			"Price" * (1 + COALESCE("MarkupPct", 0) / 100.0)
 	`
 
 	var priceID string
@@ -150,28 +162,22 @@ func (s *Server) handleCreateSupplierPrice(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	var guidESVal interface{}
-	if req.GUID_ES != "" {
-		guidESVal = req.GUID_ES
-	} else {
-		guidESVal = nil
-	}
-
 	err = s.database.GORMWith(ctx).Raw(query,
-		sql.Named("supplierID", req.SupplierID),
-		sql.Named("invoiceImportID", invoiceImportID),
-		sql.Named("invoiceDataID", invoiceDataID),
-		sql.Named("guidES", guidESVal),
-		sql.Named("itemCode", getStringPtr(req.ItemCode)),
-		sql.Named("itemName", getStringPtr(req.ItemName)),
-		sql.Named("barcode", getStringPtr(req.Barcode)),
-		sql.Named("price", req.Price),
-		sql.Named("quantity", getFloatPtr(req.Quantity)),
-		sql.Named("invoiceNumber", getStringPtr(req.InvoiceNumber)),
-		sql.Named("invoiceDate", invoiceDateVal),
-		sql.Named("regionID", getStringPtr(req.RegionID)),
-		sql.Named("markupPct", markupPct),
-		sql.Named("isActive", req.IsActive),
+		supplierPriceID,
+		req.SupplierID,
+		invoiceImportID,
+		invoiceDataID,
+		guidESArg,
+		getStringPtr(req.ItemCode),
+		getStringPtr(req.ItemName),
+		getStringPtr(req.Barcode),
+		req.Price,
+		getFloatPtr(req.Quantity),
+		getStringPtr(req.InvoiceNumber),
+		invoiceDateVal,
+		regionArg,
+		markupPct,
+		req.IsActive,
 	).Row().Scan(&priceID, &finalPrice)
 
 	if err != nil {
@@ -236,7 +242,7 @@ func (s *Server) handleUpdateSupplierPrice(w http.ResponseWriter, r *http.Reques
 		if *req.RegionID == "" {
 			updates = append(updates, "RegionID = NULL")
 		} else {
-			updates = append(updates, "RegionID = CAST(@regionID AS UNIQUEIDENTIFIER)")
+			updates = append(updates, "RegionID = CAST(@regionID AS UUID)")
 			args = append(args, sql.Named("regionID", *req.RegionID))
 		}
 	}
@@ -256,22 +262,22 @@ func (s *Server) handleUpdateSupplierPrice(w http.ResponseWriter, r *http.Reques
 		s.writeError(w, http.StatusBadRequest, "Не указаны поля для обновления")
 		return
 	}
-	updates = append(updates, "UpdatedAt = GETUTCDATE()")
+	updates = append(updates, "UpdatedAt = (NOW() AT TIME ZONE 'utc')")
 
 	query := fmt.Sprintf(`
 		UPDATE SupplierPrice
 		SET %s
-		WHERE SupplierPriceID = CAST(@priceID AS UNIQUEIDENTIFIER);
+		WHERE SupplierPriceID = CAST(@priceID AS UUID);
 
 		SELECT
-			CAST(SupplierPriceID AS NVARCHAR(50)) AS SupplierPriceID,
+			CAST(SupplierPriceID AS TEXT) AS SupplierPriceID,
 			Price,
-			Price * (1 + ISNULL(MarkupPct, 0) / 100.0) AS FinalPrice,
-			ISNULL(MarkupPct, 0) AS MarkupPct,
-			CAST(RegionID AS NVARCHAR(50)) AS RegionID,
+			Price * (1 + COALESCE(MarkupPct, 0) / 100.0) AS FinalPrice,
+			COALESCE(MarkupPct, 0) AS MarkupPct,
+			CAST(RegionID AS TEXT) AS RegionID,
 			IsActive
 		FROM SupplierPrice
-		WHERE SupplierPriceID = CAST(@priceID AS UNIQUEIDENTIFIER);
+		WHERE SupplierPriceID = CAST(@priceID AS UUID);
 	`, strings.Join(updates, ", "))
 
 	var result struct {
@@ -342,8 +348,8 @@ func (s *Server) handleDeleteSupplierPrice(w http.ResponseWriter, r *http.Reques
 
 	res := s.database.GORMWith(ctx).Exec(`
 		UPDATE SupplierPrice
-		SET IsActive = 0, UpdatedAt = GETUTCDATE()
-		WHERE SupplierPriceID = CAST(@priceID AS UNIQUEIDENTIFIER)`,
+		SET IsActive = 0, UpdatedAt = (NOW() AT TIME ZONE 'utc')
+		WHERE SupplierPriceID = CAST(@priceID AS UUID)`,
 		sql.Named("priceID", priceID),
 	)
 	if res.Error != nil {
@@ -392,14 +398,14 @@ func (s *Server) handleToggleSupplierPrice(w http.ResponseWriter, r *http.Reques
 		if err := tx.Exec(`
 			UPDATE SupplierPrice
 			SET IsActive = CASE WHEN IsActive = 1 THEN 0 ELSE 1 END,
-			    UpdatedAt = GETUTCDATE()
-			WHERE SupplierPriceID = CAST(@priceID AS UNIQUEIDENTIFIER)`,
+			    UpdatedAt = (NOW() AT TIME ZONE 'utc')
+			WHERE SupplierPriceID = CAST(@priceID AS UUID)`,
 			sql.Named("priceID", priceID),
 		).Error; err != nil {
 			return err
 		}
 		return tx.Raw(
-			`SELECT IsActive FROM SupplierPrice WHERE SupplierPriceID = CAST(@priceID AS UNIQUEIDENTIFIER)`,
+			`SELECT IsActive FROM SupplierPrice WHERE SupplierPriceID = CAST(@priceID AS UUID)`,
 			sql.Named("priceID", priceID),
 		).Row().Scan(&isActive)
 	})

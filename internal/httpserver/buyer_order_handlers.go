@@ -152,8 +152,8 @@ func (s *Server) resolveBuyerUser(ctx context.Context, r *http.Request) (string,
 
 	q := s.database.GORMWith(ctx).
 		Table("BuyerUser AS bu").
-		Select(`CAST(bu.BuyerUserID AS NVARCHAR(50)) AS BuyerUserID,
-			CAST(ba.BuyerApplicationID AS NVARCHAR(50)) AS BuyerApplicationID`).
+		Select(`CAST(bu.BuyerUserID AS TEXT) AS BuyerUserID,
+			CAST(ba.BuyerApplicationID AS TEXT) AS BuyerApplicationID`).
 		Joins("INNER JOIN BuyerApplication ba ON ba.BuyerUserID = bu.BuyerUserID AND ba.IsActive = 1").
 		Where("bu.IsActive = ?", true)
 	if claims.BuyerUserID != "" {
@@ -176,7 +176,7 @@ func (s *Server) resolveBuyerUser(ctx context.Context, r *http.Request) (string,
 // ensureOrderStatusID возвращает OrderStatusID по имени; при отсутствии создаёт.
 func (s *Server) ensureOrderStatusID(tx *gorm.DB, name, description string) (string, error) {
 	var id string
-	err := tx.Raw(`SELECT CAST(OrderStatusID AS NVARCHAR(50)) FROM OrderStatus WHERE Name = ?`, name).Scan(&id).Error
+	err := tx.Raw(`SELECT CAST(OrderStatusID AS TEXT) FROM OrderStatus WHERE Name = ?`, name).Scan(&id).Error
 	if err == nil && id != "" {
 		return id, nil
 	}
@@ -252,11 +252,11 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 		var row resolvedPriceRow
 		err := s.database.GORMWith(ctx).
 			Table("SupplierPrice AS sp").
-			Select(`CAST(sp.SupplierID AS NVARCHAR(50)) AS SupplierID,
-				CASE WHEN p.ProductID IS NULL THEN NULL ELSE CAST(p.ProductID AS NVARCHAR(50)) END AS ProductID,
-				CASE WHEN r.RegionID IS NULL THEN NULL ELSE CAST(r.RegionID AS NVARCHAR(50)) END AS RegionID,
-				CASE WHEN spl.PriceListID IS NULL THEN NULL ELSE CAST(spl.PriceListID AS NVARCHAR(50)) END AS PriceListID,
-				ISNULL(sp.FinalPrice, sp.Price) * (1 + ISNULL(plr.MarkupPct, 0) / 100.0) AS UnitPrice,
+			Select(`CAST(sp.SupplierID AS TEXT) AS SupplierID,
+				CASE WHEN p.ProductID IS NULL THEN NULL ELSE CAST(p.ProductID AS TEXT) END AS ProductID,
+				CASE WHEN r.RegionID IS NULL THEN NULL ELSE CAST(r.RegionID AS TEXT) END AS RegionID,
+				CASE WHEN spl.PriceListID IS NULL THEN NULL ELSE CAST(spl.PriceListID AS TEXT) END AS PriceListID,
+				COALESCE(sp.FinalPrice, sp.Price) * (1 + COALESCE(plr.MarkupPct, 0) / 100.0) AS UnitPrice,
 				sp.ItemName AS ItemName,
 				sp.ItemCode AS ItemCode,
 				sp.Barcode AS Barcode,
@@ -325,11 +325,11 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 			return fmt.Errorf("status: %w", err)
 		}
 
-		// GORM-driver/sqlserver квотирует имена через "...", а в MSSQL имя [Order]
+		// GORM-driver/sqlserver квотирует имена через "...", а в MSSQL имя "Order"
 		// (зарезервированное слово) понимается только в квадратных скобках.
-		// Поэтому INSERT и UPDATE по [Order] делаем через сырой Exec.
+		// Поэтому INSERT и UPDATE по "Order" делаем через сырой Exec.
 		if err := tx.Exec(`
-			INSERT INTO [Order] (OrderID, BuyerUserID, BuyerApplicationID, BuyerLocationID, OrderStatusID, TotalAmount, Comment, CreatedAt)
+			INSERT INTO "Order" (OrderID, BuyerUserID, BuyerApplicationID, BuyerLocationID, OrderStatusID, TotalAmount, Comment, CreatedAt)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			db.UUIDParam(orderID),
@@ -341,7 +341,7 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 			commentStr,
 			now,
 		).Error; err != nil {
-			return fmt.Errorf("[Order] insert: %w", err)
+			return fmt.Errorf("Order insert: %w", err)
 		}
 
 		for _, it := range resolvedItems {
@@ -416,7 +416,7 @@ func (s *Server) handleBuyerGetOrders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	base := s.database.GORMWith(ctx).
-		Table("[Order] AS o").
+		Table(`"Order" AS o`).
 		Joins("INNER JOIN OrderStatus os ON o.OrderStatusID = os.OrderStatusID").
 		Where("o.BuyerUserID = ?", db.UUIDParam(buyerUserID))
 	if statusFilter != "" {
@@ -432,7 +432,7 @@ func (s *Server) handleBuyerGetOrders(w http.ResponseWriter, r *http.Request) {
 
 	orders := []BuyerOrderListItem{}
 	err := base.
-		Select(`CAST(o.OrderID AS NVARCHAR(50)) AS OrderID,
+		Select(`CAST(o.OrderID AS TEXT) AS OrderID,
 			os.Name AS Status,
 			o.TotalAmount,
 			(SELECT COUNT(*) FROM OrderItem WHERE OrderID = o.OrderID) AS ItemsCount,
@@ -487,9 +487,9 @@ func (s *Server) handleBuyerGetOrderByID(w http.ResponseWriter, r *http.Request,
 	}
 	var row orderRow
 	err := s.database.GORMWith(ctx).
-		Table("[Order] AS o").
-		Select(`CAST(o.OrderID AS NVARCHAR(50)) AS OrderID,
-			CAST(o.BuyerUserID AS NVARCHAR(50)) AS OwnerID,
+		Table(`"Order" AS o`).
+		Select(`CAST(o.OrderID AS TEXT) AS OrderID,
+			CAST(o.BuyerUserID AS TEXT) AS OwnerID,
 			os.Name AS Status,
 			o.TotalAmount,
 			o.CreatedAt,
@@ -591,8 +591,8 @@ func (s *Server) handleBuyerCancelOrder(w http.ResponseWriter, r *http.Request, 
 	}
 	var chk checkRow
 	err := s.database.GORMWith(ctx).
-		Table("[Order] AS o").
-		Select(`CAST(o.BuyerUserID AS NVARCHAR(50)) AS OwnerID, os.Name AS CurrentStatus`).
+		Table(`"Order" AS o`).
+		Select(`CAST(o.BuyerUserID AS TEXT) AS OwnerID, os.Name AS CurrentStatus`).
 		Joins("INNER JOIN OrderStatus os ON o.OrderStatusID = os.OrderStatusID").
 		Where("o.OrderID = ?", db.UUIDParam(orderID)).
 		Take(&chk).Error
@@ -620,7 +620,7 @@ func (s *Server) handleBuyerCancelOrder(w http.ResponseWriter, r *http.Request, 
 		if err != nil {
 			return err
 		}
-		return tx.Exec(`UPDATE [Order] SET OrderStatusID = CAST(? AS UNIQUEIDENTIFIER) WHERE OrderID = CAST(? AS UNIQUEIDENTIFIER)`, cancelledID, orderID).Error
+		return tx.Exec(`UPDATE "Order" SET OrderStatusID = CAST(? AS UUID) WHERE OrderID = CAST(? AS UUID)`, cancelledID, orderID).Error
 	})
 	if err != nil {
 		s.logger.Error("Ошибка отмены заказа покупателем: %v", err)
@@ -681,7 +681,7 @@ func (s *Server) handleBuyerCatalog(w http.ResponseWriter, r *http.Request) {
 	if buyerUserID, _, ok := s.resolveBuyerUser(ctx, r); ok {
 		var buyerID string
 		_ = s.database.GORMWith(ctx).
-			Raw(`SELECT CAST(BuyerID AS NVARCHAR(50)) FROM BuyerUser WHERE BuyerUserID = ?`, db.UUIDParam(buyerUserID)).
+			Raw(`SELECT CAST(BuyerID AS TEXT) FROM BuyerUser WHERE BuyerUserID = ?`, db.UUIDParam(buyerUserID)).
 			Scan(&buyerID).Error
 		if buyerID != "" {
 			var assignedCount int64
@@ -710,10 +710,10 @@ func (s *Server) handleBuyerCatalog(w http.ResponseWriter, r *http.Request) {
 
 	items := []BuyerCatalogItem{}
 	err := base.
-		Select(`CAST(sp.SupplierPriceID AS NVARCHAR(50)) AS SupplierPriceID,
-			ISNULL(sp.ItemName, '') AS Name,
+		Select(`CAST(sp.SupplierPriceID AS TEXT) AS SupplierPriceID,
+			COALESCE(sp.ItemName, '') AS Name,
 			sup.Name AS Supplier,
-			ISNULL(sp.FinalPrice, sp.Price) * (1 + ISNULL(plr.MarkupPct, 0) / 100.0) AS Price,
+			COALESCE(sp.FinalPrice, sp.Price) * (1 + COALESCE(plr.MarkupPct, 0) / 100.0) AS Price,
 			sp.IsActive AS InStock`).
 		Joins("LEFT JOIN PriceListRegion plr ON plr.PriceListID = sp.PriceListID AND plr.RegionID = sp.RegionID AND plr.IsActive = 1").
 		Order("sp.ItemName").

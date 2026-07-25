@@ -19,11 +19,10 @@ type QueryParams struct {
 // ParseQueryParams парсит параметры запроса из строковых значений
 func ParseQueryParams(limitStr, offsetStr, updatedAfterStr, idGtStr, columnsStr string) (*QueryParams, error) {
 	params := &QueryParams{
-		Limit:  1000, // значение по умолчанию
+		Limit:  1000,
 		Offset: 0,
 	}
 
-	// Парсинг limit
 	if limitStr != "" {
 		limit, err := strconv.Atoi(limitStr)
 		if err != nil {
@@ -35,7 +34,6 @@ func ParseQueryParams(limitStr, offsetStr, updatedAfterStr, idGtStr, columnsStr 
 		params.Limit = limit
 	}
 
-	// Парсинг offset
 	if offsetStr != "" {
 		offset, err := strconv.Atoi(offsetStr)
 		if err != nil {
@@ -47,7 +45,6 @@ func ParseQueryParams(limitStr, offsetStr, updatedAfterStr, idGtStr, columnsStr 
 		params.Offset = offset
 	}
 
-	// Парсинг updated_after
 	if updatedAfterStr != "" {
 		updatedAfter, err := time.Parse(time.RFC3339, updatedAfterStr)
 		if err != nil {
@@ -56,7 +53,6 @@ func ParseQueryParams(limitStr, offsetStr, updatedAfterStr, idGtStr, columnsStr 
 		params.UpdatedAfter = &updatedAfter
 	}
 
-	// Парсинг id_gt
 	if idGtStr != "" {
 		idGt, err := strconv.ParseInt(idGtStr, 10, 64)
 		if err != nil {
@@ -65,7 +61,6 @@ func ParseQueryParams(limitStr, offsetStr, updatedAfterStr, idGtStr, columnsStr 
 		params.IDGt = &idGt
 	}
 
-	// Парсинг columns
 	if columnsStr != "" {
 		columns := strings.Split(columnsStr, ",")
 		for i, col := range columns {
@@ -77,21 +72,21 @@ func ParseQueryParams(limitStr, offsetStr, updatedAfterStr, idGtStr, columnsStr 
 	return params, nil
 }
 
-// BuildSelectQuery строит SQL запрос с учётом параметров
+func quoteIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// BuildSelectQuery строит SQL запрос (PostgreSQL).
 func BuildSelectQuery(tableName string, params *QueryParams, tableColumns []string) (string, []interface{}, error) {
 	var query strings.Builder
 	var args []interface{}
-	argIndex := 1
 
-	// SELECT часть
 	query.WriteString("SELECT ")
 	if len(params.Columns) > 0 {
-		// Проверяем, что все запрашиваемые колонки существуют
 		columnMap := make(map[string]bool)
 		for _, col := range tableColumns {
 			columnMap[strings.ToLower(col)] = true
 		}
-
 		validColumns := []string{}
 		for _, col := range params.Columns {
 			if col == "*" {
@@ -99,7 +94,7 @@ func BuildSelectQuery(tableName string, params *QueryParams, tableColumns []stri
 				break
 			}
 			if columnMap[strings.ToLower(col)] {
-				validColumns = append(validColumns, fmt.Sprintf("[%s]", col))
+				validColumns = append(validColumns, quoteIdent(col))
 			} else {
 				return "", nil, fmt.Errorf("колонка '%s' не существует в таблице %s", col, tableName)
 			}
@@ -109,44 +104,33 @@ func BuildSelectQuery(tableName string, params *QueryParams, tableColumns []stri
 		query.WriteString("*")
 	}
 
-	// FROM часть
-	query.WriteString(fmt.Sprintf(" FROM [%s]", tableName))
+	query.WriteString(fmt.Sprintf(" FROM %s", quoteIdent(tableName)))
 
-	// WHERE часть
 	var whereConditions []string
+	argIndex := 1
 
 	if params.UpdatedAfter != nil {
-		// Проверяем наличие колонки updated_at
-		hasUpdatedAt := false
 		for _, col := range tableColumns {
 			if strings.ToLower(col) == "updated_at" {
-				hasUpdatedAt = true
+				whereConditions = append(whereConditions, fmt.Sprintf("%s > $%d", quoteIdent("updated_at"), argIndex))
+				args = append(args, *params.UpdatedAfter)
+				argIndex++
 				break
 			}
-		}
-
-		if hasUpdatedAt {
-			whereConditions = append(whereConditions, fmt.Sprintf("[updated_at] > @p%d", argIndex))
-			args = append(args, *params.UpdatedAfter)
-			argIndex++
 		}
 	}
 
 	if params.IDGt != nil {
-		// Ищем первичный ключ (обычно это id)
-		hasPK := false
 		pkColumn := ""
 		for _, col := range tableColumns {
 			colLower := strings.ToLower(col)
 			if colLower == "id" || strings.HasSuffix(colLower, "_id") {
-				hasPK = true
 				pkColumn = col
 				break
 			}
 		}
-
-		if hasPK {
-			whereConditions = append(whereConditions, fmt.Sprintf("[%s] > @p%d", pkColumn, argIndex))
+		if pkColumn != "" {
+			whereConditions = append(whereConditions, fmt.Sprintf("%s > $%d", quoteIdent(pkColumn), argIndex))
 			args = append(args, *params.IDGt)
 			argIndex++
 		}
@@ -156,8 +140,6 @@ func BuildSelectQuery(tableName string, params *QueryParams, tableColumns []stri
 		query.WriteString(" WHERE " + strings.Join(whereConditions, " AND "))
 	}
 
-	// ORDER BY часть (обязательно для OFFSET/FETCH в SQL Server)
-	// Ищем первичный ключ для сортировки
 	pkColumn := ""
 	for _, col := range tableColumns {
 		colLower := strings.ToLower(col)
@@ -166,67 +148,49 @@ func BuildSelectQuery(tableName string, params *QueryParams, tableColumns []stri
 			break
 		}
 	}
-
-	// Если не нашли ID, используем первую колонку
 	if pkColumn == "" && len(tableColumns) > 0 {
 		pkColumn = tableColumns[0]
 	}
-
-	// ORDER BY обязателен для OFFSET/FETCH
-	if pkColumn != "" {
-		query.WriteString(fmt.Sprintf(" ORDER BY [%s]", pkColumn))
-		// OFFSET и FETCH (SQL Server 2012+)
-		query.WriteString(fmt.Sprintf(" OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", params.Offset, params.Limit))
-	} else {
-		// Fallback для старых версий SQL Server или если нет колонок для сортировки
-		// Используем TOP вместо OFFSET/FETCH
+	if pkColumn == "" {
 		return "", nil, fmt.Errorf("не удалось найти колонку для сортировки в таблице %s", tableName)
 	}
 
+	query.WriteString(fmt.Sprintf(" ORDER BY %s OFFSET %d LIMIT %d", quoteIdent(pkColumn), params.Offset, params.Limit))
 	return query.String(), args, nil
 }
 
-// BuildCountQuery строит запрос для подсчёта общего количества записей
+// BuildCountQuery строит запрос COUNT (PostgreSQL).
 func BuildCountQuery(tableName string, params *QueryParams, tableColumns []string) (string, []interface{}, error) {
 	var query strings.Builder
 	var args []interface{}
 	argIndex := 1
 
-	query.WriteString(fmt.Sprintf("SELECT COUNT(*) FROM [%s]", tableName))
+	query.WriteString(fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteIdent(tableName)))
 
-	// WHERE часть (та же логика что и в BuildSelectQuery)
 	var whereConditions []string
 
 	if params.UpdatedAfter != nil {
-		hasUpdatedAt := false
 		for _, col := range tableColumns {
 			if strings.ToLower(col) == "updated_at" {
-				hasUpdatedAt = true
+				whereConditions = append(whereConditions, fmt.Sprintf("%s > $%d", quoteIdent("updated_at"), argIndex))
+				args = append(args, *params.UpdatedAfter)
+				argIndex++
 				break
 			}
-		}
-
-		if hasUpdatedAt {
-			whereConditions = append(whereConditions, fmt.Sprintf("[updated_at] > @p%d", argIndex))
-			args = append(args, *params.UpdatedAfter)
-			argIndex++
 		}
 	}
 
 	if params.IDGt != nil {
-		hasPK := false
 		pkColumn := ""
 		for _, col := range tableColumns {
 			colLower := strings.ToLower(col)
 			if colLower == "id" || strings.HasSuffix(colLower, "_id") {
-				hasPK = true
 				pkColumn = col
 				break
 			}
 		}
-
-		if hasPK {
-			whereConditions = append(whereConditions, fmt.Sprintf("[%s] > @p%d", pkColumn, argIndex))
+		if pkColumn != "" {
+			whereConditions = append(whereConditions, fmt.Sprintf("%s > $%d", quoteIdent(pkColumn), argIndex))
 			args = append(args, *params.IDGt)
 			argIndex++
 		}

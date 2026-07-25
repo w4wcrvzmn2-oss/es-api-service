@@ -1,31 +1,15 @@
 package db
 
-import (
-	mssqldb "github.com/microsoft/go-mssqldb"
-)
-
-// UUIDParam оборачивает строку GUID в mssqldb.UniqueIdentifier,
-// чтобы GORM/драйвер передал её в MSSQL как uniqueidentifier, а не nvarchar.
-// Без этого MSSQL ругается «Ошибка при преобразовании строки символов в тип uniqueidentifier»
-// при использовании именованных параметров через `?` в GORM-запросах.
-//
-// Возвращает nil-эквивалент (UUID v0) если строка пустая — но WHERE не должен
-// передавать пустую UUID, защита от случайностей.
-func UUIDParam(s string) mssqldb.UniqueIdentifier {
-	var u mssqldb.UniqueIdentifier
-	if s == "" {
-		return u
-	}
-	_ = u.Scan(s)
-	return u
+// UUIDParam возвращает строку GUID для параметра PostgreSQL uuid.
+func UUIDParam(s string) string {
+	return s
 }
 
-// UUIDParamPtr возвращает *mssqldb.UniqueIdentifier для optional GUID:
-// nil если строка пустая или nil, иначе указатель на UUID-параметр.
-func UUIDParamPtr(s *string) *mssqldb.UniqueIdentifier {
+// UUIDParamPtr возвращает *string для optional UUID: nil если пусто.
+func UUIDParamPtr(s *string) *string {
 	if s == nil || *s == "" {
 		return nil
 	}
-	u := UUIDParam(*s)
-	return &u
+	v := *s
+	return &v
 }

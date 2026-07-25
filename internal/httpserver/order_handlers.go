@@ -142,17 +142,17 @@ func (s *Server) handleGetOrders(w http.ResponseWriter, r *http.Request) {
 
 	query := `
 		SELECT
-			CAST(o.OrderID AS NVARCHAR(50)) AS OrderID,
-			CAST(o.BuyerUserID AS NVARCHAR(50)) AS BuyerUserID,
-			CAST(o.BuyerApplicationID AS NVARCHAR(50)) AS BuyerApplicationID,
-			CAST(o.BuyerLocationID AS NVARCHAR(50)) AS BuyerLocationID,
-			CAST(o.OrderStatusID AS NVARCHAR(50)) AS OrderStatusID,
+			CAST(o.OrderID AS TEXT) AS OrderID,
+			CAST(o.BuyerUserID AS TEXT) AS BuyerUserID,
+			CAST(o.BuyerApplicationID AS TEXT) AS BuyerApplicationID,
+			CAST(o.BuyerLocationID AS TEXT) AS BuyerLocationID,
+			CAST(o.OrderStatusID AS TEXT) AS OrderStatusID,
 			o.CreatedAt, o.PlacedAt, o.TotalAmount, o.Comment,
 			bu.FullName AS BuyerUserName,
 			b.Name AS BuyerName,
 			os.Name AS OrderStatusName,
 			bl.Address AS LocationAddress
-		FROM [Order] o
+		FROM "Order" o
 		INNER JOIN BuyerUser bu ON o.BuyerUserID = bu.BuyerUserID
 		INNER JOIN Buyer b ON bu.BuyerID = b.BuyerID
 		INNER JOIN OrderStatus os ON o.OrderStatusID = os.OrderStatusID
@@ -161,18 +161,18 @@ func (s *Server) handleGetOrders(w http.ResponseWriter, r *http.Request) {
 	`
 	var args []interface{}
 	if buyerUserID != "" {
-		query += " AND o.BuyerUserID = CAST(@buyerUserID AS UNIQUEIDENTIFIER)"
+		query += " AND o.BuyerUserID = CAST(@buyerUserID AS UUID)"
 		args = append(args, sql.Named("buyerUserID", buyerUserID))
 	}
 	if buyerID != "" {
-		query += " AND bu.BuyerID = CAST(@buyerID AS UNIQUEIDENTIFIER)"
+		query += " AND bu.BuyerID = CAST(@buyerID AS UUID)"
 		args = append(args, sql.Named("buyerID", buyerID))
 	}
 	if statusID != "" {
-		query += " AND o.OrderStatusID = CAST(@statusID AS UNIQUEIDENTIFIER)"
+		query += " AND o.OrderStatusID = CAST(@statusID AS UUID)"
 		args = append(args, sql.Named("statusID", statusID))
 	}
-	query += " ORDER BY o.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY"
+	query += " ORDER BY o.CreatedAt DESC OFFSET @offset LIMIT @limit"
 	args = append(args, sql.Named("offset", offset), sql.Named("limit", limit))
 
 	var rows []orderListRow
@@ -204,17 +204,17 @@ func (s *Server) handleGetOrderByID(w http.ResponseWriter, r *http.Request, orde
 	var row orderListRow
 	err := s.database.GORMWith(ctx).Raw(
 		`SELECT
-			CAST(o.OrderID AS NVARCHAR(50)) AS OrderID,
-			CAST(o.BuyerUserID AS NVARCHAR(50)) AS BuyerUserID,
-			CAST(o.BuyerApplicationID AS NVARCHAR(50)) AS BuyerApplicationID,
-			CAST(o.BuyerLocationID AS NVARCHAR(50)) AS BuyerLocationID,
-			CAST(o.OrderStatusID AS NVARCHAR(50)) AS OrderStatusID,
+			CAST(o.OrderID AS TEXT) AS OrderID,
+			CAST(o.BuyerUserID AS TEXT) AS BuyerUserID,
+			CAST(o.BuyerApplicationID AS TEXT) AS BuyerApplicationID,
+			CAST(o.BuyerLocationID AS TEXT) AS BuyerLocationID,
+			CAST(o.OrderStatusID AS TEXT) AS OrderStatusID,
 			o.CreatedAt, o.PlacedAt, o.TotalAmount, o.Comment,
 			bu.FullName AS BuyerUserName,
 			b.Name AS BuyerName,
 			os.Name AS OrderStatusName,
 			bl.Address AS LocationAddress
-		FROM [Order] o
+		FROM "Order" o
 		INNER JOIN BuyerUser bu ON o.BuyerUserID = bu.BuyerUserID
 		INNER JOIN Buyer b ON bu.BuyerID = b.BuyerID
 		INNER JOIN OrderStatus os ON o.OrderStatusID = os.OrderStatusID
@@ -251,15 +251,14 @@ func (s *Server) handleGetOrderByID(w http.ResponseWriter, r *http.Request, orde
 	}
 	var rows []itemRow
 	err = s.database.GORMWith(ctx).Raw(
-		`SELECT TOP 500
-			CAST(oi.OrderLineID AS NVARCHAR(50)) AS OrderLineID,
-			CAST(oi.OrderID AS NVARCHAR(50)) AS OrderID,
-			CAST(oi.SupplierID AS NVARCHAR(50)) AS SupplierID,
-			CAST(oi.SupplierItemID AS NVARCHAR(50)) AS SupplierItemID,
-			CAST(oi.ProductID AS NVARCHAR(50)) AS ProductID,
-			CAST(oi.RegionID AS NVARCHAR(50)) AS RegionID,
+		`SELECT CAST(oi.OrderLineID AS TEXT) AS OrderLineID,
+			CAST(oi.OrderID AS TEXT) AS OrderID,
+			CAST(oi.SupplierID AS TEXT) AS SupplierID,
+			CAST(oi.SupplierItemID AS TEXT) AS SupplierItemID,
+			CAST(oi.ProductID AS TEXT) AS ProductID,
+			CAST(oi.RegionID AS TEXT) AS RegionID,
 			oi.Qty, oi.UnitPrice,
-			CAST(oi.PriceListID AS NVARCHAR(50)) AS PriceListID,
+			CAST(oi.PriceListID AS TEXT) AS PriceListID,
 			oi.CreatedAt,
 			s.Name AS SupplierName,
 			NULL AS SupplierItemName,
@@ -268,7 +267,9 @@ func (s *Server) handleGetOrderByID(w http.ResponseWriter, r *http.Request, orde
 		INNER JOIN Supplier s ON oi.SupplierID = s.SupplierID
 		LEFT JOIN Product p ON oi.ProductID = p.ProductID
 		WHERE oi.OrderID = ?
-		ORDER BY oi.CreatedAt`,
+		ORDER BY oi.CreatedAt
+LIMIT 500
+`,
 		db.UUIDParam(orderID),
 	).Scan(&rows).Error
 	if err != nil {
@@ -349,8 +350,8 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		err = tx.Exec(`
-			INSERT INTO [Order] (OrderID, BuyerUserID, BuyerApplicationID, BuyerLocationID, OrderStatusID, TotalAmount, Comment, CreatedAt)
-			VALUES (?, ?, ?, ?, ?, ?, ?, GETUTCDATE())`,
+			INSERT INTO "Order" (OrderID, BuyerUserID, BuyerApplicationID, BuyerLocationID, OrderStatusID, TotalAmount, Comment, CreatedAt)
+			VALUES (?, ?, ?, ?, ?, ?, ?, (NOW() AT TIME ZONE 'utc'))`,
 			db.UUIDParam(orderID),
 			db.UUIDParam(req.BuyerUserID),
 			db.UUIDParam(req.BuyerApplicationID),
@@ -360,7 +361,7 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 			comment,
 		).Error
 		if err != nil {
-			return fmt.Errorf("[Order] insert: %w", err)
+			return fmt.Errorf("Order insert: %w", err)
 		}
 
 		for _, item := range req.Items {
@@ -370,7 +371,7 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 			}
 			err = tx.Exec(`
 				INSERT INTO OrderItem (OrderLineID, OrderID, SupplierID, SupplierItemID, ProductID, RegionID, Qty, UnitPrice, PriceListID, CreatedAt)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, GETUTCDATE())`,
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, (NOW() AT TIME ZONE 'utc'))`,
 				db.UUIDParam(uuid.New().String()),
 				db.UUIDParam(orderID),
 				db.UUIDParam(item.SupplierID),
@@ -419,11 +420,11 @@ func (s *Server) handleUpdateOrder(w http.ResponseWriter, r *http.Request, order
 	args := []interface{}{sql.Named("orderID", orderID)}
 
 	if req.OrderStatusID != nil {
-		updateParts = append(updateParts, "OrderStatusID = CAST(@statusID AS UNIQUEIDENTIFIER)")
+		updateParts = append(updateParts, "OrderStatusID = CAST(@statusID AS UUID)")
 		args = append(args, sql.Named("statusID", *req.OrderStatusID))
 	}
 	if req.BuyerLocationID != nil {
-		updateParts = append(updateParts, "BuyerLocationID = CAST(@locationID AS UNIQUEIDENTIFIER)")
+		updateParts = append(updateParts, "BuyerLocationID = CAST(@locationID AS UUID)")
 		args = append(args, sql.Named("locationID", *req.BuyerLocationID))
 	}
 	if req.Comment != nil {
@@ -435,7 +436,7 @@ func (s *Server) handleUpdateOrder(w http.ResponseWriter, r *http.Request, order
 		return
 	}
 
-	query := fmt.Sprintf("UPDATE [Order] SET %s WHERE OrderID = CAST(@orderID AS UNIQUEIDENTIFIER)", strings.Join(updateParts, ", "))
+	query := fmt.Sprintf(`UPDATE "Order" SET %s WHERE OrderID = CAST(@orderID AS UUID)`, strings.Join(updateParts, ", "))
 	res := s.database.GORMWith(ctx).Exec(query, args...)
 	if res.Error != nil {
 		s.logger.Error("Ошибка обновления заказа: %v", res.Error)
@@ -479,9 +480,9 @@ func (s *Server) transitionOrderStatus(w http.ResponseWriter, r *http.Request, o
 		if err != nil {
 			return err
 		}
-		q := `UPDATE [Order] SET OrderStatusID = ?`
+		q := `UPDATE "Order" SET OrderStatusID = ?`
 		if setPlacedAt {
-			q += `, PlacedAt = GETUTCDATE()`
+			q += `, PlacedAt = (NOW() AT TIME ZONE 'utc')`
 		}
 		q += ` WHERE OrderID = ?`
 		res := tx.Exec(q, db.UUIDParam(statusID), db.UUIDParam(orderID))
@@ -543,15 +544,14 @@ func (s *Server) handleGetOrderItems(w http.ResponseWriter, r *http.Request, ord
 	}
 	var rows []itemRow
 	err := s.database.GORMWith(ctx).Raw(
-		`SELECT TOP 500
-			CAST(oi.OrderLineID AS NVARCHAR(50)) AS OrderLineID,
-			CAST(oi.OrderID AS NVARCHAR(50)) AS OrderID,
-			CAST(oi.SupplierID AS NVARCHAR(50)) AS SupplierID,
-			CAST(oi.SupplierItemID AS NVARCHAR(50)) AS SupplierItemID,
-			CAST(oi.ProductID AS NVARCHAR(50)) AS ProductID,
-			CAST(oi.RegionID AS NVARCHAR(50)) AS RegionID,
+		`SELECT CAST(oi.OrderLineID AS TEXT) AS OrderLineID,
+			CAST(oi.OrderID AS TEXT) AS OrderID,
+			CAST(oi.SupplierID AS TEXT) AS SupplierID,
+			CAST(oi.SupplierItemID AS TEXT) AS SupplierItemID,
+			CAST(oi.ProductID AS TEXT) AS ProductID,
+			CAST(oi.RegionID AS TEXT) AS RegionID,
 			oi.Qty, oi.UnitPrice,
-			CAST(oi.PriceListID AS NVARCHAR(50)) AS PriceListID,
+			CAST(oi.PriceListID AS TEXT) AS PriceListID,
 			oi.CreatedAt,
 			s.Name AS SupplierName,
 			NULL AS SupplierItemName,
@@ -560,7 +560,9 @@ func (s *Server) handleGetOrderItems(w http.ResponseWriter, r *http.Request, ord
 		INNER JOIN Supplier s ON oi.SupplierID = s.SupplierID
 		LEFT JOIN Product p ON oi.ProductID = p.ProductID
 		WHERE oi.OrderID = ?
-		ORDER BY oi.CreatedAt`,
+		ORDER BY oi.CreatedAt
+LIMIT 500
+`,
 		db.UUIDParam(orderID),
 	).Scan(&rows).Error
 	if err != nil {
@@ -624,7 +626,7 @@ func (s *Server) handleAddOrderItem(w http.ResponseWriter, r *http.Request, orde
 	err := s.database.GORMWith(ctx).Transaction(func(tx *gorm.DB) error {
 		err := tx.Exec(`
 			INSERT INTO OrderItem (OrderLineID, OrderID, SupplierID, SupplierItemID, ProductID, RegionID, Qty, UnitPrice, PriceListID, CreatedAt)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, GETUTCDATE())`,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, (NOW() AT TIME ZONE 'utc'))`,
 			db.UUIDParam(orderLineID),
 			db.UUIDParam(orderID),
 			db.UUIDParam(req.SupplierID),
@@ -639,7 +641,7 @@ func (s *Server) handleAddOrderItem(w http.ResponseWriter, r *http.Request, orde
 			return err
 		}
 		return tx.Exec(`
-			UPDATE [Order]
+			UPDATE "Order"
 			SET TotalAmount = (SELECT SUM(Qty * UnitPrice) FROM OrderItem WHERE OrderID = ?)
 			WHERE OrderID = ?`,
 			db.UUIDParam(orderID),
@@ -674,14 +676,15 @@ func (s *Server) handleGetOrderStatuses(w http.ResponseWriter, r *http.Request) 
 
 	var statuses []models.OrderStatus
 	err := s.database.GORMWith(ctx).Raw(
-		`SELECT TOP 100
-			CAST(OrderStatusID AS NVARCHAR(50)) AS OrderStatusID,
+		`SELECT CAST(OrderStatusID AS TEXT) AS OrderStatusID,
 			Name,
 			Description,
 			IsActive
 		FROM OrderStatus
 		WHERE IsActive = 1
-		ORDER BY Name`,
+		ORDER BY Name
+LIMIT 100
+`,
 	).Scan(&statuses).Error
 	if err != nil {
 		s.logger.Error("Ошибка получения статусов заказов: %v", err)

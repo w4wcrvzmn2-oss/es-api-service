@@ -93,11 +93,10 @@ func (s *Server) handleGetSupplierMarkupPolicies(w http.ResponseWriter, r *http.
 
 	var policies []Policy
 	err := s.database.GORMWith(ctx).Raw(
-		`SELECT TOP 100
-			CAST(smp.PolicyID AS NVARCHAR(50)) AS PolicyID,
-			CAST(smp.SupplierID AS NVARCHAR(50)) AS SupplierID,
+		`SELECT CAST(smp.PolicyID AS TEXT) AS PolicyID,
+			CAST(smp.SupplierID AS TEXT) AS SupplierID,
 			s.Name AS SupplierName,
-			CAST(smp.RegionID AS NVARCHAR(50)) AS RegionID,
+			CAST(smp.RegionID AS TEXT) AS RegionID,
 			r.Name AS RegionName,
 			smp.MarkupPct,
 			smp.RoundingStep,
@@ -108,8 +107,10 @@ func (s *Server) handleGetSupplierMarkupPolicies(w http.ResponseWriter, r *http.
 		FROM SupplierMarkupPolicy smp
 		INNER JOIN Supplier s ON smp.SupplierID = s.SupplierID
 		LEFT JOIN Region r ON smp.RegionID = r.RegionID
-		WHERE smp.SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)
-		ORDER BY r.Name, smp.CreatedAt DESC`,
+		WHERE smp.SupplierID = CAST(@supplierID AS UUID)
+		ORDER BY r.Name, smp.CreatedAt DESC
+LIMIT 100
+`,
 		sql.Named("supplierID", supplierID),
 	).Scan(&policies).Error
 	if err != nil {
@@ -169,43 +170,42 @@ func (s *Server) handleCreateSupplierMarkupPolicy(w http.ResponseWriter, r *http
 
 	policyID := uuid.New().String()
 
+	var regionArg interface{}
+	if req.RegionID != nil && *req.RegionID != "" {
+		regionArg = *req.RegionID
+	}
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+	var roundingArg interface{}
+	if req.RoundingStep != nil {
+		roundingArg = *req.RoundingStep
+	}
+
 	query := `
 		INSERT INTO SupplierMarkupPolicy (
 			PolicyID, SupplierID, RegionID, MarkupPct, RoundingStep, IsActive, EffectiveFrom, CreatedAt
 		) VALUES (
-			CAST(@policyID AS UNIQUEIDENTIFIER),
-			CAST(@supplierID AS UNIQUEIDENTIFIER),
-			CASE WHEN @regionID IS NULL OR @regionID = '' THEN NULL ELSE CAST(@regionID AS UNIQUEIDENTIFIER) END,
-			@markupPct,
-			@roundingStep,
-			ISNULL(@isActive, 1),
-			GETUTCDATE(),
-			GETUTCDATE()
+			CAST(? AS UUID),
+			CAST(? AS UUID),
+			CAST(? AS UUID),
+			?,
+			?,
+			?,
+			(NOW() AT TIME ZONE 'utc'),
+			(NOW() AT TIME ZONE 'utc')
 		)
 	`
 
-	args := []interface{}{
-		sql.Named("policyID", policyID),
-		sql.Named("supplierID", req.SupplierID),
-		sql.Named("markupPct", req.MarkupPct),
-	}
-	if req.RegionID != nil && *req.RegionID != "" {
-		args = append(args, sql.Named("regionID", *req.RegionID))
-	} else {
-		args = append(args, sql.Named("regionID", nil))
-	}
-	if req.RoundingStep != nil {
-		args = append(args, sql.Named("roundingStep", *req.RoundingStep))
-	} else {
-		args = append(args, sql.Named("roundingStep", nil))
-	}
-	if req.IsActive != nil {
-		args = append(args, sql.Named("isActive", *req.IsActive))
-	} else {
-		args = append(args, sql.Named("isActive", true))
-	}
-
-	err := s.database.GORMWith(ctx).Exec(query, args...).Error
+	err := s.database.GORMWith(ctx).Exec(query,
+		policyID,
+		req.SupplierID,
+		regionArg,
+		req.MarkupPct,
+		roundingArg,
+		isActive,
+	).Error
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Error("Ошибка создания политики наценок: %v", err)
@@ -265,7 +265,7 @@ func (s *Server) handleUpdateSupplierMarkupPolicy(w http.ResponseWriter, r *http
 		if *req.RegionID == "" {
 			updates = append(updates, "RegionID = NULL")
 		} else {
-			updates = append(updates, "RegionID = CAST(@regionID AS UNIQUEIDENTIFIER)")
+			updates = append(updates, "RegionID = CAST(@regionID AS UUID)")
 			args = append(args, sql.Named("regionID", *req.RegionID))
 		}
 	}
@@ -290,7 +290,7 @@ func (s *Server) handleUpdateSupplierMarkupPolicy(w http.ResponseWriter, r *http
 	query := fmt.Sprintf(`
 		UPDATE SupplierMarkupPolicy
 		SET %s
-		WHERE PolicyID = CAST(@policyID AS UNIQUEIDENTIFIER)
+		WHERE PolicyID = CAST(@policyID AS UUID)
 	`, strings.Join(updates, ", "))
 
 	err := s.database.GORMWith(ctx).Exec(query, args...).Error
@@ -333,7 +333,7 @@ func (s *Server) handleDeleteSupplierMarkupPolicy(w http.ResponseWriter, r *http
 	defer cancel()
 
 	err := s.database.GORMWith(ctx).Exec(
-		`DELETE FROM SupplierMarkupPolicy WHERE PolicyID = CAST(@policyID AS UNIQUEIDENTIFIER)`,
+		`DELETE FROM SupplierMarkupPolicy WHERE PolicyID = CAST(@policyID AS UUID)`,
 		sql.Named("policyID", policyID),
 	).Error
 	if err != nil {

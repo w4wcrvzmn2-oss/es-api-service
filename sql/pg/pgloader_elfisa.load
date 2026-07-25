@@ -1,0 +1,32 @@
+-- pgloader config: MSSQL (live VPS or local Express after RESTORE) → PostgreSQL elfisa
+-- Install: https://pgloader.io/  (Windows: use WSL or Linux box; or Docker)
+--
+-- Example (Docker on Windows Server with Docker):
+-- docker run --rm -v D:/migrate:/data --network host dimitri/pgloader:latest
+--   pgloader /data/elfisa.load
+--
+-- BEFORE: replace passwords/hosts. Prefer migrating WHILE VPS is still online.
+
+LOAD DATABASE
+  FROM mssql://SA:PASSWORD@193.188.23.166/elfisa
+  INTO postgresql://es_api:PASSWORD@127.0.0.1:5432/elfisa
+
+WITH include drop, create tables, create indexes, reset sequences,
+     workers = 4, concurrency = 1,
+     batch rows = 1000
+
+SET work_mem to '256MB',
+    maintenance_work_mem to '512MB'
+
+CAST type uniqueidentifier to uuid drop typemod,
+     type nvarchar to text drop typemod,
+     type varchar to text drop typemod,
+     type datetime2 to timestamptz drop default drop not null using zero-dates-to-null,
+     type datetime to timestamptz drop default drop not null using zero-dates-to-null,
+     type bit to boolean drop typemod,
+     type money to numeric drop typemod
+
+INCLUDING ONLY TABLE NAMES MATCHING ~/./
+
+BEFORE LOAD DO
+  $$ CREATE EXTENSION IF NOT EXISTS pgcrypto; $$;

@@ -6,11 +6,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 
-async function loadPriceLists() {
+async function loadPriceLists(opts = {}) {
     const tbody = document.getElementById('priceListsTable');
     if (!tbody) return;
 
-    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Загрузка данных...</td></tr>';
+    const silent = !!opts.silent;
+    if (!silent) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Загрузка данных...</td></tr>';
+    }
 
     try {
         const response = await API.get('/api/price-lists');
@@ -21,10 +24,9 @@ async function loadPriceLists() {
                 const lastUpdate = price.last_update_at ? new Date(price.last_update_at).toLocaleDateString('ru') : '-';
                 const unlinkedCount = price.unmatched_count ?? price.prices_count ?? 0;
                 const cnt = price.prices_count ?? 0;
-                const linksUrl = `links.html?supplier=${price.supplier_id}`;
 
                 return `
-                <tr>
+                <tr data-id="${price.price_list_id}">
                     <td class="text-center">
                         <input type="checkbox" ${price.is_active ? 'checked' : ''}
                                onchange="togglePriceActive('${price.price_list_id}', this.checked)"
@@ -40,7 +42,7 @@ async function loadPriceLists() {
                         <button class="btn btn-outline-info btn-sm" onclick="showPriceListBuyers('${price.price_list_id}')" title="Подключённые клиенты"><i class="bi bi-people"></i></button>
                     </td>
                     <td class="text-center">
-                        <button class="btn btn-outline-danger btn-sm" onclick="deletePriceList('${price.price_list_id}')" title="Удалить"><i class="bi bi-trash"></i></button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="deletePriceList('${price.price_list_id}', this)" title="Удалить"><i class="bi bi-trash"></i></button>
                     </td>
                     <td class="text-center">
                         ${unlinkedCount > 0
@@ -58,7 +60,9 @@ async function loadPriceLists() {
         TableFilters.setup('tblPriceLists');
     } catch (error) {
         console.error('Ошибка загрузки прайсов:', error);
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-danger py-3">Ошибка загрузки данных</td></tr>';
+        if (!silent) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-danger py-3">Ошибка загрузки данных</td></tr>';
+        }
     }
 }
 
@@ -72,19 +76,38 @@ async function togglePriceActive(priceId, isActive) {
     }
 }
 
-async function deletePriceList(priceId) {
+async function deletePriceList(priceId, btn) {
     if (!confirm('Вы уверены, что хотите удалить этот прайс и все его позиции?')) return;
+
+    const row = btn ? btn.closest('tr') : document.querySelector(`tr[data-id="${priceId}"]`);
+    if (row) {
+        row.style.opacity = '0.35';
+        row.style.pointerEvents = 'none';
+    }
 
     try {
         const result = await API.delete(`/api/price-lists/${priceId}`);
-        if (result) {
-            Toast.success('Удалено', 'Прайс удалён');
-            await loadPriceLists();
-        } else {
-            throw new Error('Ошибка удаления');
+        if (!result) throw new Error('Ошибка удаления');
+        Toast.success('Удалено', 'Прайс удалён');
+        allPriceLists = allPriceLists.filter(p => p.price_list_id !== priceId);
+        if (priceListsDT) {
+            ElfTable.destroy(priceListsDT);
+            priceListsDT = null;
+        }
+        if (row) row.remove();
+        const tbody = document.getElementById('priceListsTable');
+        if (tbody && !tbody.querySelector('tr[data-id]')) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Нет данных</td></tr>';
+        } else if (tbody && tbody.querySelector('tr[data-id]')) {
+            priceListsDT = ElfTable.init('tblPriceLists', { sortColumn: 2, sortDir: 'asc', unsortable: [0, 5, 6, 7], exportName: 'Прайсы' });
+            TableFilters.setup('tblPriceLists');
         }
     } catch (error) {
         console.error('Ошибка удаления прайса:', error);
+        if (row) {
+            row.style.opacity = '';
+            row.style.pointerEvents = '';
+        }
         Toast.error('Ошибка удаления', error.message);
     }
 }

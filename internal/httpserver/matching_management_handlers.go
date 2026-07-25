@@ -54,8 +54,8 @@ func (s *Server) handleSearchDrugs(w http.ResponseWriter, r *http.Request) {
 			OR ef2.TRN_NAME_RUS LIKE @%s
 			OR ef2.INN_NAME_RUS LIKE @%s
 			OR ef2.BARCODE LIKE @%s
-			OR CAST(ef2.KOD_ES AS NVARCHAR(50)) LIKE @%s
-			OR CAST(ef2.ID_ES AS NVARCHAR(50)) LIKE @%s
+			OR CAST(ef2.KOD_ES AS TEXT) LIKE @%s
+			OR CAST(ef2.ID_ES AS TEXT) LIKE @%s
 			OR ep.PRODUCER_NAME LIKE @%s
 		)`, paramName, paramName, paramName, paramName, paramName, paramName, paramName)
 		
@@ -72,8 +72,7 @@ func (s *Server) handleSearchDrugs(w http.ResponseWriter, r *http.Request) {
 	args = append(args, sql.Named("mainPattern", searchPattern))
 
 	searchQuery := fmt.Sprintf(`
-		SELECT TOP 100
-			CAST(ef2.GUID_ES AS NVARCHAR(50)) AS GUID_ES,
+		SELECT CAST(ef2.GUID_ES AS TEXT) AS GUID_ES,
 			ef2.NAME,
 			ef2.INN_NAME_RUS,
 			ef2.CUREFORM_NAME,
@@ -94,7 +93,8 @@ func (s *Server) handleSearchDrugs(w http.ResponseWriter, r *http.Request) {
 			     WHEN ef2.NAME LIKE @exactPattern THEN 2
 			     ELSE 3 END,
 			ef2.NAME
-	`, strings.Join(whereConditions, " AND "))
+LIMIT 100
+`, strings.Join(whereConditions, " AND "))
 	
 	// Добавляем параметры для сортировки
 	exactPattern := queryParam + "%"
@@ -347,7 +347,7 @@ func (s *Server) handleUpdateSupplierPriceMatch(w http.ResponseWriter, r *http.R
 				s.writeError(w, http.StatusBadRequest, "Недопустимый формат GUID_ES")
 				return
 			}
-			updates = append(updates, "GUID_ES = CAST(@guidES AS UNIQUEIDENTIFIER)")
+			updates = append(updates, "GUID_ES = CAST(@guidES AS UUID)")
 			args = append(args, sql.Named("guidES", *req.GUID_ES))
 		}
 	}
@@ -390,23 +390,23 @@ func (s *Server) handleUpdateSupplierPriceMatch(w http.ResponseWriter, r *http.R
 		s.logger.Debug("Будут обновлены поля: %v", updates)
 	}
 
-	updates = append(updates, "UpdatedAt = GETUTCDATE()")
+	updates = append(updates, "UpdatedAt = (NOW() AT TIME ZONE 'utc')")
 
 	updateQuery := fmt.Sprintf(`
 		UPDATE SupplierPrice
 		SET %s
-		WHERE SupplierPriceID = CAST(@priceID AS UNIQUEIDENTIFIER)
+		WHERE SupplierPriceID = CAST(@priceID AS UUID)
 	`, strings.Join(updates, ", "))
 
 	// Сначала получаем ItemCode и SupplierID из SupplierPrice для сохранения в кеш
 	var supplierID, itemCode sql.NullString
 	var guidES sql.NullString
 	getQuery := `
-		SELECT CAST(SupplierID AS NVARCHAR(50)) AS SupplierID,
+		SELECT CAST(SupplierID AS TEXT) AS SupplierID,
 		       ItemCode,
-		       CASE WHEN GUID_ES IS NULL THEN NULL ELSE CAST(GUID_ES AS NVARCHAR(50)) END AS GUID_ES
+		       CASE WHEN GUID_ES IS NULL THEN NULL ELSE CAST(GUID_ES AS TEXT) END AS GUID_ES
 		FROM SupplierPrice
-		WHERE SupplierPriceID = CAST(@priceID AS UNIQUEIDENTIFIER)
+		WHERE SupplierPriceID = CAST(@priceID AS UUID)
 	`
 	err := s.database.GORMWith(ctx).Raw(getQuery, sql.Named("priceID", priceID)).Row().Scan(&supplierID, &itemCode, &guidES)
 	if err != nil {
@@ -438,11 +438,11 @@ func (s *Server) handleUpdateSupplierPriceMatch(w http.ResponseWriter, r *http.R
 		var finalMatchConfidence sql.NullFloat64
 		
 		getUpdatedQuery := `
-			SELECT CASE WHEN GUID_ES IS NULL THEN NULL ELSE CAST(GUID_ES AS NVARCHAR(50)) END AS GUID_ES,
+			SELECT CASE WHEN GUID_ES IS NULL THEN NULL ELSE CAST(GUID_ES AS TEXT) END AS GUID_ES,
 			       MatchMethod,
 			       MatchConfidence
 			FROM SupplierPrice
-			WHERE SupplierPriceID = CAST(@priceID AS UNIQUEIDENTIFIER)
+			WHERE SupplierPriceID = CAST(@priceID AS UUID)
 		`
 		err = s.database.GORMWith(ctx).Raw(getUpdatedQuery, sql.Named("priceID", priceID)).Row().Scan(
 			&finalGUIDES, &finalMatchMethod, &finalMatchConfidence)

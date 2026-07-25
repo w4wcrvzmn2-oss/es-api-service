@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"es_api_service/internal/db"
 	"es_api_service/internal/dbfimport"
 	"es_api_service/internal/matching"
 	"es_api_service/internal/models"
@@ -86,13 +87,14 @@ func (s *Server) handleGetSuppliers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := `
-		SELECT TOP 500 CAST(s.SupplierID AS NVARCHAR(50)) AS SupplierID, s.Name, s.Address, s.Contacts, s.INN,
+		SELECT CAST(s.SupplierID AS TEXT) AS SupplierID, s.Name, s.Address, s.Contacts, s.INN,
 			s.ContractNumber, s.Login,
 			s.IsActive, s.CreatedAt, s.UpdatedAt,
 			(SELECT COUNT(*) FROM SupplierRegion sr WHERE sr.SupplierID = s.SupplierID AND sr.IsActive = 1) AS RegionsCount
 		FROM Supplier s
 		ORDER BY s.Name
-	`
+LIMIT 500
+`
 
 	if s.logger != nil {
 		s.logger.Info("Начинаем выполнение SQL запроса для получения поставщиков")
@@ -246,22 +248,22 @@ func (s *Server) handleCreateSupplier(w http.ResponseWriter, r *http.Request) {
 	}
 	query := `
 		INSERT INTO Supplier (SupplierID, Name, Address, Contacts, INN, ContractNumber, Login, Password, IsActive, CreatedAt, UpdatedAt)
-		VALUES (CAST(@supplierID AS UNIQUEIDENTIFIER), @name, @address, @contacts, @inn, @contractNumber, @login, @password, @isActive, @createdAt, @updatedAt)
+		VALUES (CAST(? AS UUID), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	now := time.Now()
 	_, err := s.database.ExecContext(ctx, query,
-		sql.Named("supplierID", supplierID),
-		sql.Named("name", req.Name),
-		sql.Named("address", req.Address),
-		sql.Named("contacts", req.Contacts),
-		sql.Named("inn", req.INN),
-		sql.Named("contractNumber", req.ContractNumber),
-		sql.Named("login", req.Login),
-		sql.Named("password", passwordValue),
-		sql.Named("isActive", req.IsActive),
-		sql.Named("createdAt", now),
-		sql.Named("updatedAt", now))
+		supplierID,
+		req.Name,
+		req.Address,
+		req.Contacts,
+		req.INN,
+		req.ContractNumber,
+		req.Login,
+		passwordValue,
+		req.IsActive,
+		now,
+		now)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Error("Ошибка выполнения SQL при создании поставщика: %v", err)
@@ -337,6 +339,7 @@ func (s *Server) handleUpdateSupplier(w http.ResponseWriter, r *http.Request, su
 	}
 
 	var passwordValue interface{}
+	updatePassword := false
 	if req.Password != nil && *req.Password != "" {
 		hashedPassword, err := hashPassword(*req.Password)
 		if err != nil {
@@ -344,33 +347,61 @@ func (s *Server) handleUpdateSupplier(w http.ResponseWriter, r *http.Request, su
 			return
 		}
 		passwordValue = hashedPassword
+		updatePassword = true
 	}
 
 	query := `
 		UPDATE Supplier SET
-			Name = @name,
-			Address = @address,
-			Contacts = @contacts,
-			INN = @inn,
-			ContractNumber = @contractNumber,
-			Login = @login,
-			Password = CASE WHEN @password IS NULL OR @password = '' THEN Password ELSE @password END,
-			IsActive = @isActive,
-			UpdatedAt = @updatedAt
-		WHERE SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)
+			Name = ?,
+			Address = ?,
+			Contacts = ?,
+			INN = ?,
+			ContractNumber = ?,
+			Login = ?,
+			IsActive = ?,
+			UpdatedAt = ?
+		WHERE SupplierID = CAST(? AS UUID)
 	`
+	args := []interface{}{
+		req.Name,
+		req.Address,
+		req.Contacts,
+		req.INN,
+		req.ContractNumber,
+		req.Login,
+		req.IsActive,
+		time.Now(),
+		supplierID,
+	}
+	if updatePassword {
+		query = `
+			UPDATE Supplier SET
+				Name = ?,
+				Address = ?,
+				Contacts = ?,
+				INN = ?,
+				ContractNumber = ?,
+				Login = ?,
+				Password = ?,
+				IsActive = ?,
+				UpdatedAt = ?
+			WHERE SupplierID = CAST(? AS UUID)
+		`
+		args = []interface{}{
+			req.Name,
+			req.Address,
+			req.Contacts,
+			req.INN,
+			req.ContractNumber,
+			req.Login,
+			passwordValue,
+			req.IsActive,
+			time.Now(),
+			supplierID,
+		}
+	}
 
-	result, err := s.database.ExecContext(ctx, query,
-		sql.Named("supplierID", supplierID),
-		sql.Named("name", req.Name),
-		sql.Named("address", req.Address),
-		sql.Named("contacts", req.Contacts),
-		sql.Named("inn", req.INN),
-		sql.Named("contractNumber", req.ContractNumber),
-		sql.Named("login", req.Login),
-		sql.Named("password", passwordValue),
-		sql.Named("isActive", req.IsActive),
-		sql.Named("updatedAt", time.Now()))
+	result, err := s.database.ExecContext(ctx, query, args...)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка обновления: %v", err))
 		return
@@ -419,7 +450,7 @@ func (s *Server) handleDeleteSupplier(w http.ResponseWriter, r *http.Request, su
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	query := `DELETE FROM Supplier WHERE SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)`
+	query := `DELETE FROM Supplier WHERE SupplierID = CAST(@supplierID AS UUID)`
 	result, err := s.database.ExecContext(ctx, query, sql.Named("supplierID", supplierID))
 	if err != nil {
 		if strings.Contains(err.Error(), "REFERENCE") || strings.Contains(err.Error(), "foreign key") {
@@ -454,17 +485,17 @@ func (s *Server) handleGetSupplierRegions(w http.ResponseWriter, r *http.Request
 	defer cancel()
 
 	query := `
-		SELECT TOP 200
-			CAST(sr.RegionID AS NVARCHAR(50)) AS RegionID,
+		SELECT CAST(sr.RegionID AS TEXT) AS RegionID,
 			r.Name AS RegionName,
 			r.Code AS RegionCode,
 			sr.IsActive
 		FROM SupplierRegion sr
 		INNER JOIN Region r ON sr.RegionID = r.RegionID
-		WHERE sr.SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)
+		WHERE sr.SupplierID = CAST(@supplierID AS UUID)
 		  AND sr.IsActive = 1
 		ORDER BY r.Name
-	`
+LIMIT 200
+`
 
 	rows, err := s.database.QueryContext(ctx, query, sql.Named("supplierID", supplierID))
 	if err != nil {
@@ -511,21 +542,18 @@ func (s *Server) saveSupplierRegions(ctx context.Context, supplierID string, reg
 	}
 	defer tx.Rollback()
 
-	delQuery := `DELETE FROM SupplierRegion WHERE SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)`
-	if _, err := tx.ExecContext(ctx, delQuery, sql.Named("supplierID", supplierID)); err != nil {
+	delQuery := `DELETE FROM SupplierRegion WHERE SupplierID = CAST(? AS UUID)`
+	if _, err := db.ExecRaw(ctx, tx, delQuery, supplierID); err != nil {
 		return err
 	}
 
 	insertQuery := `
-		INSERT INTO SupplierRegion (SupplierID, RegionID, IsActive, CreatedAt)
-		VALUES (CAST(@supplierID AS UNIQUEIDENTIFIER), CAST(@regionID AS UNIQUEIDENTIFIER), 1, GETUTCDATE())
+		INSERT INTO SupplierRegion (SupplierRegionID, SupplierID, RegionID, IsActive, CreatedAt)
+		VALUES (gen_random_uuid(), CAST(? AS UUID), CAST(? AS UUID), TRUE, (NOW() AT TIME ZONE 'utc'))
 	`
 	for _, regionID := range regionIDs {
 		if regionID != "" {
-			if _, err := tx.ExecContext(ctx, insertQuery,
-				sql.Named("supplierID", supplierID),
-				sql.Named("regionID", regionID),
-			); err != nil {
+			if _, err := db.ExecRaw(ctx, tx, insertQuery, supplierID, regionID); err != nil {
 				return err
 			}
 		}
@@ -547,11 +575,11 @@ func (s *Server) cleanOrphanedPriceListRegions(ctx context.Context, supplierID s
 		FROM PriceListRegion plr
 		INNER JOIN PriceList pl ON plr.PriceListID = pl.PriceListID
 		INNER JOIN Region r ON plr.RegionID = r.RegionID
-		WHERE pl.SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)
+		WHERE pl.SupplierID = CAST(@supplierID AS UUID)
 		  AND pl.IsActive = 1
 		  AND plr.RegionID NOT IN (
 			SELECT RegionID FROM SupplierRegion
-			WHERE SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER) AND IsActive = 1
+			WHERE SupplierID = CAST(@supplierID AS UUID) AND IsActive = 1
 		  )
 		ORDER BY pl.Name, r.Name
 	`
@@ -574,15 +602,16 @@ func (s *Server) cleanOrphanedPriceListRegions(ctx context.Context, supplierID s
 	}
 
 	deleteQuery := `
-		DELETE plr FROM PriceListRegion plr
-		INNER JOIN PriceList pl ON plr.PriceListID = pl.PriceListID
-		WHERE pl.SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)
+		DELETE FROM PriceListRegion plr
+		USING PriceList pl
+		WHERE plr.PriceListID = pl.PriceListID
+		  AND pl.SupplierID = CAST(? AS UUID)
 		  AND plr.RegionID NOT IN (
 			SELECT RegionID FROM SupplierRegion
-			WHERE SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER) AND IsActive = 1
+			WHERE SupplierID = CAST(? AS UUID) AND IsActive = TRUE
 		  )
 	`
-	_, err = s.database.ExecContext(ctx, deleteQuery, sql.Named("supplierID", supplierID))
+	_, err = s.database.ExecContext(ctx, deleteQuery, supplierID, supplierID)
 	if err != nil {
 		return items, err
 	}
@@ -601,22 +630,24 @@ func (s *Server) handleGetImportPoints(w http.ResponseWriter, r *http.Request) {
 
 	supplierID := r.URL.Query().Get("supplier_id")
 	query := `
-		SELECT TOP 500 CAST(ip.ImportPointID AS NVARCHAR(50)) AS ImportPointID, 
-		       CAST(ip.SupplierID AS NVARCHAR(50)) AS SupplierID, 
+		SELECT CAST(ip.ImportPointID AS TEXT) AS ImportPointID, 
+		       CAST(ip.SupplierID AS TEXT) AS SupplierID, 
 		       s.Name AS SupplierName,
 		       ip.Name, ip.Description, ip.SourceType, ip.DBFFilePath, ip.SourceFilePath,
 		       ip.FtpHost, ip.FtpPort, ip.FtpUser, ip.FtpPassword, ip.FtpRemotePath,
 		       ip.IsActive, ip.CreatedAt, ip.UpdatedAt
 		FROM ImportPoint ip
 		LEFT JOIN Supplier s ON ip.SupplierID = s.SupplierID
-	`
+		WHERE 1=1`
 	var args []interface{}
 
 	if supplierID != "" {
-		query += " WHERE ip.SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)"
-		args = append(args, sql.Named("supplierID", supplierID))
+		query += ` AND ip.SupplierID = CAST(? AS UUID)`
+		args = append(args, supplierID)
 	}
-	query += " ORDER BY ip.Name"
+	query += `
+		ORDER BY ip.Name
+		LIMIT 500`
 
 	rows, err := s.database.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -750,42 +781,39 @@ func (s *Server) handleCreateImportPoint(w http.ResponseWriter, r *http.Request)
 	}
 
 	importPointID := uuid.New().String()
-	query := `
-		INSERT INTO ImportPoint (ImportPointID, Name, Description, SourceType, SourceFilePath,
-		                         FtpHost, FtpPort, FtpUser, FtpPassword, FtpRemotePath,
-		                         IsActive, CreatedAt, UpdatedAt)
-		VALUES (CAST(@importPointID AS UNIQUEIDENTIFIER), @name, @description, @sourceType, @sourceFilePath,
-		        @ftpHost, @ftpPort, @ftpUser, @ftpPassword, @ftpRemotePath,
-		        @isActive, @createdAt, @updatedAt)
-	`
-
 	now := time.Now()
+	// Позиционные ? — надёжнее для PostgreSQL/GORM, чем @named (иначе бывают паники/500).
+	query := `
+		INSERT INTO ImportPoint (
+			ImportPointID, Name, Description, SourceType, SourceFilePath,
+			FtpHost, FtpPort, FtpUser, FtpPassword, FtpRemotePath,
+			IsActive, CreatedAt, UpdatedAt
+		) VALUES (
+			CAST(? AS UUID), ?, ?, ?, ?,
+			?, ?, ?, ?, ?,
+			?, ?, ?
+		)`
 
 	result, err := s.database.ExecContext(ctx, query,
-		sql.Named("importPointID", importPointID),
-		sql.Named("name", req.Name),
-		sql.Named("description", req.Description),
-		sql.Named("sourceType", req.SourceType),
-		sql.Named("sourceFilePath", req.SourceFilePath),
-		sql.Named("ftpHost", req.FtpHost),
-		sql.Named("ftpPort", req.FtpPort),
-		sql.Named("ftpUser", req.FtpUser),
-		sql.Named("ftpPassword", req.FtpPassword),
-		sql.Named("ftpRemotePath", req.FtpRemotePath),
-		sql.Named("isActive", req.IsActive),
-		sql.Named("createdAt", now),
-		sql.Named("updatedAt", now))
+		importPointID,
+		req.Name,
+		req.Description,
+		req.SourceType,
+		req.SourceFilePath,
+		req.FtpHost,
+		req.FtpPort,
+		req.FtpUser,
+		req.FtpPassword,
+		req.FtpRemotePath,
+		req.IsActive,
+		now,
+		now,
+	)
 	if err != nil {
-		errorMsg := fmt.Sprintf("Ошибка создания точки импорта: %v", err)
 		if s.logger != nil {
 			s.logger.Error("Ошибка выполнения SQL при создании точки импорта: %v", err)
-
-			if strings.Contains(err.Error(), "Invalid object name") ||
-				strings.Contains(err.Error(), "object name") {
-				errorMsg = "Таблица ImportPoint не найдена. Выполните SQL скрипт migrate_import_point_v2.sql"
-			}
 		}
-		s.writeError(w, http.StatusInternalServerError, errorMsg)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Не удалось создать точку импорта: %v", err))
 		return
 	}
 
@@ -868,35 +896,36 @@ func (s *Server) handleUpdateImportPoint(w http.ResponseWriter, r *http.Request,
 
 	query := `
 		UPDATE ImportPoint SET
-			Name = @name,
-			Description = @description,
-			SourceType = @sourceType,
-			SourceFilePath = @sourceFilePath,
-			FtpHost = @ftpHost,
-			FtpPort = @ftpPort,
-			FtpUser = @ftpUser,
-			FtpPassword = @ftpPassword,
-			FtpRemotePath = @ftpRemotePath,
-			IsActive = @isActive,
-			UpdatedAt = @updatedAt
-		WHERE ImportPointID = CAST(@pointID AS UNIQUEIDENTIFIER)
+			Name = ?,
+			Description = ?,
+			SourceType = ?,
+			SourceFilePath = ?,
+			FtpHost = ?,
+			FtpPort = ?,
+			FtpUser = ?,
+			FtpPassword = ?,
+			FtpRemotePath = ?,
+			IsActive = ?,
+			UpdatedAt = ?
+		WHERE ImportPointID = CAST(? AS UUID)
 	`
 
 	result, err := s.database.ExecContext(ctx, query,
-		sql.Named("pointID", pointID),
-		sql.Named("name", req.Name),
-		sql.Named("description", req.Description),
-		sql.Named("sourceType", req.SourceType),
-		sql.Named("sourceFilePath", req.SourceFilePath),
-		sql.Named("ftpHost", req.FtpHost),
-		sql.Named("ftpPort", req.FtpPort),
-		sql.Named("ftpUser", req.FtpUser),
-		sql.Named("ftpPassword", req.FtpPassword),
-		sql.Named("ftpRemotePath", req.FtpRemotePath),
-		sql.Named("isActive", req.IsActive),
-		sql.Named("updatedAt", time.Now()))
+		req.Name,
+		req.Description,
+		req.SourceType,
+		req.SourceFilePath,
+		req.FtpHost,
+		req.FtpPort,
+		req.FtpUser,
+		req.FtpPassword,
+		req.FtpRemotePath,
+		req.IsActive,
+		time.Now(),
+		pointID,
+	)
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка обновления: %v", err))
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Не удалось обновить точку импорта: %v", err))
 		return
 	}
 
@@ -925,20 +954,28 @@ func (s *Server) handleDeleteImportPoint(w http.ResponseWriter, r *http.Request,
 	}
 	defer tx.Rollback()
 
-	delMappings := `DELETE FROM DBFFieldMapping WHERE ImportPointID = CAST(@pointID AS UNIQUEIDENTIFIER)`
-	if _, err := tx.ExecContext(ctx, delMappings, sql.Named("pointID", pointID)); err != nil {
-		s.writeError(w, http.StatusInternalServerError, "Ошибка удаления маппингов")
+	delMappings := `DELETE FROM DBFFieldMapping WHERE ImportPointID = CAST(? AS UUID)`
+	if _, err := db.ExecRaw(ctx, tx, delMappings, pointID); err != nil {
+		if s.logger != nil {
+			s.logger.Error("Ошибка удаления маппингов ImportPoint %s: %v", pointID, err)
+		}
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка удаления маппингов: %v", err))
 		return
 	}
 
-	query := `DELETE FROM ImportPoint WHERE ImportPointID = CAST(@pointID AS UNIQUEIDENTIFIER)`
-	result, err := tx.ExecContext(ctx, query, sql.Named("pointID", pointID))
+	query := `DELETE FROM ImportPoint WHERE ImportPointID = CAST(? AS UUID)`
+	result, err := db.ExecRaw(ctx, tx, query, pointID)
 	if err != nil {
-		if strings.Contains(err.Error(), "REFERENCE") || strings.Contains(err.Error(), "foreign key") {
+		errStr := err.Error()
+		if strings.Contains(errStr, "foreign key") || strings.Contains(errStr, "violates foreign key") ||
+			strings.Contains(errStr, "REFERENCE") {
 			s.writeError(w, http.StatusConflict, "Невозможно удалить: точка импорта используется в прайс-листах или импортах")
 			return
 		}
-		s.writeError(w, http.StatusInternalServerError, "Ошибка удаления точки импорта")
+		if s.logger != nil {
+			s.logger.Error("Ошибка удаления ImportPoint %s: %v", pointID, err)
+		}
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка удаления точки импорта: %v", err))
 		return
 	}
 
@@ -972,15 +1009,16 @@ func (s *Server) handleGetFieldMappings(w http.ResponseWriter, r *http.Request) 
 	}
 
 	query := `
-		SELECT TOP 200 CAST(MappingID AS NVARCHAR(50)) AS MappingID, 
-		       CAST(ImportPointID AS NVARCHAR(50)) AS ImportPointID, 
+		SELECT CAST(MappingID AS TEXT) AS MappingID, 
+		       CAST(ImportPointID AS TEXT) AS ImportPointID, 
 		       DBFFieldName, TargetFieldName,
 		       DataType, IsRequired, DefaultValue, TransformRule, DisplayOrder,
 		       CreatedAt, UpdatedAt
 		FROM DBFFieldMapping
-		WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)
+		WHERE ImportPointID = CAST(@importPointID AS UUID)
 		ORDER BY DisplayOrder, DBFFieldName
-	`
+LIMIT 200
+`
 
 	rows, err := s.database.QueryContext(ctx, query, sql.Named("importPointID", importPointID))
 	if err != nil {
@@ -1030,9 +1068,8 @@ func (s *Server) handleGetInvoiceImports(w http.ResponseWriter, r *http.Request)
 
 	if importPointID != "" {
 		query = `
-			SELECT TOP 200
-				CAST(InvoiceImportID AS NVARCHAR(50)) AS InvoiceImportID,
-				CAST(ImportPointID AS NVARCHAR(50)) AS ImportPointID,
+			SELECT CAST(InvoiceImportID AS TEXT) AS InvoiceImportID,
+				CAST(ImportPointID AS TEXT) AS ImportPointID,
 				FileName,
 				FilePath,
 				FileSize,
@@ -1046,15 +1083,15 @@ func (s *Server) handleGetInvoiceImports(w http.ResponseWriter, r *http.Request)
 				CompletedAt,
 				CreatedAt
 			FROM InvoiceImport
-			WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)
+			WHERE ImportPointID = CAST(@importPointID AS UUID)
 			ORDER BY CreatedAt DESC
-		`
+LIMIT 200
+`
 		args = []interface{}{sql.Named("importPointID", importPointID)}
 	} else if supplierID != "" {
 		query = `
-			SELECT TOP 200
-				CAST(ii.InvoiceImportID AS NVARCHAR(50)) AS InvoiceImportID,
-				CAST(ii.ImportPointID AS NVARCHAR(50)) AS ImportPointID,
+			SELECT CAST(ii.InvoiceImportID AS TEXT) AS InvoiceImportID,
+				CAST(ii.ImportPointID AS TEXT) AS ImportPointID,
 				ii.FileName,
 				ii.FilePath,
 				ii.FileSize,
@@ -1069,9 +1106,10 @@ func (s *Server) handleGetInvoiceImports(w http.ResponseWriter, r *http.Request)
 				ii.CreatedAt
 			FROM InvoiceImport ii
 			INNER JOIN ImportPoint ip ON ii.ImportPointID = ip.ImportPointID
-			WHERE ip.SupplierID = CAST(@supplierID AS UNIQUEIDENTIFIER)
+			WHERE ip.SupplierID = CAST(@supplierID AS UUID)
 			ORDER BY ii.CreatedAt DESC
-		`
+LIMIT 200
+`
 		args = []interface{}{sql.Named("supplierID", supplierID)}
 	} else {
 		s.writeError(w, http.StatusBadRequest, "Не указан import_point_id или supplier_id")
@@ -1225,33 +1263,25 @@ func (s *Server) handleSaveFieldMapping(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Используем MERGE (UPSERT) для обновления или вставки
+	// Используем INSERT ... ON CONFLICT (UPSERT) для обновления или вставки
 	// Это предотвращает ошибку дублирования ключа при повторном сохранении
 	query := `
-		MERGE DBFFieldMapping AS target
-		USING (SELECT CAST(@importPointID AS UNIQUEIDENTIFIER) AS ImportPointID, @dbfFieldName AS DBFFieldName) AS source
-		ON target.ImportPointID = source.ImportPointID
-		   AND target.DBFFieldName = source.DBFFieldName
-		WHEN MATCHED THEN
-			UPDATE SET
-				TargetFieldName = @targetFieldName,
-				DataType = @dataType,
-				IsRequired = @isRequired,
-				DefaultValue = @defaultValue,
-				TransformRule = @transformRule,
-				DisplayOrder = @displayOrder,
-				UpdatedAt = @updatedAt
-		WHEN NOT MATCHED THEN
-			INSERT (MappingID, ImportPointID, DBFFieldName, TargetFieldName, DataType,
-			        IsRequired, DefaultValue, TransformRule, DisplayOrder, CreatedAt, UpdatedAt)
-			VALUES (NEWID(), CAST(@importPointID AS UNIQUEIDENTIFIER), @dbfFieldName, @targetFieldName, @dataType,
-			        @isRequired, @defaultValue, @transformRule, @displayOrder, @createdAt, @updatedAt);
-		
-		-- Получаем MappingID для ответа
-		SELECT CAST(MappingID AS NVARCHAR(50)) AS MappingID
-		FROM DBFFieldMapping
-		WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)
-		  AND DBFFieldName = @dbfFieldName;
+		INSERT INTO "DBFFieldMapping" (
+			"MappingID", "ImportPointID", "DBFFieldName", "TargetFieldName", "DataType",
+			"IsRequired", "DefaultValue", "TransformRule", "DisplayOrder", "CreatedAt", "UpdatedAt"
+		) VALUES (
+			gen_random_uuid(), CAST(@importPointID AS UUID), @dbfFieldName, @targetFieldName, @dataType,
+			@isRequired, @defaultValue, @transformRule, @displayOrder, @createdAt, @updatedAt
+		)
+		ON CONFLICT ("ImportPointID", "DBFFieldName") DO UPDATE SET
+			"TargetFieldName" = EXCLUDED."TargetFieldName",
+			"DataType" = EXCLUDED."DataType",
+			"IsRequired" = EXCLUDED."IsRequired",
+			"DefaultValue" = EXCLUDED."DefaultValue",
+			"TransformRule" = EXCLUDED."TransformRule",
+			"DisplayOrder" = EXCLUDED."DisplayOrder",
+			"UpdatedAt" = EXCLUDED."UpdatedAt"
+		RETURNING CAST("MappingID" AS TEXT) AS "MappingID";
 	`
 
 	now := time.Now()
@@ -1341,33 +1371,33 @@ func (s *Server) handleSaveAllFieldMappings(w http.ResponseWriter, r *http.Reque
 	}
 	defer tx.Rollback()
 
-	_, err = tx.ExecContext(ctx,
-		`DELETE FROM DBFFieldMapping WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)`,
-		sql.Named("importPointID", importPointID))
+	_, err = db.ExecRaw(ctx, tx,
+		`DELETE FROM DBFFieldMapping WHERE ImportPointID = CAST(? AS UUID)`,
+		importPointID)
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, "Ошибка очистки старых маппингов")
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка очистки старых маппингов: %v", err))
 		return
 	}
 
 	now := time.Now()
 	for i, m := range body.Mappings {
-		_, err = tx.ExecContext(ctx, `
+		_, err = db.ExecRaw(ctx, tx, `
 			INSERT INTO DBFFieldMapping
 				(MappingID, ImportPointID, DBFFieldName, TargetFieldName, DataType,
 				 IsRequired, DefaultValue, TransformRule, DisplayOrder, CreatedAt, UpdatedAt)
 			VALUES
-				(NEWID(), CAST(@importPointID AS UNIQUEIDENTIFIER), @dbfFieldName, @targetFieldName, @dataType,
-				 @isRequired, @defaultValue, @transformRule, @displayOrder, @createdAt, @updatedAt)`,
-			sql.Named("importPointID", importPointID),
-			sql.Named("dbfFieldName", m.DBFFieldName),
-			sql.Named("targetFieldName", m.TargetFieldName),
-			sql.Named("dataType", m.DataType),
-			sql.Named("isRequired", m.IsRequired),
-			sql.Named("defaultValue", m.DefaultValue),
-			sql.Named("transformRule", m.TransformRule),
-			sql.Named("displayOrder", i),
-			sql.Named("createdAt", now),
-			sql.Named("updatedAt", now))
+				(gen_random_uuid(), CAST(? AS UUID), ?, ?, ?,
+				 ?, ?, ?, ?, ?, ?)`,
+			importPointID,
+			m.DBFFieldName,
+			m.TargetFieldName,
+			m.DataType,
+			m.IsRequired,
+			m.DefaultValue,
+			m.TransformRule,
+			i,
+			now,
+			now)
 		if err != nil {
 			s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка вставки маппинга %s: %v", m.DBFFieldName, err))
 			return
@@ -1462,10 +1492,10 @@ func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request) {
 		UPDATE InvoiceImport 
 		SET ImportStatus = 'FAILED',
 		    ErrorMessage = 'Импорт завис (превышено время ожидания 30 минут)',
-		    CompletedAt = GETUTCDATE()
-		WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)
+		    CompletedAt = (NOW() AT TIME ZONE 'utc')
+		WHERE ImportPointID = CAST(@importPointID AS UUID)
 		  AND ImportStatus = 'PROCESSING'
-		  AND StartedAt <= DATEADD(minute, -30, GETUTCDATE())
+		  AND StartedAt <= DATEADD(minute, -30, (NOW() AT TIME ZONE 'utc'))
 	`
 	result, err := s.database.ExecContext(checkCtx, cleanupQuery, sql.Named("importPointID", req.ImportPointID))
 	if err != nil {
@@ -1483,9 +1513,9 @@ func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request) {
 	activeImportsQuery := `
 		SELECT COUNT(*), MAX(StartedAt) as LastStartedAt
 		FROM InvoiceImport
-		WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)
+		WHERE ImportPointID = CAST(@importPointID AS UUID)
 		  AND ImportStatus = 'PROCESSING'
-		  AND StartedAt > DATEADD(minute, -30, GETUTCDATE())
+		  AND StartedAt > DATEADD(minute, -30, (NOW() AT TIME ZONE 'utc'))
 	`
 	var activeCount int
 	var lastStartedAt sql.NullTime
@@ -1525,10 +1555,10 @@ func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request) {
 				UPDATE InvoiceImport 
 				SET ImportStatus = 'FAILED',
 				    ErrorMessage = 'Импорт завис (принудительно прерван)',
-				    CompletedAt = GETUTCDATE()
-				WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)
+				    CompletedAt = (NOW() AT TIME ZONE 'utc')
+				WHERE ImportPointID = CAST(@importPointID AS UUID)
 				  AND ImportStatus = 'PROCESSING'
-				  AND StartedAt <= DATEADD(minute, -5, GETUTCDATE())
+				  AND StartedAt <= DATEADD(minute, -5, (NOW() AT TIME ZONE 'utc'))
 			`
 			result, err := s.database.ExecContext(checkCtx, forceCleanupQuery, sql.Named("importPointID", req.ImportPointID))
 			if err != nil {
@@ -1583,8 +1613,8 @@ func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request) {
 			updatePLCtx, updatePLCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			_, plErr := s.database.ExecContext(updatePLCtx, `
 				UPDATE PriceList
-				SET LastUpdateAt = GETUTCDATE(), UpdatedAt = GETUTCDATE()
-				WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER) AND IsActive = 1
+				SET LastUpdateAt = (NOW() AT TIME ZONE 'utc'), UpdatedAt = (NOW() AT TIME ZONE 'utc')
+				WHERE ImportPointID = CAST(@importPointID AS UUID) AND IsActive = 1
 			`, sql.Named("importPointID", req.ImportPointID))
 			updatePLCancel()
 			if plErr != nil && s.logger != nil {
@@ -1616,6 +1646,7 @@ func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request) {
 						if s.logger != nil {
 							s.logger.Info("Сопоставление данных импорта %s успешно завершено", invoiceImport.InvoiceImportID)
 						}
+						s.scheduleRebuildPriceCacheByImportPoint(req.ImportPointID)
 					}
 				}()
 			}
@@ -1632,14 +1663,15 @@ func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request) {
 // getFieldMappings получает маппинг полей для точки импорта
 func (s *Server) getFieldMappings(ctx context.Context, importPointID string) ([]models.DBFFieldMapping, error) {
 	query := `
-		SELECT TOP 200 CAST(MappingID AS NVARCHAR(50)) AS MappingID, 
-		       CAST(ImportPointID AS NVARCHAR(50)) AS ImportPointID, 
+		SELECT CAST(MappingID AS TEXT) AS MappingID, 
+		       CAST(ImportPointID AS TEXT) AS ImportPointID, 
 		       DBFFieldName, TargetFieldName,
 		       DataType, IsRequired, DefaultValue, TransformRule, DisplayOrder
 		FROM DBFFieldMapping
-		WHERE ImportPointID = CAST(@importPointID AS UNIQUEIDENTIFIER)
+		WHERE ImportPointID = CAST(@importPointID AS UUID)
 		ORDER BY DisplayOrder
-	`
+LIMIT 200
+`
 
 	rows, err := s.database.QueryContext(ctx, query, sql.Named("importPointID", importPointID))
 	if err != nil {
@@ -1688,7 +1720,7 @@ func (s *Server) handleAnalyzeImportPoint(w http.ResponseWriter, r *http.Request
 	query := `
 		SELECT SourceType, SourceFilePath, FtpHost, FtpPort, FtpUser, FtpPassword, FtpRemotePath
 		FROM ImportPoint
-		WHERE ImportPointID = CAST(@id AS UNIQUEIDENTIFIER) AND IsActive = 1
+		WHERE ImportPointID = CAST(@id AS UUID) AND IsActive = 1
 	`
 	err := s.database.QueryRowContext(ctx, query, sql.Named("id", pointID)).
 		Scan(&sourceType, &sourceFilePath, &ftpHost, &ftpPort, &ftpUser, &ftpPassword, &ftpRemotePath)
