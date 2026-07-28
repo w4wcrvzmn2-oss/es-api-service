@@ -153,79 +153,111 @@ func (a *AuthService) Login(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(LoginResponse{Token: token, Role: role, RedirectURL: redirectURL})
 }
 
-// findSupplierByCredentials ищет поставщика по Login/Password через GORM.
+type authCredentialRow struct {
+	ID       string  `gorm:"column:id"`
+	Password *string `gorm:"column:password"`
+}
+
+// findSupplierByCredentials ищет поставщика по Login/Password.
 // Возвращает SupplierID или "" если не найдено / пароль не совпал.
 func (a *AuthService) findSupplierByCredentials(ctx context.Context, login, password string) (string, error) {
 	if a.database == nil {
 		return "", fmt.Errorf("database not available")
 	}
-	// CAST UUID в NVARCHAR, чтобы GORM Scan заполнил string-поле,
-	// а не 16 raw bytes из uniqueidentifier (это попадёт в JWT).
-	var supplier struct {
-		SupplierID string
-		Password   *string
-	}
-	err := a.database.GORMWith(ctx).
-		Table("Supplier").
-		Select("CAST(SupplierID AS TEXT) AS SupplierID, Password").
-		Where("Login = ? AND IsActive = ?", login, true).
-		Take(&supplier).Error
+	var row authCredentialRow
+	err := a.database.GORMWith(ctx).Raw(`
+		SELECT CAST("SupplierID" AS TEXT) AS id, "Password" AS password
+		FROM "Supplier"
+		WHERE "Login" = ? AND "IsActive" = TRUE
+		LIMIT 1
+	`, login).Scan(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", nil
 	}
 	if err != nil {
+		if a.logger != nil {
+			a.logger.Warn("findSupplierByCredentials: query error for '%s': %v", login, err)
+		}
 		return "", err
 	}
+	if row.ID == "" {
+		if a.logger != nil {
+			a.logger.Info("findSupplierByCredentials: supplier '%s' not found or inactive", login)
+		}
+		return "", nil
+	}
 	stored := ""
-	if supplier.Password != nil {
-		stored = *supplier.Password
+	if row.Password != nil {
+		stored = *row.Password
+	}
+	if a.logger != nil {
+		a.logger.Info("findSupplierByCredentials: supplier '%s' found id=%s pwdLen=%d bcrypt=%v", login, row.ID, len(stored), isBcryptHash(stored))
 	}
 	if !verifyPassword(stored, password) {
+		if a.logger != nil {
+			a.logger.Warn("findSupplierByCredentials: password mismatch for supplier '%s' id=%s", login, row.ID)
+		}
 		return "", nil
 	}
 	if !isBcryptHash(stored) {
-		if err := a.upgradeSupplierPasswordHash(ctx, supplier.SupplierID, password); err != nil && a.logger != nil {
-			a.logger.Warn("Не удалось обновить пароль поставщика %s на bcrypt-хэш: %v", supplier.SupplierID, err)
+		if err := a.upgradeSupplierPasswordHash(ctx, row.ID, password); err != nil && a.logger != nil {
+			a.logger.Warn("Не удалось обновить пароль поставщика %s на bcrypt-хэш: %v", row.ID, err)
 		}
 	}
-	return supplier.SupplierID, nil
+	return row.ID, nil
 }
 
-// findBuyerUserByCredentials ищет BuyerUser по Email/Password через GORM.
+// findBuyerUserByCredentials ищет BuyerUser по Email/Password.
 // Возвращает BuyerUserID или "" если не найдено / пароль не совпал.
 func (a *AuthService) findBuyerUserByCredentials(ctx context.Context, login, password string) (string, error) {
 	if a.database == nil {
 		return "", fmt.Errorf("database not available")
 	}
-	// CAST UUID в NVARCHAR — иначе uniqueidentifier попадёт в string как 16 raw bytes.
-	var bu struct {
-		BuyerUserID string
-		Password    *string
-	}
-	err := a.database.GORMWith(ctx).
-		Table("BuyerUser").
-		Select("CAST(BuyerUserID AS TEXT) AS BuyerUserID, Password").
-		Where("Email = ? AND IsActive = ?", login, true).
-		Take(&bu).Error
+	var row authCredentialRow
+	err := a.database.GORMWith(ctx).Raw(`
+		SELECT CAST("BuyerUserID" AS TEXT) AS id, "Password" AS password
+		FROM "BuyerUser"
+		WHERE lower("Email") = lower(?) AND "IsActive" = TRUE
+		ORDER BY "CreatedAt" DESC
+		LIMIT 1
+	`, login).Scan(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", nil
 	}
 	if err != nil {
+		if a.logger != nil {
+			a.logger.Warn("findBuyerUserByCredentials: query error for '%s': %v", login, err)
+		}
 		return "", err
 	}
-	if bu.Password == nil || *bu.Password == "" {
+	if row.ID == "" {
+		if a.logger != nil {
+			a.logger.Info("findBuyerUserByCredentials: buyer '%s' not found or inactive", login)
+		}
 		return "", nil
 	}
-	stored := *bu.Password
+	if row.Password == nil || *row.Password == "" {
+		if a.logger != nil {
+			a.logger.Warn("findBuyerUserByCredentials: buyer '%s' id=%s has empty password", login, row.ID)
+		}
+		return "", nil
+	}
+	stored := *row.Password
+	if a.logger != nil {
+		a.logger.Info("findBuyerUserByCredentials: buyer '%s' found id=%s pwdLen=%d bcrypt=%v", login, row.ID, len(stored), isBcryptHash(stored))
+	}
 	if !verifyPassword(stored, password) {
+		if a.logger != nil {
+			a.logger.Warn("findBuyerUserByCredentials: password mismatch for buyer '%s' id=%s", login, row.ID)
+		}
 		return "", nil
 	}
 	if !isBcryptHash(stored) {
-		if err := a.upgradeBuyerUserPasswordHash(ctx, bu.BuyerUserID, password); err != nil && a.logger != nil {
-			a.logger.Warn("Не удалось обновить пароль BuyerUser %s на bcrypt-хэш: %v", bu.BuyerUserID, err)
+		if err := a.upgradeBuyerUserPasswordHash(ctx, row.ID, password); err != nil && a.logger != nil {
+			a.logger.Warn("Не удалось обновить пароль BuyerUser %s на bcrypt-хэш: %v", row.ID, err)
 		}
 	}
-	return bu.BuyerUserID, nil
+	return row.ID, nil
 }
 
 func (a *AuthService) upgradeBuyerUserPasswordHash(ctx context.Context, buyerUserID, password string) error {

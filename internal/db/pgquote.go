@@ -27,9 +27,9 @@ func NormalizeBoolSQL(sql string) string {
 	sql = reBoolToggle.ReplaceAllString(sql, `NOT $1`)
 	sql = reBoolEq1.ReplaceAllString(sql, `$1 = TRUE`)
 	sql = reBoolEq0.ReplaceAllString(sql, `$1 = FALSE`)
-	// COALESCE(@flag, 1) / COALESCE(?, 1) → TRUE/FALSE (иначе integer vs boolean)
-	sql = regexp.MustCompile(`(?i)COALESCE\s*\(\s*(@[A-Za-z_][A-Za-z0-9_]*|\?)\s*,\s*1\s*\)`).ReplaceAllString(sql, `COALESCE($1, TRUE)`)
-	sql = regexp.MustCompile(`(?i)COALESCE\s*\(\s*(@[A-Za-z_][A-Za-z0-9_]*|\?)\s*,\s*0\s*\)`).ReplaceAllString(sql, `COALESCE($1, FALSE)`)
+	// COALESCE только для булевых параметров (не для @price / @quantity и т.п.)
+	sql = regexp.MustCompile(`(?i)COALESCE\s*\(\s*(@(?:`+boolColPat+`)|\?)\s*,\s*1\s*\)`).ReplaceAllString(sql, `COALESCE($1, TRUE)`)
+	sql = regexp.MustCompile(`(?i)COALESCE\s*\(\s*(@(?:`+boolColPat+`)|\?)\s*,\s*0\s*\)`).ReplaceAllString(sql, `COALESCE($1, FALSE)`)
 	return sql
 }
 
@@ -308,7 +308,7 @@ func isAllCapsIdent(s string) bool {
 func canonicalEsTableName(ident string) string {
 	switch strings.ToLower(ident) {
 	case "es_ef2":
-		// В 002_elfisa_schema.sql создано как "es_ef2" (lowercase).
+		// На сервере PG таблица обычно "es_ef2" (lowercase), не "ES_EF2".
 		return "es_ef2"
 	default:
 		return strings.ToUpper(ident)
@@ -324,6 +324,7 @@ func isSkippedPascalWord(s string) bool {
 		"SELECT", "LIMIT", "OFFSET", "HAVING", "UNION", "EXCEPT", "INTERSECT",
 		"EXISTS", "BETWEEN", "LIKE", "ILIKE", "CAST", "COALESCE", "NULLIF",
 		"COUNT", "SUM", "AVG", "MIN", "MAX", "NOW", "INTERVAL", "FILTER",
+		"LOWER", "UPPER", "ROW_NUMBER",
 		"WITHIN", "GENERATE", "SERIES", "RETURNING", "CONFLICT", "NOTHING",
 		"EXCLUDED", "LATERAL", "WITH", "RECURSIVE", "DISTINCT", "ALL",
 		"ANY", "SOME", "ARRAY", "ROW", "ROWS", "UNBOUNDED", "PRECEDING",

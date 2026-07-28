@@ -150,19 +150,26 @@ func (s *Server) resolveBuyerUser(ctx context.Context, r *http.Request) (string,
 	}
 	var res result
 
-	q := s.database.GORMWith(ctx).
-		Table("BuyerUser AS bu").
-		Select(`CAST(bu.BuyerUserID AS TEXT) AS BuyerUserID,
-			CAST(ba.BuyerApplicationID AS TEXT) AS BuyerApplicationID`).
-		Joins("INNER JOIN BuyerApplication ba ON ba.BuyerUserID = bu.BuyerUserID AND ba.IsActive = 1").
-		Where("bu.IsActive = ?", true)
+	query := `
+		SELECT
+			CAST(bu."BuyerUserID" AS TEXT) AS "BuyerUserID",
+			CAST(ba."BuyerApplicationID" AS TEXT) AS "BuyerApplicationID"
+		FROM "BuyerUser" bu
+		INNER JOIN "BuyerApplication" ba
+			ON ba."BuyerUserID" = bu."BuyerUserID" AND ba."IsActive" = TRUE
+		WHERE bu."IsActive" = TRUE
+	`
+	args := []interface{}{}
 	if claims.BuyerUserID != "" {
-		q = q.Where("bu.BuyerUserID = ?", db.UUIDParam(claims.BuyerUserID))
+		query += ` AND bu."BuyerUserID" = CAST(? AS UUID)`
+		args = append(args, db.UUIDParam(claims.BuyerUserID))
 	} else {
-		q = q.Where("bu.Email = ?", claims.Username)
+		query += ` AND bu."Email" = ?`
+		args = append(args, claims.Username)
 	}
+	query += ` LIMIT 1`
 
-	if err := q.Limit(1).Take(&res).Error; err != nil {
+	if err := s.database.GORMWith(ctx).Raw(query, args...).Scan(&res).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			s.logger.Error("resolveBuyerUser: не найден BuyerUser (claims=%+v)", claims)
 		} else {
@@ -182,7 +189,7 @@ func (s *Server) ensureOrderStatusID(tx *gorm.DB, name, description string) (str
 	}
 	id = uuid.New().String()
 	st := models.OrderStatus{OrderStatusID: id, Name: name, Description: &description, IsActive: true}
-	if err := tx.Create(&st).Error; err != nil {
+	if err := tx.Table("OrderStatus").Create(&st).Error; err != nil {
 		return "", err
 	}
 	return id, nil
@@ -250,24 +257,31 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 
 		// Денормализованная схема: см. MD/15. LEFT JOIN'ы гасят висячие FK-ссылки → NULL в OrderItem.
 		var row resolvedPriceRow
-		err := s.database.GORMWith(ctx).
-			Table("SupplierPrice AS sp").
-			Select(`CAST(sp.SupplierID AS TEXT) AS SupplierID,
-				CASE WHEN p.ProductID IS NULL THEN NULL ELSE CAST(p.ProductID AS TEXT) END AS ProductID,
-				CASE WHEN r.RegionID IS NULL THEN NULL ELSE CAST(r.RegionID AS TEXT) END AS RegionID,
-				CASE WHEN spl.PriceListID IS NULL THEN NULL ELSE CAST(spl.PriceListID AS TEXT) END AS PriceListID,
-				COALESCE(sp.FinalPrice, sp.Price) * (1 + COALESCE(plr.MarkupPct, 0) / 100.0) AS UnitPrice,
-				sp.ItemName AS ItemName,
-				sp.ItemCode AS ItemCode,
-				sp.Barcode AS Barcode,
-				sp.SupplierItemName AS SuppName`).
-			Joins("LEFT JOIN Product p ON p.ProductID = sp.GUID_ES").
-			Joins("LEFT JOIN Region r ON r.RegionID = sp.RegionID").
-			Joins("LEFT JOIN SupplierPriceList spl ON spl.PriceListID = sp.PriceListID").
-			Joins("LEFT JOIN PriceListRegion plr ON plr.PriceListID = sp.PriceListID AND plr.RegionID = sp.RegionID AND plr.IsActive = 1").
-			Where("sp.SupplierPriceID = ? AND sp.IsActive = ?", db.UUIDParam(ri.SupplierPriceID), true).
-			Take(&row).Error
+		err := s.database.GORMWith(ctx).Raw(`
+			SELECT
+				CAST(sp."SupplierID" AS TEXT) AS "SupplierID",
+				CASE WHEN p."ProductID" IS NULL THEN NULL ELSE CAST(p."ProductID" AS TEXT) END AS "ProductID",
+				CASE WHEN r."RegionID" IS NULL THEN NULL ELSE CAST(r."RegionID" AS TEXT) END AS "RegionID",
+				CASE WHEN spl."PriceListID" IS NULL THEN NULL ELSE CAST(spl."PriceListID" AS TEXT) END AS "PriceListID",
+				COALESCE(sp."FinalPrice", sp."Price") * (1 + COALESCE(plr."MarkupPct", 0) / 100.0) AS "UnitPrice",
+				sp."ItemName" AS "ItemName",
+				sp."ItemCode" AS "ItemCode",
+				sp."Barcode" AS "Barcode",
+				sp."SupplierItemName" AS "SuppName"
+			FROM "SupplierPrice" sp
+			LEFT JOIN "Product" p ON p."ProductID" = sp."GUID_ES"
+			LEFT JOIN "Region" r ON r."RegionID" = sp."RegionID"
+			LEFT JOIN "SupplierPriceList" spl ON spl."PriceListID" = sp."PriceListID"
+			LEFT JOIN "PriceListRegion" plr
+				ON plr."PriceListID" = sp."PriceListID" AND plr."RegionID" = sp."RegionID" AND plr."IsActive" = TRUE
+			WHERE sp."SupplierPriceID" = CAST(? AS UUID) AND sp."IsActive" = TRUE
+			LIMIT 1
+		`, db.UUIDParam(ri.SupplierPriceID)).Scan(&row).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			s.writeError(w, http.StatusNotFound, fmt.Sprintf("Товар не найден или недоступен: %s", ri.SupplierPriceID))
+			return
+		}
+		if err == nil && row.SupplierID == "" {
 			s.writeError(w, http.StatusNotFound, fmt.Sprintf("Товар не найден или недоступен: %s", ri.SupplierPriceID))
 			return
 		}
@@ -296,9 +310,10 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 	if locationID != nil {
 		var cnt int64
 		if err := s.database.GORMWith(ctx).Raw(`
-			SELECT COUNT(*) FROM BuyerLocation bl
-			INNER JOIN BuyerUser bu ON bu.BuyerID = bl.BuyerID
-			WHERE bl.BuyerLocationID = ? AND bu.BuyerUserID = ?`,
+			SELECT COUNT(*)
+			FROM "BuyerLocation" bl
+			INNER JOIN "BuyerUser" bu ON bu."BuyerID" = bl."BuyerID"
+			WHERE bl."BuyerLocationID" = CAST(? AS UUID) AND bu."BuyerUserID" = CAST(? AS UUID)`,
 			db.UUIDParam(*locationID), db.UUIDParam(buyerUserID)).Scan(&cnt).Error; err != nil {
 			s.logger.Error("Ошибка проверки адреса доставки: %v", err)
 			s.writeError(w, http.StatusInternalServerError, "Ошибка проверки адреса доставки")
@@ -363,7 +378,7 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 				PriceListID:     it.row.PriceListID,
 				CreatedAt:       now,
 			}
-			if err := tx.Create(&line).Error; err != nil {
+			if err := tx.Table("OrderItem").Create(&line).Error; err != nil {
 				return fmt.Errorf("OrderItem insert: %w", err)
 			}
 		}

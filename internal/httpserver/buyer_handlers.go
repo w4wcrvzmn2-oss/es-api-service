@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"es_api_service/internal/db"
@@ -92,16 +93,16 @@ func (s *Server) handleGetBuyers(w http.ResponseWriter, r *http.Request) {
 
 	buyers := []buyerWithRegion{}
 	err := s.database.GORMWith(ctx).
-		Table("Buyer AS b").
-		Select(`CAST(b.BuyerID AS TEXT) AS BuyerID,
-			b.Name, b.INN,
-			CAST(b.RegionID AS TEXT) AS RegionID,
-			b.Code, b.Phone, b.Address, b.Email,
-			b.IsActive, b.CreatedAt,
-			r.Name AS RegionName`).
-		Joins("LEFT JOIN Region r ON b.RegionID = r.RegionID").
-		Where("b.IsActive = ?", true).
-		Order("b.Name").
+		Table(`"Buyer" AS b`).
+		Select(`CAST(b."BuyerID" AS TEXT) AS "BuyerID",
+			b."Name", b."INN",
+			CAST(b."RegionID" AS TEXT) AS "RegionID",
+			b."Code", b."Phone", b."Address", b."Email",
+			b."IsActive", b."CreatedAt",
+			r."Name" AS "RegionName"`).
+		Joins(`LEFT JOIN "Region" r ON b."RegionID" = r."RegionID"`).
+		Where(`b."IsActive" = ?`, true).
+		Order(`b."Name"`).
 		Limit(500).
 		Scan(&buyers).Error
 	if err != nil {
@@ -126,15 +127,15 @@ func (s *Server) handleGetBuyerByID(w http.ResponseWriter, r *http.Request, buye
 
 	var b buyerWithRegion
 	err := s.database.GORMWith(ctx).
-		Table("Buyer AS b").
-		Select(`CAST(b.BuyerID AS TEXT) AS BuyerID,
-			b.Name, b.INN,
-			CAST(b.RegionID AS TEXT) AS RegionID,
-			b.Code, b.Phone, b.Address, b.Email,
-			b.IsActive, b.CreatedAt,
-			r.Name AS RegionName`).
-		Joins("LEFT JOIN Region r ON b.RegionID = r.RegionID").
-		Where("b.BuyerID = ?", db.UUIDParam(buyerID)).
+		Table(`"Buyer" AS b`).
+		Select(`CAST(b."BuyerID" AS TEXT) AS "BuyerID",
+			b."Name", b."INN",
+			CAST(b."RegionID" AS TEXT) AS "RegionID",
+			b."Code", b."Phone", b."Address", b."Email",
+			b."IsActive", b."CreatedAt",
+			r."Name" AS "RegionName"`).
+		Joins(`LEFT JOIN "Region" r ON b."RegionID" = r."RegionID"`).
+		Where(`b."BuyerID" = ?`, db.UUIDParam(buyerID)).
 		Take(&b).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		s.writeError(w, http.StatusNotFound, "Покупатель не найден")
@@ -171,19 +172,30 @@ func (s *Server) handleCreateBuyer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	buyerID := uuid.New().String()
-	buyer := models.Buyer{
-		BuyerID:   buyerID,
-		Name:      req.Name,
-		INN:       req.INN,
-		RegionID:  nilIfEmpty(req.RegionID),
-		Code:      nilIfEmpty(req.Code),
-		Phone:     nilIfEmpty(req.Phone),
-		Address:   nilIfEmpty(req.Address),
-		Email:     nilIfEmpty(req.Email),
-		IsActive:  req.IsActive,
-		CreatedAt: time.Now().UTC(),
+	regionID := ""
+	if v := nilIfEmpty(req.RegionID); v != nil {
+		regionID = *v
 	}
-	if err := s.database.GORMWith(ctx).Create(&buyer).Error; err != nil {
+	_, err := s.database.ExecContext(ctx, `
+		INSERT INTO "Buyer" (
+			"BuyerID", "Name", "INN", "RegionID", "Code", "Phone", "Address", "Email", "IsActive", "CreatedAt"
+		) VALUES (
+			CAST(@buyerID AS UUID), @name, @inn,
+			CAST(NULLIF(CAST(@regionID AS TEXT), '') AS UUID),
+			@code, @phone, @address, @email, @isActive, (NOW() AT TIME ZONE 'utc')
+		)
+	`,
+		sql.Named("buyerID", buyerID),
+		sql.Named("name", req.Name),
+		sql.Named("inn", nilIfEmpty(req.INN)),
+		sql.Named("regionID", regionID),
+		sql.Named("code", nilIfEmpty(req.Code)),
+		sql.Named("phone", nilIfEmpty(req.Phone)),
+		sql.Named("address", nilIfEmpty(req.Address)),
+		sql.Named("email", nilIfEmpty(req.Email)),
+		sql.Named("isActive", req.IsActive),
+	)
+	if err != nil {
 		s.logger.Error("Ошибка создания покупателя: %v", err)
 		s.writeError(w, http.StatusInternalServerError, "Ошибка создания покупателя")
 		return
@@ -215,25 +227,40 @@ func (s *Server) handleUpdateBuyer(w http.ResponseWriter, r *http.Request, buyer
 		return
 	}
 
-	res := s.database.GORMWith(ctx).
-		Model(&models.Buyer{}).
-		Where("BuyerID = ?", db.UUIDParam(buyerID)).
-		Updates(map[string]interface{}{
-			"Name":     req.Name,
-			"INN":      req.INN,
-			"RegionID": nilIfEmpty(req.RegionID),
-			"Code":     nilIfEmpty(req.Code),
-			"Phone":    nilIfEmpty(req.Phone),
-			"Address":  nilIfEmpty(req.Address),
-			"Email":    nilIfEmpty(req.Email),
-			"IsActive": req.IsActive,
-		})
-	if res.Error != nil {
-		s.logger.Error("Ошибка обновления покупателя: %v", res.Error)
+	regionID := ""
+	if v := nilIfEmpty(req.RegionID); v != nil {
+		regionID = *v
+	}
+
+	res, err := s.database.ExecContext(ctx, `
+		UPDATE "Buyer" SET
+			"Name" = @name,
+			"INN" = @inn,
+			"RegionID" = CAST(NULLIF(CAST(@regionID AS TEXT), '') AS UUID),
+			"Code" = @code,
+			"Phone" = @phone,
+			"Address" = @address,
+			"Email" = @email,
+			"IsActive" = @isActive
+		WHERE "BuyerID" = CAST(@buyerID AS UUID)
+	`,
+		sql.Named("buyerID", buyerID),
+		sql.Named("name", req.Name),
+		sql.Named("inn", nilIfEmpty(req.INN)),
+		sql.Named("regionID", regionID),
+		sql.Named("code", nilIfEmpty(req.Code)),
+		sql.Named("phone", nilIfEmpty(req.Phone)),
+		sql.Named("address", nilIfEmpty(req.Address)),
+		sql.Named("email", nilIfEmpty(req.Email)),
+		sql.Named("isActive", req.IsActive),
+	)
+	if err != nil {
+		s.logger.Error("Ошибка обновления покупателя: %v", err)
 		s.writeError(w, http.StatusInternalServerError, "Ошибка обновления покупателя")
 		return
 	}
-	if res.RowsAffected == 0 {
+	n, _ := res.RowsAffected()
+	if n == 0 {
 		s.writeError(w, http.StatusNotFound, "Покупатель не найден")
 		return
 	}
@@ -254,16 +281,17 @@ func (s *Server) handleDeleteBuyer(w http.ResponseWriter, r *http.Request, buyer
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	res := s.database.GORMWith(ctx).
-		Model(&models.Buyer{}).
-		Where("BuyerID = ?", db.UUIDParam(buyerID)).
-		Update("IsActive", false)
-	if res.Error != nil {
-		s.logger.Error("Ошибка удаления покупателя: %v", res.Error)
+	res, err := s.database.ExecContext(ctx, `
+		UPDATE "Buyer" SET "IsActive" = FALSE
+		WHERE "BuyerID" = CAST(@buyerID AS UUID)
+	`, sql.Named("buyerID", buyerID))
+	if err != nil {
+		s.logger.Error("Ошибка удаления покупателя: %v", err)
 		s.writeError(w, http.StatusInternalServerError, "Ошибка удаления покупателя")
 		return
 	}
-	if res.RowsAffected == 0 {
+	n, _ := res.RowsAffected()
+	if n == 0 {
 		s.writeError(w, http.StatusNotFound, "Покупатель не найден")
 		return
 	}
@@ -333,20 +361,20 @@ func (s *Server) handleGetBuyerUsers(w http.ResponseWriter, r *http.Request) {
 	buyerID := r.URL.Query().Get("buyer_id")
 
 	q := s.database.GORMWith(ctx).
-		Table("BuyerUser AS bu").
-		Select(`CAST(bu.BuyerUserID AS TEXT) AS BuyerUserID,
-			CAST(bu.BuyerID AS TEXT) AS BuyerID,
-			bu.FullName, bu.Email, bu.Phone, bu.Role,
-			bu.IsActive, bu.CreatedAt,
-			b.Name AS BuyerName`).
-		Joins("INNER JOIN Buyer b ON bu.BuyerID = b.BuyerID").
-		Where("bu.IsActive = ?", true)
+		Table(`"BuyerUser" AS bu`).
+		Select(`CAST(bu."BuyerUserID" AS TEXT) AS "BuyerUserID",
+			CAST(bu."BuyerID" AS TEXT) AS "BuyerID",
+			bu."FullName", bu."Email", bu."Phone", bu."Role",
+			bu."IsActive", bu."CreatedAt",
+			b."Name" AS "BuyerName"`).
+		Joins(`INNER JOIN "Buyer" b ON bu."BuyerID" = b."BuyerID"`).
+		Where(`bu."IsActive" = ?`, true)
 	if buyerID != "" {
-		q = q.Where("bu.BuyerID = ?", db.UUIDParam(buyerID))
+		q = q.Where(`bu."BuyerID" = ?`, db.UUIDParam(buyerID))
 	}
 
 	users := []buyerUserWithBuyer{}
-	if err := q.Order("bu.FullName").Limit(500).Scan(&users).Error; err != nil {
+	if err := q.Order(`bu."FullName"`).Limit(500).Scan(&users).Error; err != nil {
 		s.logger.Error("Ошибка получения пользователей: %v", err)
 		s.writeError(w, http.StatusInternalServerError, "Ошибка получения пользователей")
 		return
@@ -368,14 +396,14 @@ func (s *Server) handleGetBuyerUserByID(w http.ResponseWriter, r *http.Request, 
 
 	var u buyerUserWithBuyer
 	err := s.database.GORMWith(ctx).
-		Table("BuyerUser AS bu").
-		Select(`CAST(bu.BuyerUserID AS TEXT) AS BuyerUserID,
-			CAST(bu.BuyerID AS TEXT) AS BuyerID,
-			bu.FullName, bu.Email, bu.Phone, bu.Role,
-			bu.IsActive, bu.CreatedAt,
-			b.Name AS BuyerName`).
-		Joins("INNER JOIN Buyer b ON bu.BuyerID = b.BuyerID").
-		Where("bu.BuyerUserID = ?", db.UUIDParam(userID)).
+		Table(`"BuyerUser" AS bu`).
+		Select(`CAST(bu."BuyerUserID" AS TEXT) AS "BuyerUserID",
+			CAST(bu."BuyerID" AS TEXT) AS "BuyerID",
+			bu."FullName", bu."Email", bu."Phone", bu."Role",
+			bu."IsActive", bu."CreatedAt",
+			b."Name" AS "BuyerName"`).
+		Joins(`INNER JOIN "Buyer" b ON bu."BuyerID" = b."BuyerID"`).
+		Where(`bu."BuyerUserID" = ?`, db.UUIDParam(userID)).
 		Take(&u).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		s.writeError(w, http.StatusNotFound, "Пользователь не найден")
@@ -431,34 +459,32 @@ func (s *Server) handleCreateBuyerUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := uuid.New().String()
+	appID := uuid.New().String()
 	now := time.Now().UTC()
-	bu := models.BuyerUser{
-		BuyerUserID: userID,
-		BuyerID:     req.BuyerID,
-		FullName:    req.FullName,
-		Email:       req.Email,
-		Phone:       req.Phone,
-		Role:        req.Role,
-		IsActive:    req.IsActive,
-		Password:    passwordPtr,
-		CreatedAt:   now,
-	}
 
 	// Создаём пользователя вместе с BuyerApplication одной транзакцией.
-	// Без активной BuyerApplication пользователь не может оформить заказ
-	// (resolveBuyerUser делает INNER JOIN BuyerApplication ... IsActive=1).
 	err := s.database.GORMWith(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&bu).Error; err != nil {
-			return err
+		if e := tx.Exec(`
+			INSERT INTO "BuyerUser" (
+				"BuyerUserID", "BuyerID", "FullName", "Email", "Phone", "Role",
+				"IsActive", "Password", "CreatedAt"
+			) VALUES (
+				CAST(? AS UUID), CAST(? AS UUID), ?, ?, ?, ?,
+				?, ?, ?
+			)`,
+			userID, req.BuyerID, req.FullName, req.Email, req.Phone, req.Role,
+			req.IsActive, passwordPtr, now,
+		).Error; e != nil {
+			return e
 		}
-		app := models.BuyerApplication{
-			BuyerApplicationID: uuid.New().String(),
-			BuyerID:            req.BuyerID,
-			BuyerUserID:        userID,
-			IsActive:           true,
-			CreatedAt:          now,
-		}
-		return tx.Create(&app).Error
+		return tx.Exec(`
+			INSERT INTO "BuyerApplication" (
+				"BuyerApplicationID", "BuyerID", "BuyerUserID", "IsActive", "CreatedAt"
+			) VALUES (
+				CAST(? AS UUID), CAST(? AS UUID), CAST(? AS UUID), TRUE, ?
+			)`,
+			appID, req.BuyerID, userID, now,
+		).Error
 	})
 	if err != nil {
 		s.logger.Error("Ошибка создания пользователя: %v", err)
@@ -488,22 +514,29 @@ func (s *Server) handleUpdateBuyerUser(w http.ResponseWriter, r *http.Request, u
 		return
 	}
 
-	res := s.database.GORMWith(ctx).
-		Model(&models.BuyerUser{}).
-		Where("BuyerUserID = ?", db.UUIDParam(userID)).
-		Updates(map[string]interface{}{
-			"FullName": req.FullName,
-			"Email":    req.Email,
-			"Phone":    req.Phone,
-			"Role":     req.Role,
-			"IsActive": req.IsActive,
-		})
-	if res.Error != nil {
-		s.logger.Error("Ошибка обновления пользователя: %v", res.Error)
+	res, err := s.database.ExecContext(ctx, `
+		UPDATE "BuyerUser" SET
+			"FullName" = @fullName,
+			"Email" = @email,
+			"Phone" = @phone,
+			"Role" = @role,
+			"IsActive" = @isActive
+		WHERE "BuyerUserID" = CAST(@userID AS UUID)
+	`,
+		sql.Named("userID", userID),
+		sql.Named("fullName", req.FullName),
+		sql.Named("email", req.Email),
+		sql.Named("phone", req.Phone),
+		sql.Named("role", req.Role),
+		sql.Named("isActive", req.IsActive),
+	)
+	if err != nil {
+		s.logger.Error("Ошибка обновления пользователя: %v", err)
 		s.writeError(w, http.StatusInternalServerError, "Ошибка обновления пользователя")
 		return
 	}
-	if res.RowsAffected == 0 {
+	n, _ := res.RowsAffected()
+	if n == 0 {
 		s.writeError(w, http.StatusNotFound, "Пользователь не найден")
 		return
 	}
@@ -524,16 +557,17 @@ func (s *Server) handleDeleteBuyerUser(w http.ResponseWriter, r *http.Request, u
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	res := s.database.GORMWith(ctx).
-		Model(&models.BuyerUser{}).
-		Where("BuyerUserID = ?", db.UUIDParam(userID)).
-		Update("IsActive", false)
-	if res.Error != nil {
-		s.logger.Error("Ошибка удаления пользователя: %v", res.Error)
+	res, err := s.database.ExecContext(ctx, `
+		UPDATE "BuyerUser" SET "IsActive" = FALSE
+		WHERE "BuyerUserID" = CAST(@userID AS UUID)
+	`, sql.Named("userID", userID))
+	if err != nil {
+		s.logger.Error("Ошибка удаления пользователя: %v", err)
 		s.writeError(w, http.StatusInternalServerError, "Ошибка удаления пользователя")
 		return
 	}
-	if res.RowsAffected == 0 {
+	n, _ := res.RowsAffected()
+	if n == 0 {
 		s.writeError(w, http.StatusNotFound, "Пользователь не найден")
 		return
 	}
@@ -585,16 +619,17 @@ func (s *Server) handleSetBuyerUserPassword(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	res := s.database.GORMWith(ctx).
-		Model(&models.BuyerUser{}).
-		Where("BuyerUserID = ?", db.UUIDParam(userID)).
-		Update("Password", hashed)
-	if res.Error != nil {
-		s.logger.Error("Ошибка установки пароля BuyerUser %s: %v", userID, res.Error)
-		s.writeError(w, http.StatusInternalServerError, "Ошибка установки пароля")
+	res, err := s.database.ExecContext(ctx, `
+		UPDATE "BuyerUser" SET "Password" = @password
+		WHERE "BuyerUserID" = CAST(@userID AS UUID)
+	`, sql.Named("userID", userID), sql.Named("password", hashed))
+	if err != nil {
+		s.logger.Error("Ошибка установки пароля BuyerUser %s: %v", userID, err)
+		s.writeError(w, http.StatusInternalServerError, "Ошибка сохранения пароля")
 		return
 	}
-	if res.RowsAffected == 0 {
+	n, _ := res.RowsAffected()
+	if n == 0 {
 		s.writeError(w, http.StatusNotFound, "Пользователь не найден")
 		return
 	}
@@ -656,19 +691,21 @@ func (s *Server) handleGetBuyerLocations(w http.ResponseWriter, r *http.Request)
 	}
 
 	locations := []locationWithRegion{}
-	err := s.database.GORMWith(ctx).
-		Table("BuyerLocation AS bl").
-		Select(`CAST(bl.BuyerLocationID AS TEXT) AS BuyerLocationID,
-			CAST(bl.BuyerID AS TEXT) AS BuyerID,
-			bl.Address,
-			CAST(bl.RegionID AS TEXT) AS RegionID,
-			bl.IsDefault, bl.CreatedAt,
-			r.Name AS RegionName`).
-		Joins("LEFT JOIN Region r ON bl.RegionID = r.RegionID").
-		Where("bl.BuyerID = ?", db.UUIDParam(buyerID)).
-		Order("bl.IsDefault DESC, bl.CreatedAt").
-		Limit(100).
-		Scan(&locations).Error
+	err := s.database.GORMWith(ctx).Raw(`
+		SELECT
+			CAST(bl."BuyerLocationID" AS TEXT) AS "BuyerLocationID",
+			CAST(bl."BuyerID" AS TEXT) AS "BuyerID",
+			bl."Address" AS "Address",
+			CAST(bl."RegionID" AS TEXT) AS "RegionID",
+			bl."IsDefault" AS "IsDefault",
+			bl."CreatedAt" AS "CreatedAt",
+			r."Name" AS "RegionName"
+		FROM "BuyerLocation" bl
+		LEFT JOIN "Region" r ON bl."RegionID" = r."RegionID"
+		WHERE bl."BuyerID" = CAST(? AS UUID)
+		ORDER BY bl."IsDefault" DESC, bl."CreatedAt"
+		LIMIT 100
+	`, db.UUIDParam(buyerID)).Scan(&locations).Error
 	if err != nil {
 		s.logger.Error("Ошибка получения адресов: %v", err)
 		s.writeError(w, http.StatusInternalServerError, "Ошибка получения адресов")
@@ -690,18 +727,25 @@ func (s *Server) handleGetBuyerLocationByID(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 
 	var loc locationWithRegion
-	err := s.database.GORMWith(ctx).
-		Table("BuyerLocation AS bl").
-		Select(`CAST(bl.BuyerLocationID AS TEXT) AS BuyerLocationID,
-			CAST(bl.BuyerID AS TEXT) AS BuyerID,
-			bl.Address,
-			CAST(bl.RegionID AS TEXT) AS RegionID,
-			bl.IsDefault, bl.CreatedAt,
-			r.Name AS RegionName`).
-		Joins("LEFT JOIN Region r ON bl.RegionID = r.RegionID").
-		Where("bl.BuyerLocationID = ?", db.UUIDParam(locationID)).
-		Take(&loc).Error
+	err := s.database.GORMWith(ctx).Raw(`
+		SELECT
+			CAST(bl."BuyerLocationID" AS TEXT) AS "BuyerLocationID",
+			CAST(bl."BuyerID" AS TEXT) AS "BuyerID",
+			bl."Address" AS "Address",
+			CAST(bl."RegionID" AS TEXT) AS "RegionID",
+			bl."IsDefault" AS "IsDefault",
+			bl."CreatedAt" AS "CreatedAt",
+			r."Name" AS "RegionName"
+		FROM "BuyerLocation" bl
+		LEFT JOIN "Region" r ON bl."RegionID" = r."RegionID"
+		WHERE bl."BuyerLocationID" = CAST(? AS UUID)
+		LIMIT 1
+	`, db.UUIDParam(locationID)).Scan(&loc).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
+		s.writeError(w, http.StatusNotFound, "Адрес не найден")
+		return
+	}
+	if err == nil && loc.BuyerLocationID == "" {
 		s.writeError(w, http.StatusNotFound, "Адрес не найден")
 		return
 	}
@@ -742,7 +786,7 @@ func (s *Server) handleCreateBuyerLocation(w http.ResponseWriter, r *http.Reques
 	// Если это адрес по умолчанию — сбрасываем флаг у других адресов того же покупателя.
 	if req.IsDefault {
 		_ = s.database.GORMWith(ctx).
-			Model(&models.BuyerLocation{}).
+			Table("BuyerLocation").
 			Where("BuyerID = ?", db.UUIDParam(req.BuyerID)).
 			Update("IsDefault", false).Error
 	}
@@ -756,7 +800,7 @@ func (s *Server) handleCreateBuyerLocation(w http.ResponseWriter, r *http.Reques
 		IsDefault:       req.IsDefault,
 		CreatedAt:       time.Now().UTC(),
 	}
-	if err := s.database.GORMWith(ctx).Create(&loc).Error; err != nil {
+	if err := s.database.GORMWith(ctx).Table("BuyerLocation").Create(&loc).Error; err != nil {
 		s.logger.Error("Ошибка создания адреса: %v", err)
 		s.writeError(w, http.StatusInternalServerError, "Ошибка создания адреса")
 		return
@@ -779,8 +823,9 @@ func (s *Server) handleDeleteBuyerLocation(w http.ResponseWriter, r *http.Reques
 	defer cancel()
 
 	res := s.database.GORMWith(ctx).
+		Table("BuyerLocation").
 		Where("BuyerLocationID = ?", db.UUIDParam(locationID)).
-		Delete(&models.BuyerLocation{})
+		Delete(nil)
 	if res.Error != nil {
 		s.logger.Error("Ошибка удаления адреса: %v", res.Error)
 		s.writeError(w, http.StatusInternalServerError, "Ошибка удаления адреса")
