@@ -126,12 +126,14 @@ func LoadConfig() (*Config, error) {
 		config.DB.SSLMode = "disable"
 	}
 	if config.DB.MaxOpenConns <= 0 {
-		config.DB.MaxOpenConns = 100
+		// Для локального PostgreSQL на сервере держим консервативный пул,
+		// чтобы массовый импорт не съедал все соединения.
+		config.DB.MaxOpenConns = 20
 	}
 	if config.DB.MaxIdleConns <= 0 {
 		idle := config.DB.MaxOpenConns / 4
-		if idle < 25 {
-			idle = 25
+		if idle < 5 {
+			idle = 5
 		}
 		if idle > config.DB.MaxOpenConns {
 			idle = config.DB.MaxOpenConns
@@ -145,10 +147,10 @@ func LoadConfig() (*Config, error) {
 		config.SourceDB.SSLMode = "disable"
 	}
 	if config.SourceDB.MaxOpenConns <= 0 {
-		config.SourceDB.MaxOpenConns = 20
+		config.SourceDB.MaxOpenConns = 5
 	}
 	if config.SourceDB.MaxIdleConns <= 0 {
-		config.SourceDB.MaxIdleConns = 5
+		config.SourceDB.MaxIdleConns = 2
 	}
 	if config.Logging.Level == "" {
 		config.Logging.Level = "info"

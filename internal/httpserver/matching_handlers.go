@@ -729,7 +729,8 @@ func (s *Server) handleGlobalStats(w http.ResponseWriter, r *http.Request) {
 			COUNT(CASE WHEN sp.GUID_ES IS NOT NULL AND CAST(sp.GUID_ES AS TEXT) <> '' THEN 1 END),
 			COUNT(CASE WHEN sp.GUID_ES IS NULL OR CAST(sp.GUID_ES AS TEXT) = '' THEN 1 END)
 		FROM SupplierPrice sp
-		WHERE sp.IsActive = 1
+		INNER JOIN PriceList pl ON pl.PriceListID = sp.PriceListID AND pl.IsActive = TRUE
+		WHERE sp.IsActive = TRUE
 	`).Row().Scan(&matched, &unmatched)
 
 	if err != nil {
@@ -804,6 +805,13 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	// Итоговая цена: база × (1 + (прайс + регион + клиент) / 100), ±%.
+	pc := s.resolvePricingContext(ctx, r)
+	finalPriceExpr := sqlAdditiveFinalPriceExpr("sp", pc)
+	if s.logger != nil {
+		s.logger.Info("Сводный прайс: pricing buyer_id=%s region_id=%s", pc.BuyerID, pc.RegionID)
+	}
+
 	// Поиск по названию (дозагрузка из десктопа) и постраничность.
 	search := strings.TrimSpace(r.URL.Query().Get("q"))
 	qLike := ""
@@ -854,9 +862,7 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 					sp.MatchConfidence,
 					sp.RegionID,
 					COALESCE(sp.MarkupPct, 0) AS MarkupPct,
-					sp.Price * (1 + COALESCE(sp.MarkupPct, 0) / 100.0) AS FinalPrice,
-					-- Группируем по GUID_ES, BatchNumber, ExpiryDate, Manufacturer, Country для разделения партий
-					-- Если поля NULL, считаем их как отдельную группу
+					` + finalPriceExpr + ` AS FinalPrice,
 					ROW_NUMBER() OVER (
 						PARTITION BY 
 							sp.GUID_ES, 
@@ -870,12 +876,8 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				WHERE sp.SupplierID = CAST(@supplierID AS UUID)
 				  AND sp.IsActive = 1
 				  AND sp.GUID_ES IS NOT NULL
-				  -- Если запись сопоставлена (GUID_ES IS NOT NULL), включаем её в сводный прайс независимо от состояния PriceList
-				  -- PriceList проверяется только для несопоставленных записей, но здесь мы уже фильтруем только сопоставленные
 		`
 		args = []interface{}{sql.Named("supplierID", supplierID)}
-
-		// regionID не используется в сводном прайсе - регионы не фильтруются
 
 		query += `
 			)
@@ -895,11 +897,9 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				lp.BatchNumber AS BatchNumber,
 				lp.ExpiryDate AS ExpiryDate,
 				lp.Manufacturer AS Manufacturer,
-				-- Country и Region не отображаются в сводном прайсе - все данные о препарате из ЕС
 				lp.InvoiceDate AS LastPriceDate,
 				lp.MatchMethod,
 				lp.MatchConfidence,
-				-- Дополнительные поля из es_ef2
 				ef2.TRN_NAME_RUS AS TradeName,
 				ef2.DOSAGE AS Dosage,
 				ef2.REESTR_PRICE AS RegistryPrice,
@@ -913,7 +913,6 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				ef2.REGISTR_STATUS AS RegistryStatus
 			FROM LatestPrices lp
 			LEFT JOIN es_ef2 ef2  ON lp.GUID_ES = ef2.GUID_ES
-			-- Region не используется в сводном прайсе
 			LEFT JOIN (
 				SELECT KOD_PRODUCER, MIN(PRODUCER_NAME) AS PRODUCER_NAME
 				FROM es_producer 
@@ -943,8 +942,7 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 					sp.MatchConfidence,
 					sp.RegionID,
 					COALESCE(sp.MarkupPct, 0) AS MarkupPct,
-					sp.Price * (1 + COALESCE(sp.MarkupPct, 0) / 100.0) AS FinalPrice,
-					-- Группируем по GUID_ES, SupplierID, BatchNumber, ExpiryDate, Series, Manufacturer, Country для разделения партий
+					` + finalPriceExpr + ` AS FinalPrice,
 					ROW_NUMBER() OVER (
 						PARTITION BY 
 							sp.GUID_ES, 
@@ -958,12 +956,8 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				FROM SupplierPrice sp 
 				WHERE sp.IsActive = 1
 				  AND sp.GUID_ES IS NOT NULL
-				  -- Если запись сопоставлена (GUID_ES IS NOT NULL), включаем её в сводный прайс независимо от состояния PriceList
-				  -- PriceList проверяется только для несопоставленных записей, но здесь мы уже фильтруем только сопоставленные
 		`
 		args = []interface{}{}
-
-		// regionID не используется в сводном прайсе - регионы не фильтруются
 
 		query += `
 			)
@@ -983,11 +977,9 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				lp.BatchNumber AS BatchNumber,
 				lp.ExpiryDate AS ExpiryDate,
 				lp.Manufacturer AS Manufacturer,
-				-- Country и Region не отображаются в сводном прайсе - все данные о препарате из ЕС
 				lp.InvoiceDate AS LastPriceDate,
 				lp.MatchMethod,
 				lp.MatchConfidence,
-				-- Дополнительные поля из es_ef2
 				ef2.TRN_NAME_RUS AS TradeName,
 				ef2.DOSAGE AS Dosage,
 				ef2.REESTR_PRICE AS RegistryPrice,
@@ -1002,7 +994,6 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 			FROM LatestPrices lp
 			LEFT JOIN es_ef2 ef2  ON lp.GUID_ES = ef2.GUID_ES
 			LEFT JOIN Supplier s  ON lp.SupplierID = s.SupplierID AND s.IsActive = 1
-			-- Region не используется в сводном прайсе - все данные о препарате из ЕС
 			LEFT JOIN (
 				SELECT KOD_PRODUCER, MIN(PRODUCER_NAME) AS PRODUCER_NAME
 				FROM es_producer 

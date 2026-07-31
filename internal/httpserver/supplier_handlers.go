@@ -250,11 +250,11 @@ func (s *Server) handleSCPriceListUpdate(w http.ResponseWriter, r *http.Request)
 		sets = append(sets, fmt.Sprintf("ValidDays=%d", *body.ValidDays))
 	}
 	if body.IsActive != nil {
-		v := 0
 		if *body.IsActive {
-			v = 1
+			sets = append(sets, "IsActive=TRUE")
+		} else {
+			sets = append(sets, "IsActive=FALSE")
 		}
-		sets = append(sets, fmt.Sprintf("IsActive=%d", v))
 	}
 	if len(sets) == 0 {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Нечего обновлять"})
@@ -703,34 +703,34 @@ func (s *Server) handleSCClients(w http.ResponseWriter, r *http.Request) {
 	regionID := r.URL.Query().Get("region_id")
 
 	q := `SELECT DISTINCT
-			CAST(b.BuyerID AS TEXT) AS BuyerID,
-			b.Name AS Name,
-			COALESCE(b.INN,'') AS INN,
-			COALESCE(r.Name,'') AS Region,
-			COALESCE(bl.Address,'') AS Address,
-			COALESCE(cfg.IsActive, 1) AS IsActive,
-			COALESCE(cfg.PriceColumn, 'Базовая') AS PriceColumn,
-			COALESCE(cfg.MarkupPct, 0) AS MarkupPct,
-			COALESCE(cfg.ClientCode, '') AS ClientCode,
-			COALESCE(cfg.PaymentCode, '') AS PaymentCode,
-			COALESCE(cfg.DeliveryCode, '') AS DeliveryCode,
-			COALESCE(cfg.ControlMinOrder, 0) AS ControlMinOrder,
-			COALESCE(cfg.MinOrderAmount, 0) AS MinOrderAmount,
-			COALESCE(cfg.MinReorderAmount, 0) AS MinReorderAmount,
-			cfg.UpdatedAt AS UpdatedAt
-		FROM Buyer b
-		INNER JOIN SupplierRegion sr
-			ON sr.RegionID = b.RegionID
-			AND sr.SupplierID = CAST(@sid AS UUID)
-			AND sr.IsActive = 1
-		LEFT JOIN Region r ON r.RegionID = b.RegionID
-		LEFT JOIN BuyerLocation bl ON bl.BuyerID = b.BuyerID AND bl.IsDefault = 1
-		LEFT JOIN SupplierBuyerConfig cfg ON cfg.BuyerID = b.BuyerID AND cfg.SupplierID = CAST(@sid AS UUID)
-		WHERE b.IsActive = 1`
+			CAST(b."BuyerID" AS TEXT) AS "BuyerID",
+			b."Name" AS "Name",
+			COALESCE(b."INN",'') AS "INN",
+			COALESCE(r."Name",'') AS "Region",
+			COALESCE(bl."Address",'') AS "Address",
+			COALESCE(cfg."IsActive", TRUE) AS "IsActive",
+			COALESCE(cfg."PriceColumn", 'Базовая') AS "PriceColumn",
+			COALESCE(cfg."MarkupPct", 0) AS "MarkupPct",
+			COALESCE(cfg."ClientCode", '') AS "ClientCode",
+			COALESCE(cfg."PaymentCode", '') AS "PaymentCode",
+			COALESCE(cfg."DeliveryCode", '') AS "DeliveryCode",
+			COALESCE(cfg."ControlMinOrder", FALSE) AS "ControlMinOrder",
+			COALESCE(cfg."MinOrderAmount", 0) AS "MinOrderAmount",
+			COALESCE(cfg."MinReorderAmount", 0) AS "MinReorderAmount",
+			cfg."UpdatedAt" AS "UpdatedAt"
+		FROM "Buyer" b
+		INNER JOIN "SupplierRegion" sr
+			ON sr."RegionID" = b."RegionID"
+			AND sr."SupplierID" = CAST(@sid AS UUID)
+			AND sr."IsActive" = TRUE
+		LEFT JOIN "Region" r ON r."RegionID" = b."RegionID"
+		LEFT JOIN "BuyerLocation" bl ON bl."BuyerID" = b."BuyerID" AND bl."IsDefault" = TRUE
+		LEFT JOIN "SupplierBuyerConfig" cfg ON cfg."BuyerID" = b."BuyerID" AND cfg."SupplierID" = CAST(@sid AS UUID)
+		WHERE b."IsActive" = TRUE`
 	if regionID != "" {
-		q += ` AND b.RegionID = CAST(@rid AS UUID)`
+		q += ` AND b."RegionID" = CAST(@rid AS UUID)`
 	}
-	q += ` ORDER BY b.Name`
+	q += ` ORDER BY b."Name"`
 
 	type Client struct {
 		BuyerID          string     `json:"buyer_id"`
@@ -805,7 +805,11 @@ func (s *Server) handleSCClientUpdate(w http.ResponseWriter, r *http.Request, si
 
 	sets := []string{"UpdatedAt=(NOW() AT TIME ZONE 'utc')"}
 	if body.IsActive != nil {
-		sets = append(sets, fmt.Sprintf("IsActive=%d", boolToInt(*body.IsActive)))
+		if *body.IsActive {
+			sets = append(sets, "IsActive=TRUE")
+		} else {
+			sets = append(sets, "IsActive=FALSE")
+		}
 	}
 	if body.PriceColumn != nil {
 		sets = append(sets, "PriceColumn=@pc")
@@ -823,7 +827,11 @@ func (s *Server) handleSCClientUpdate(w http.ResponseWriter, r *http.Request, si
 		sets = append(sets, "DeliveryCode=@dc")
 	}
 	if body.ControlMinOrder != nil {
-		sets = append(sets, fmt.Sprintf("ControlMinOrder=%d", boolToInt(*body.ControlMinOrder)))
+		if *body.ControlMinOrder {
+			sets = append(sets, "ControlMinOrder=TRUE")
+		} else {
+			sets = append(sets, "ControlMinOrder=FALSE")
+		}
 	}
 	if body.MinOrderAmount != nil {
 		sets = append(sets, "MinOrderAmount=@moa")

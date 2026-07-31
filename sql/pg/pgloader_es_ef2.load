@@ -1,0 +1,26 @@
+-- Загрузка справочника препаратов es_ef2 из MSSQL elfisa в PostgreSQL elfisa.
+-- Запуск на сервере (где есть доступ к MSSQL-источнику):
+--   pgloader sql/pg/pgloader_es_ef2.load
+--
+-- Перед запуском замените PASSWORD и хост MSSQL (старый сервер или localhost после RESTORE .bak).
+
+LOAD TABLE "es_ef2"
+  FROM mssql://SA:PASSWORD@193.188.23.166/elfisa
+  INTO postgresql://es_api:24PharmData@127.0.0.1:5432/elfisa
+  WITH truncate, disable triggers, create no tables, reset sequences,
+       workers = 4, concurrency = 1, batch rows = 2000
+
+CAST type uniqueidentifier to uuid drop typemod,
+     type nvarchar to text drop typemod,
+     type varchar to text drop typemod,
+     type datetime2 to timestamptz drop default drop not null using zero-dates-to-null,
+     type datetime to timestamptz drop default drop not null using zero-dates-to-null,
+     type bit to boolean drop typemod,
+     type money to numeric drop typemod,
+     type bigint to bigint drop typemod,
+     type varbinary to bytea drop typemod
+
+ALTER TABLE NAMES MATCHING "es_ef2" IN TARGET SET SCHEMA 'public';
+
+BEFORE LOAD DO
+  $$ CREATE EXTENSION IF NOT EXISTS pgcrypto; $$;

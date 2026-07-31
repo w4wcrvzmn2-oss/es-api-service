@@ -15,11 +15,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/LindsayBradford/go-dbf/godbf"
 	"github.com/google/uuid"
 )
 
-// validateDBFStructure проверяет структуру DBF файла и соответствие полей маппингу
+// validateDBFStructure проверяет структуру файла данных и соответствие полей маппингу.
 func (di *DBFImporter) validateDBFStructure(dbfFieldNames []string, mappings []models.DBFFieldMapping) []string {
 	var errors []string
 
@@ -94,13 +93,13 @@ func (di *DBFImporter) validateDBFStructure(dbfFieldNames []string, mappings []m
 	return errors
 }
 
-// DBFImporter обрабатывает импорт DBF файлов
+// DBFImporter обрабатывает импорт файлов прайсов (DBF/Excel).
 type DBFImporter struct {
 	database *db.Database
 	logger   *logger.Logger
 }
 
-// NewDBFImporter создает новый импортер DBF
+// NewDBFImporter создает новый импортер файлов прайсов.
 func NewDBFImporter(database *db.Database, logger *logger.Logger) *DBFImporter {
 	return &DBFImporter{
 		database: database,
@@ -108,10 +107,10 @@ func NewDBFImporter(database *db.Database, logger *logger.Logger) *DBFImporter {
 	}
 }
 
-// ImportInvoice импортирует накладную из DBF файла
+// ImportInvoice импортирует накладную из файла прайса.
 func (di *DBFImporter) ImportInvoice(ctx context.Context, importPointID, filePath string, mappings []models.DBFFieldMapping) (*models.InvoiceImport, error) {
 	if di.logger != nil {
-		di.logger.Info("Начало импорта DBF файла: ImportPointID=%s, FilePath=%s", importPointID, filePath)
+		di.logger.Info("Начало импорта файла прайса: ImportPointID=%s, FilePath=%s", importPointID, filePath)
 	}
 
 	// Проверяем существование файла
@@ -155,25 +154,25 @@ func (di *DBFImporter) ImportInvoice(ctx context.Context, importPointID, filePat
 		di.logger.Info("Запись об импорте создана: InvoiceImportID=%s", invoiceImport.InvoiceImportID)
 	}
 
-	// Открываем DBF файл
+	// Читаем файл прайса целиком через общий reader для DBF/Excel.
 	if di.logger != nil {
-		di.logger.Info("Открытие DBF файла: %s", filePath)
+		di.logger.Info("Чтение файла прайса: %s", filePath)
 	}
-	dbfTable, err := godbf.NewFromFile(filePath, "CP866") // Кодировка для русских символов
+	fieldNames, records, err := ReadTabularFile(filePath)
 	if err != nil {
-		errMsg := fmt.Sprintf("не удалось открыть DBF файл: %v", err)
+		errMsg := fmt.Sprintf("не удалось открыть файл данных: %v", err)
 		if di.logger != nil {
-			di.logger.Error("Ошибка открытия DBF файла: %s, ошибка: %v", filePath, err)
+			di.logger.Error("Ошибка чтения файла данных: %s, ошибка: %v", filePath, err)
 		}
 		invoiceImport.ImportStatus = "FAILED"
 		invoiceImport.ErrorMessage = &errMsg
 		di.updateInvoiceImport(ctx, invoiceImport)
-		return nil, fmt.Errorf("не удалось открыть DBF файл: %w", err)
+		return nil, fmt.Errorf("не удалось открыть файл данных: %w", err)
 	}
 
-	invoiceImport.RecordsTotal = dbfTable.NumberOfRecords()
+	invoiceImport.RecordsTotal = len(records)
 	if di.logger != nil {
-		di.logger.Info("DBF файл открыт успешно: записей=%d", invoiceImport.RecordsTotal)
+		di.logger.Info("Файл прайса прочитан успешно: формат=%s, записей=%d", DetectDataFileFormat(filePath), invoiceImport.RecordsTotal)
 	}
 
 	// Получаем маппинг полей
@@ -217,199 +216,30 @@ func (di *DBFImporter) ImportInvoice(ctx context.Context, importPointID, filePat
 		di.logger.Info("SupplierID получен: %s", supplierID)
 	}
 
-	// Получаем имена полей из DBF файла
-	fieldNames := dbfTable.FieldNames()
 	if di.logger != nil {
-		di.logger.Info("Поля в DBF файле (%d): %v", len(fieldNames), fieldNames)
+		di.logger.Info("Поля в файле данных (%d): %v", len(fieldNames), fieldNames)
 	}
 
-	// ВАЛИДАЦИЯ: Проверяем структуру и соответствие полей перед импортом
+	// Проверяем структуру и соответствие полей перед импортом.
 	validationErrors := di.validateDBFStructure(fieldNames, mappings)
 	if len(validationErrors) > 0 {
-		errMsg := fmt.Sprintf("Ошибки валидации структуры DBF файла:\n%s", strings.Join(validationErrors, "\n"))
+		errMsg := fmt.Sprintf("Ошибки валидации структуры файла данных:\n%s", strings.Join(validationErrors, "\n"))
 		if di.logger != nil {
-			di.logger.Error("Ошибки валидации DBF файла %s:\n%s", filePath, errMsg)
+			di.logger.Error("Ошибки валидации файла данных %s:\n%s", filePath, errMsg)
 		}
 		invoiceImport.ImportStatus = "FAILED"
 		invoiceImport.ErrorMessage = &errMsg
 		di.updateInvoiceImport(ctx, invoiceImport)
-		return nil, fmt.Errorf("ошибки валидации структуры DBF файла: %s", strings.Join(validationErrors, "; "))
+		return nil, fmt.Errorf("ошибки валидации структуры файла данных: %s", strings.Join(validationErrors, "; "))
 	}
 
 	if di.logger != nil {
-		di.logger.Info("Валидация структуры DBF файла пройдена успешно. Начинаем импорт записей...")
+		di.logger.Info("Валидация структуры файла данных пройдена успешно. Начинаем импорт записей...")
 	}
 
-	// Обрабатываем каждую запись в многопоточном режиме
-	headerRecordCount := dbfTable.NumberOfRecords()
-	if di.logger != nil {
-		di.logger.Info("DBF заголовок сообщает о записях: %d", headerRecordCount)
-	}
-
-	// Читаем ВСЕ записи из DBF, даже если их больше чем в заголовке
-	// Пробуем читать до тех пор, пока не получим ошибку (EOF или другая)
-	if di.logger != nil {
-		di.logger.Info("Начинаем чтение всех записей из DBF файла (будем читать до ошибки)...")
-	}
-
-	records := make([]map[string]interface{}, 0, headerRecordCount)
-	readCount := 0
-	readErrors := 0
-	maxAttempts := headerRecordCount * 2 // Пробуем читать в 2 раза больше, чем в заголовке (на случай если заголовок неверный)
-	consecutiveErrors := 0
-	maxConsecutiveErrors := 10 // Максимум 10 подряд идущих ошибок перед остановкой
-
-	// Обработка паник при чтении - сохраняем панику для обработки после цикла
-	var panicError interface{}
-	defer func() {
-		if r := recover(); r != nil {
-			panicError = r
-			if di.logger != nil {
-				di.logger.Error("ПАНИКА при чтении записей из DBF: %v", r)
-				di.logger.Error("Stack: %+v", r)
-				if readCount > 0 {
-					di.logger.Info("До паники успешно прочитано %d записей", readCount)
-				}
-			}
-		}
-	}()
-
-	for i := 0; i < maxAttempts; i++ {
-		// Проверяем контекст при чтении
-		select {
-		case <-ctx.Done():
-			if di.logger != nil {
-				di.logger.Error("Чтение записей прервано: контекст отменен. Прочитано %d записей", readCount)
-			}
-			goto readingDone
-		default:
-		}
-
-		// Проверяем, была ли паника в предыдущей итерации
-		if panicError != nil {
-			goto readingDone
-		}
-
-		// Обрабатываем каждую запись с защитой от паник
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					panicError = r
-					if di.logger != nil && readCount < 10 {
-						di.logger.Error("Паника при чтении записи %d: %v", i, r)
-					}
-				}
-			}()
-
-			record := make(map[string]interface{})
-			recordHasError := false
-			allFieldsError := true
-
-			// Пробуем прочитать хотя бы одно поле, чтобы проверить, существует ли запись
-			for _, fieldName := range fieldNames {
-				fieldValue, err := dbfTable.FieldValueByName(i, fieldName)
-				if err != nil {
-					if !recordHasError {
-						recordHasError = true
-					}
-					// Если это первое поле и ошибка, возможно запись не существует
-					if fieldName == fieldNames[0] {
-						// Проверяем тип ошибки - если это ошибка выхода за границы, прекращаем чтение
-						errMsg := ""
-						if err != nil {
-							errMsg = err.Error()
-						}
-						if errMsg == "index out of range" ||
-							strings.Contains(errMsg, "out of range") ||
-							strings.Contains(errMsg, "EOF") ||
-							strings.Contains(errMsg, "index") {
-							consecutiveErrors++
-							if consecutiveErrors >= maxConsecutiveErrors {
-								if di.logger != nil {
-									di.logger.Info("Достигнут конец файла: %d подряд идущих ошибок при чтении записи %d. Всего прочитано: %d",
-										consecutiveErrors, i, readCount)
-								}
-								return // Выходим из анонимной функции
-							}
-							break // Выходим из цикла по полям, переходим к следующей записи
-						}
-					}
-					fieldValue = ""
-				} else {
-					allFieldsError = false
-					record[fieldName] = fieldValue
-				}
-			}
-
-			// Если все поля дали ошибку (запись не существует), прекращаем чтение
-			if allFieldsError && recordHasError {
-				consecutiveErrors++
-				if consecutiveErrors >= maxConsecutiveErrors {
-					if di.logger != nil {
-						di.logger.Info("Достигнут конец файла: %d подряд идущих ошибок при чтении записи %d. Всего прочитано: %d",
-							consecutiveErrors, i, readCount)
-					}
-					return // Выходим из анонимной функции
-				}
-				return // Пропускаем эту запись, пробуем следующую
-			}
-
-			// Если хотя бы одно поле прочитано успешно, считаем запись валидной
-			if !allFieldsError {
-				// Заполняем остальные поля, даже если были ошибки
-				for _, fieldName := range fieldNames {
-					if _, exists := record[fieldName]; !exists {
-						fieldValue, err := dbfTable.FieldValueByName(i, fieldName)
-						if err != nil {
-							record[fieldName] = ""
-							if !recordHasError {
-								readErrors++
-								recordHasError = true
-							}
-						} else {
-							record[fieldName] = fieldValue
-						}
-					}
-				}
-
-				records = append(records, record)
-				readCount++
-				consecutiveErrors = 0 // Сбрасываем счетчик ошибок при успешном чтении
-
-				// Логирование прогресса чтения убрано - слишком много сообщений
-			} else {
-				consecutiveErrors++
-				if consecutiveErrors >= maxConsecutiveErrors {
-					if di.logger != nil {
-						di.logger.Info("Достигнут конец файла: %d подряд идущих ошибок. Всего прочитано: %d", consecutiveErrors, readCount)
-					}
-					return // Выходим из анонимной функции
-				}
-			}
-		}() // Конец анонимной функции для обработки паник
-
-		// Если была паника, прекращаем чтение
-		if panicError != nil {
-			goto readingDone
-		}
-	}
-
-readingDone:
-	// Проверяем, была ли паника
-	if panicError != nil {
-		if di.logger != nil {
-			di.logger.Warn("Чтение прервано из-за паники, но продолжаем с уже прочитанными записями: %d", readCount)
-		}
-		// Продолжаем работу с уже прочитанными записями
-	}
-
-	totalRecords := readCount
+	totalRecords := len(records)
 	if totalRecords == 0 {
-		// Если ничего не прочитано, возвращаем ошибку
-		errMsg := "Не удалось прочитать ни одной записи из DBF файла"
-		if panicError != nil {
-			errMsg = fmt.Sprintf("Ошибка чтения DBF файла: %v", panicError)
-		}
+		errMsg := "Не удалось прочитать ни одной записи из файла данных"
 		if di.logger != nil {
 			di.logger.Error("Ошибка: %s", errMsg)
 		}
@@ -420,33 +250,19 @@ readingDone:
 	}
 
 	if di.logger != nil {
-		di.logger.Info("Чтение записей завершено: прочитано %d записей (заголовок сообщал: %d), ошибок чтения полей: %d",
-			readCount, headerRecordCount, readErrors)
-		if readCount != headerRecordCount {
-			if readCount > headerRecordCount {
-				di.logger.Info("Прочитано больше записей, чем в заголовке! Заголовок: %d, фактически: %d", headerRecordCount, readCount)
-			} else {
-				di.logger.Warn("Прочитано меньше записей, чем в заголовке. Заголовок: %d, фактически: %d", headerRecordCount, readCount)
-			}
-		}
-		if panicError != nil {
-			di.logger.Warn("Чтение было прервано паникой, но продолжаем обработку с прочитанными %d записями", readCount)
-		}
 		di.logger.Info("Начинаем параллельную обработку %d записей...", totalRecords)
 	}
 
 	// Обновляем счетчик в invoiceImport на фактическое количество
 	invoiceImport.RecordsTotal = totalRecords
 
-	// Количество воркеров (параллельных потоков обработки)
-	// Оптимизировано для баланса между производительностью и нагрузкой на БД
-	numWorkers := 48 // Разумное количество потоков
+	// Количество воркеров ограничиваем консервативно:
+	// массовый импорт и последующий матчинг не должны выбивать локальный PostgreSQL по соединениям.
+	numWorkers := 8
 	if totalRecords < 100 {
-		numWorkers = 4 // Для маленьких файлов меньше потоков
+		numWorkers = 2
 	} else if totalRecords < 1000 {
-		numWorkers = 16
-	} else if totalRecords < 10000 {
-		numWorkers = 32
+		numWorkers = 4
 	}
 	if totalRecords < numWorkers {
 		numWorkers = totalRecords
@@ -490,7 +306,7 @@ readingDone:
 			// Batch insert для ускорения - накапливаем записи и вставляем батчами
 			batchSize := 100
 			batch := make([]*models.InvoiceData, 0, batchSize)
-			
+
 			for recordIndex := range recordChan {
 				// Проверяем контекст на отмену
 				select {
@@ -912,7 +728,7 @@ func (di *DBFImporter) convertValue(value interface{}, dataType string) (interfa
 			}
 			// Расширенный список форматов дат для DBF
 			layouts := []string{
-				"2006-01-02",           // ISO
+				"2006-01-02",          // ISO
 				"02.01.2006",          // DD.MM.YYYY
 				"02/01/2006",          // DD/MM/YYYY
 				"2006-01-02T15:04:05", // ISO с временем

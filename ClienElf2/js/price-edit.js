@@ -93,6 +93,9 @@ function buildCron() {
         case 'interval': {
             const iv = document.getElementById('schedInterval').value;
             if (iv === '5m') return '*/5 * * * *';
+            if (iv === '15m') return '*/15 * * * *';
+            if (iv === '20m') return '*/20 * * * *';
+            if (iv === '30m') return '*/30 * * * *';
             if (iv === '90m') return '@every 1h30m';
             return `0 */${iv} * * *`;
         }

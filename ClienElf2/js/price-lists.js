@@ -21,7 +21,7 @@ async function loadPriceLists(opts = {}) {
 
         if (allPriceLists.length > 0) {
             tbody.innerHTML = allPriceLists.map(price => {
-                const lastUpdate = price.last_update_at ? new Date(price.last_update_at).toLocaleDateString('ru') : '-';
+                const lastUpdate = formatDateTime(price.last_update_at);
                 const unlinkedCount = price.unmatched_count ?? price.prices_count ?? 0;
                 const cnt = price.prices_count ?? 0;
 
@@ -39,6 +39,7 @@ async function loadPriceLists(opts = {}) {
                     <td class="text-center text-nowrap">
                         <a href="price-view.html?id=${price.price_list_id}" class="btn btn-outline-primary btn-sm me-1" title="Просмотр позиций"><i class="bi bi-eye"></i></a>
                         <a href="price-edit.html?id=${price.price_list_id}" class="btn btn-outline-secondary btn-sm me-1" title="Редактировать"><i class="bi bi-pencil"></i></a>
+                        <button class="btn btn-outline-success btn-sm me-1" onclick="forceFetchPriceList('${price.price_list_id}', this)" title="Обновить сейчас"><i class="bi bi-arrow-repeat"></i></button>
                         <button class="btn btn-outline-info btn-sm" onclick="showPriceListBuyers('${price.price_list_id}')" title="Подключённые клиенты"><i class="bi bi-people"></i></button>
                     </td>
                     <td class="text-center">
@@ -64,6 +65,20 @@ async function loadPriceLists(opts = {}) {
             tbody.innerHTML = '<tr><td colspan="8" class="text-center text-danger py-3">Ошибка загрузки данных</td></tr>';
         }
     }
+}
+
+function formatDateTime(value) {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return escapeHtml(String(value));
+    return date.toLocaleString('ru-RU', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
 }
 
 async function togglePriceActive(priceId, isActive) {
@@ -109,6 +124,28 @@ async function deletePriceList(priceId, btn) {
             row.style.pointerEvents = '';
         }
         Toast.error('Ошибка удаления', error.message);
+    }
+}
+
+async function forceFetchPriceList(priceId, btn) {
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    }
+    try {
+        const result = await API.post(`/api/price-lists/${priceId}/fetch`, {});
+        if (!result) throw new Error('Не удалось запустить обновление прайса');
+        Toast.success('Обновление запущено', result.message || 'Ручной забор прайса стартовал');
+        setTimeout(() => { loadPriceLists({ silent: true }); }, 1500);
+    } catch (error) {
+        console.error('Ошибка ручного обновления прайса:', error);
+        Toast.error('Ошибка', error.message || 'Не удалось запустить обновление прайса');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
     }
 }
 

@@ -276,6 +276,121 @@ func nextUpdateOr(t *time.Time, fallback string) string {
 	return t.Format("2006-01-02 15:04:05")
 }
 
+// ForceFetchPriceListNow запускает немедленный забор конкретного прайс-листа,
+// не дожидаясь минутной проверки планировщика.
+func (pls *PriceListScheduler) ForceFetchPriceListNow(ctx context.Context, priceListID string) error {
+	query := `
+		SELECT 
+			CAST(pl.PriceListID AS TEXT) AS PriceListID,
+			CAST(pl.ImportPointID AS TEXT) AS ImportPointID,
+			pl.ScheduleCron,
+			ip.SourceFilePath,
+			ip.DBFFilePath,
+			ip.Name AS ImportPointName,
+			s.Name AS SupplierName,
+			ip.SourceType,
+			ip.FtpHost, ip.FtpPort, ip.FtpUser, ip.FtpPassword, ip.FtpRemotePath
+		FROM PriceList pl
+		INNER JOIN ImportPoint ip ON pl.ImportPointID = ip.ImportPointID
+		INNER JOIN Supplier s ON pl.SupplierID = s.SupplierID
+		WHERE pl.PriceListID = CAST(@priceListID AS UUID)
+		  AND pl.IsActive = 1
+		  AND pl.ImportPointID IS NOT NULL
+		  AND ip.IsActive = 1
+		LIMIT 1
+	`
+
+	var importPointID, scheduleCron, importPointName, supplierName string
+	var sourceFilePath, dbfFilePath sql.NullString
+	var sourceType sql.NullString
+	var ftpHost, ftpUser, ftpPassword, ftpRemotePath sql.NullString
+	var ftpPort sql.NullInt32
+
+	err := pls.database.GORMWith(ctx).Raw(query, sql.Named("priceListID", priceListID)).Row().Scan(
+		&priceListID, &importPointID, &scheduleCron,
+		&sourceFilePath, &dbfFilePath, &importPointName, &supplierName,
+		&sourceType, &ftpHost, &ftpPort, &ftpUser, &ftpPassword, &ftpRemotePath,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("прайс не найден, неактивен или у него нет активной точки импорта")
+		}
+		return fmt.Errorf("ошибка получения прайс-листа: %w", err)
+	}
+
+	checkActiveQuery := `
+		SELECT COUNT(*) 
+		FROM InvoiceImport 
+		WHERE ImportPointID = CAST(@importPointID AS UUID)
+		  AND ImportStatus = 'PROCESSING'
+		  AND StartedAt > DATEADD(minute, -30, (NOW() AT TIME ZONE 'utc'))
+	`
+	var activeCount int
+	err = pls.database.GORMWith(ctx).Raw(checkActiveQuery, sql.Named("importPointID", importPointID)).Row().Scan(&activeCount)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("ошибка проверки активных импортов: %w", err)
+	}
+	if activeCount > 0 {
+		return fmt.Errorf("для этой точки импорта уже выполняется импорт")
+	}
+
+	if pls.logger != nil {
+		pls.logger.Info("Запуск ручного обновления прайс-листа: %s (Поставщик: %s, Точка: %s, Тип: %s)",
+			priceListID, supplierName, importPointName, sourceType.String)
+	}
+
+	var importErr error
+	st := ""
+	if sourceType.Valid {
+		st = sourceType.String
+	}
+
+	if st == "ftp" && ftpHost.Valid && ftpHost.String != "" {
+		port := 21
+		if ftpPort.Valid {
+			port = int(ftpPort.Int32)
+		}
+		user := "anonymous"
+		if ftpUser.Valid && ftpUser.String != "" {
+			user = ftpUser.String
+		}
+		pass := ""
+		if ftpPassword.Valid {
+			pass = ftpPassword.String
+		}
+		remotePath := "/"
+		if ftpRemotePath.Valid && ftpRemotePath.String != "" {
+			remotePath = ftpRemotePath.String
+		}
+		importErr = pls.updatePriceListFromFTP(ctx, priceListID, importPointID, importPointName, ftpHost.String, port, user, pass, remotePath)
+	} else {
+		filePath := ""
+		if sourceFilePath.Valid && sourceFilePath.String != "" {
+			filePath = sourceFilePath.String
+		} else if dbfFilePath.Valid && dbfFilePath.String != "" {
+			filePath = dbfFilePath.String
+		}
+		importErr = pls.updatePriceListFromImportPoint(ctx, priceListID, importPointID, filePath)
+	}
+
+	if importErr != nil {
+		if pls.logger != nil {
+			pls.logger.Error("Ошибка ручного обновления прайс-листа %s: %v", priceListID, importErr)
+		}
+		return importErr
+	}
+
+	nowUTC := time.Now().UTC()
+	nextUpdate := pls.calculateNextUpdate(scheduleCron, time.Now())
+	if nextUpdate != nil {
+		pls.updateLastAndNextUpdate(ctx, priceListID, nowUTC, nextUpdate.UTC())
+	} else {
+		pls.updateNextUpdateAt(ctx, priceListID, nowUTC)
+	}
+
+	return nil
+}
+
 // updatePriceListFromFTP скачивает файл с FTP и запускает импорт для прайс-листа
 func (pls *PriceListScheduler) updatePriceListFromFTP(ctx context.Context, priceListID, importPointID, pointName, host string, port int, user, pass, remotePath string) error {
 	addr := fmt.Sprintf("%s:%d", host, port)
@@ -312,31 +427,15 @@ func (pls *PriceListScheduler) updatePriceListFromFTP(ctx context.Context, price
 		if pls.logger != nil {
 			pls.logger.Info("[PLS/%s] Скачивание FTP-файла: %s", pointName, remoteFile)
 		}
-
-		resp, err := conn.Retr(remoteFile)
-		if err != nil {
-			if pls.logger != nil {
-				pls.logger.Error("[PLS/%s] Ошибка скачивания %s: %v", pointName, remoteFile, err)
-			}
-			continue
-		}
-
 		tmpDir := filepath.Join(os.TempDir(), "elfapi_ftp")
 		os.MkdirAll(tmpDir, 0755)
 		localPath := filepath.Join(tmpDir, entry.Name)
 
-		outFile, err := os.Create(localPath)
-		if err != nil {
-			resp.Close()
-			return fmt.Errorf("ошибка создания файла %s: %w", localPath, err)
-		}
-
-		_, err = io.Copy(outFile, resp)
-		outFile.Close()
-		resp.Close()
-		if err != nil {
-			os.Remove(localPath)
-			return fmt.Errorf("ошибка записи файла %s: %w", localPath, err)
+		if err := pls.downloadFTPFile(conn, pointName, remoteFile, localPath, entry.Size); err != nil {
+			if pls.logger != nil {
+				pls.logger.Error("[PLS/%s] Ошибка скачивания %s: %v", pointName, remoteFile, err)
+			}
+			continue
 		}
 
 		importErr := pls.updatePriceListFromImportPoint(ctx, priceListID, importPointID, localPath)
@@ -356,6 +455,60 @@ func (pls *PriceListScheduler) updatePriceListFromFTP(ctx context.Context, price
 		pls.logger.Info("[PLS/%s] На FTP %s нет файлов для импорта в %s — пропуск до следующего окна", pointName, addr, remotePath)
 	}
 	return errFTPNoNewFiles
+}
+
+func (pls *PriceListScheduler) downloadFTPFile(conn *ftp.ServerConn, pointName, remoteFile, localPath string, expectedSize uint64) error {
+	const maxAttempts = 3
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		resp, err := conn.Retr(remoteFile)
+		if err != nil {
+			if attempt == maxAttempts {
+				return err
+			}
+			continue
+		}
+
+		outFile, err := os.Create(localPath)
+		if err != nil {
+			resp.Close()
+			return fmt.Errorf("ошибка создания файла %s: %w", localPath, err)
+		}
+
+		written, copyErr := io.Copy(outFile, resp)
+		closeErr := outFile.Close()
+		resp.Close()
+		if copyErr != nil {
+			_ = os.Remove(localPath)
+			if attempt == maxAttempts {
+				return fmt.Errorf("ошибка записи файла %s: %w", localPath, copyErr)
+			}
+			continue
+		}
+		if closeErr != nil {
+			_ = os.Remove(localPath)
+			if attempt == maxAttempts {
+				return fmt.Errorf("ошибка закрытия файла %s: %w", localPath, closeErr)
+			}
+			continue
+		}
+
+		if expectedSize > 0 && uint64(written) != expectedSize {
+			_ = os.Remove(localPath)
+			if pls.logger != nil {
+				pls.logger.Warn("[PLS/%s] FTP-файл скачан не полностью (%d из %d байт), попытка %d/%d",
+					pointName, written, expectedSize, attempt, maxAttempts)
+			}
+			if attempt == maxAttempts {
+				return fmt.Errorf("неполная загрузка FTP-файла: %d из %d байт", written, expectedSize)
+			}
+			continue
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("не удалось скачать FTP-файл %s", remoteFile)
 }
 
 // calculateNextUpdate вычисляет следующее время обновления на основе CRON выражения

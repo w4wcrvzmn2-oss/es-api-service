@@ -35,17 +35,19 @@ func (s *Server) handleMonitoring(w http.ResponseWriter, r *http.Request) {
 		return n
 	}
 
-	suppliers := scalar(`SELECT COUNT(*) FROM Supplier WHERE IsActive = 1`)
-	buyers := scalar(`SELECT COUNT(*) FROM Buyer WHERE IsActive = 1`)
-	priceLists := scalar(`SELECT COUNT(*) FROM PriceList`)
+	suppliers := scalar(`SELECT COUNT(*) FROM Supplier WHERE IsActive = TRUE`)
+	buyers := scalar(`SELECT COUNT(*) FROM Buyer WHERE IsActive = TRUE`)
+	priceLists := scalar(`SELECT COUNT(*) FROM PriceList WHERE IsActive = TRUE`)
 
-	// Прайсы: сопоставлено / не сопоставлено среди активных.
+	// Прайсы: только позиции активных прайс-листов (без хвостов старых импортов).
 	var matched, unmatched int64
 	_ = g.Raw(`
 		SELECT
 			COUNT(CASE WHEN sp.GUID_ES IS NOT NULL AND CAST(sp.GUID_ES AS TEXT) <> '' THEN 1 END),
 			COUNT(CASE WHEN sp.GUID_ES IS NULL OR CAST(sp.GUID_ES AS TEXT) = '' THEN 1 END)
-		FROM SupplierPrice sp WHERE sp.IsActive = 1
+		FROM SupplierPrice sp
+		INNER JOIN PriceList pl ON pl.PriceListID = sp.PriceListID AND pl.IsActive = TRUE
+		WHERE sp.IsActive = TRUE
 	`).Row().Scan(&matched, &unmatched)
 
 	// Заказы: всего, сегодня (UTC), сумма.

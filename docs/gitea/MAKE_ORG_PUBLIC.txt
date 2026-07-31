@@ -1,0 +1,9 @@
+# One-time: make org visible so desktop clients can read Releases without a token.
+# Or keep private and put a read-only token into desktop UpdateApiToken.
+#
+# Run in browser as admin:
+#   https://git.24pharmdata.ru/org/pharmdata/settings
+#   Visibility = Public  -> Save
+#
+# Then verify:
+#   curl https://git.24pharmdata.ru/api/v1/repos/pharmdata/elfisa-pharmacy/releases/latest

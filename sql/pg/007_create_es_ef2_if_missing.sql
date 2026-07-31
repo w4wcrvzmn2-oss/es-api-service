@@ -1,0 +1,32 @@
+-- Создать es_ef2 если таблицы ещё нет (миграция PG без полной схемы).
+-- psql -U es_api -d elfisa -f 007_create_es_ef2_if_missing.sql
+
+CREATE TABLE IF NOT EXISTS "es_ef2" (
+    "GUID_ES" UUID NOT NULL PRIMARY KEY,
+    "NAME" TEXT NOT NULL,
+    "BARCODE" TEXT,
+    "CUREFORM_COD" TEXT,
+    "CUREFORM_NAME" TEXT,
+    "INN_NAME_RUS" TEXT,
+    "INN_NAME_LAT" TEXT,
+    "PRODUCER_COD" BIGINT,
+    "TRN_NAME_RUS" TEXT,
+    "TRN_NAME_LAT" TEXT,
+    "UPAK_COD" BIGINT,
+    "DATA_AN" TIMESTAMPTZ,
+    "DATA_REG" TIMESTAMPTZ,
+    "DOSAGE" TEXT,
+    "KOD_ES" BIGINT NOT NULL DEFAULT 0,
+    "NDS_RATE" NUMERIC(19,4) NOT NULL DEFAULT 0,
+    "ID_ES" BIGINT NOT NULL DEFAULT 0,
+    "DISCRIBE" TEXT,
+    "RATING" INTEGER NOT NULL DEFAULT 0,
+    "UPDATED" TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    "DELETED" TIMESTAMPTZ,
+    "TS" BYTEA NOT NULL DEFAULT '\x00',
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    "updated_at" TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    "is_active" BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+SELECT COUNT(*)::bigint AS es_ef2_rows FROM "es_ef2";

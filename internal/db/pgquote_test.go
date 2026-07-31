@@ -83,6 +83,10 @@ func TestPreparePGSQL_Bool(t *testing.T) {
 			`AND IsActive=1`,
 			`AND "IsActive" = TRUE`,
 		},
+		{
+			`VALUES (@itemCode, COALESCE(@price, 0), COALESCE(@IsActive, 0))`,
+			`VALUES (@itemCode, COALESCE(@price, 0), COALESCE(@"IsActive", FALSE))`,
+		},
 	}
 	for _, c := range cases {
 		got := PreparePGSQL(c.in)

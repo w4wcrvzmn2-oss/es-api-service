@@ -12,7 +12,7 @@ import (
 	"es_api_service/internal/dbfimport"
 )
 
-// handleUploadDBF обрабатывает загрузку DBF/ZIP файла на сервер.
+// handleUploadDBF обрабатывает загрузку файла прайса на сервер.
 func (s *Server) handleUploadDBF(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
@@ -41,8 +41,8 @@ func (s *Server) handleUploadDBF(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	ext := strings.ToLower(filepath.Ext(handler.Filename))
-	if ext != ".dbf" && ext != ".zip" {
-		s.writeError(w, http.StatusBadRequest, "Поддерживаются файлы .dbf и .zip")
+	if ext != ".dbf" && ext != ".xlsx" && ext != ".xlsm" && ext != ".zip" {
+		s.writeError(w, http.StatusBadRequest, "Поддерживаются файлы .dbf, .xlsx, .xlsm и .zip")
 		return
 	}
 
@@ -87,7 +87,7 @@ func (s *Server) handleUploadDBF(w http.ResponseWriter, r *http.Request) {
 	if ext == ".zip" {
 		extracted, err := dbfimport.ExtractArchive(filePath, s.logger)
 		if err != nil {
-			s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Не удалось извлечь DBF из ZIP: %v", err))
+			s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Не удалось извлечь файл данных из ZIP: %v", err))
 			return
 		}
 		resultPath = extracted

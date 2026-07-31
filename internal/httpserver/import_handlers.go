@@ -16,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LindsayBradford/go-dbf/godbf"
 	"github.com/google/uuid"
 	"github.com/jlaffaye/ftp"
 )
@@ -1419,7 +1418,7 @@ func (s *Server) handleSaveAllFieldMappings(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// handleImportFile импортирует DBF файл
+// handleImportFile импортирует файл прайса (DBF/Excel)
 func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
@@ -1439,6 +1438,20 @@ func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request) {
 
 	if req.FilePath == "" {
 		s.writeError(w, http.StatusBadRequest, "Не указан путь к файлу")
+		return
+	}
+
+	normalizedFilePath := req.FilePath
+	if strings.ToLower(filepath.Ext(normalizedFilePath)) == ".zip" {
+		extracted, err := dbfimport.ExtractArchive(normalizedFilePath, s.logger)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Не удалось извлечь файл данных из ZIP: %v", err))
+			return
+		}
+		normalizedFilePath = extracted
+	}
+	if !dbfimport.IsSupportedDataFile(normalizedFilePath) {
+		s.writeError(w, http.StatusBadRequest, "Поддерживаются только файлы .dbf, .xlsx, .xlsm и .zip")
 		return
 	}
 
@@ -1585,7 +1598,7 @@ func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.logger != nil {
-		s.logger.Info("Запуск импорта файла: %s для точки импорта %s", req.FilePath, req.ImportPointID)
+		s.logger.Info("Запуск импорта файла: %s для точки импорта %s", normalizedFilePath, req.ImportPointID)
 	}
 
 	// Создаем новый контекст для горутины, который не будет отменен при завершении HTTP запроса
@@ -1599,14 +1612,14 @@ func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request) {
 		defer importCancel() // Освобождаем ресурсы только когда горутина завершится
 
 		importer := dbfimport.NewDBFImporter(s.database, s.logger)
-		invoiceImport, err := importer.ImportInvoice(importCtx, req.ImportPointID, req.FilePath, mappings)
+		invoiceImport, err := importer.ImportInvoice(importCtx, req.ImportPointID, normalizedFilePath, mappings)
 		if err != nil {
 			if s.logger != nil {
-				s.logger.Error("Ошибка импорта файла %s: %v", req.FilePath, err)
+				s.logger.Error("Ошибка импорта файла %s: %v", normalizedFilePath, err)
 			}
 		} else {
 			if s.logger != nil {
-				s.logger.Info("Импорт файла %s успешно завершен. InvoiceImportID: %s", req.FilePath, invoiceImport.InvoiceImportID)
+				s.logger.Info("Импорт файла %s успешно завершен. InvoiceImportID: %s", normalizedFilePath, invoiceImport.InvoiceImportID)
 			}
 
 			// Обновляем LastUpdateAt в связанном PriceList
@@ -1656,7 +1669,7 @@ func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusAccepted, map[string]interface{}{
 		"status":    "import_started",
 		"message":   "Импорт запущен в фоновом режиме",
-		"file_path": req.FilePath,
+		"file_path": normalizedFilePath,
 	})
 }
 
@@ -1703,7 +1716,7 @@ LIMIT 200
 	return mappings, nil
 }
 
-// handleAnalyzeImportPoint скачивает DBF с FTP или берёт локально и возвращает список полей
+// handleAnalyzeImportPoint скачивает файл прайса с FTP или берёт локально и возвращает список полей
 func (s *Server) handleAnalyzeImportPoint(w http.ResponseWriter, r *http.Request, pointID string) {
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
@@ -1775,55 +1788,43 @@ func (s *Server) handleAnalyzeImportPoint(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	dbfTable, err := godbf.NewFromFile(filePath, "CP866")
+	if strings.ToLower(filepath.Ext(filePath)) == ".zip" {
+		extracted, err := dbfimport.ExtractArchive(filePath, s.logger)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Не удалось извлечь файл данных из ZIP: %v", err))
+			return
+		}
+		filePath = extracted
+	}
+
+	headers, records, err := dbfimport.ReadTabularFile(filePath)
 	if err != nil {
-		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Не удалось открыть DBF файл: %v", err))
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Не удалось открыть файл данных: %v", err))
 		return
 	}
 
-	fieldNames := dbfTable.FieldNames()
-	fields := make([]DBFFieldInfo, 0, len(fieldNames))
-	for _, fieldName := range fieldNames {
-		fieldType := "C"
-		fieldLength := 0
-		decimals := 0
-		if dbfTable.NumberOfRecords() > 0 {
-			value, err := dbfTable.FieldValueByName(0, fieldName)
-			if err == nil && value != "" {
-				fieldLength = len(value)
-				isNumeric := true
-				hasDecimal := false
-				for _, ch := range value {
-					if ch >= '0' && ch <= '9' || ch == '-' || ch == '+' {
-						continue
-					} else if ch == '.' || ch == ',' {
-						hasDecimal = true
-					} else {
-						isNumeric = false
-						break
-					}
-				}
-				if isNumeric && fieldLength > 0 {
-					fieldType = "N"
-					if hasDecimal {
-						decimals = 2
-					}
-				}
-			}
-		}
-		fields = append(fields, DBFFieldInfo{Name: fieldName, Type: fieldType, Length: fieldLength, Decimals: decimals})
+	rawFields := dbfimport.BuildFieldInfos(headers, records)
+	fields := make([]DBFFieldInfo, 0, len(rawFields))
+	for _, rawField := range rawFields {
+		fields = append(fields, DBFFieldInfo{
+			Name:     rawField["name"].(string),
+			Type:     rawField["type"].(string),
+			Length:   rawField["length"].(int),
+			Decimals: rawField["decimals"].(int),
+		})
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"file_path":     filePath,
-		"records_count": dbfTable.NumberOfRecords(),
+		"records_count": len(records),
 		"fields":        fields,
 		"field_count":   len(fields),
 		"source_type":   sourceType,
+		"file_format":   dbfimport.DetectDataFileFormat(filePath),
 	})
 }
 
-// downloadSampleFromFTP подключается к FTP и скачивает первый DBF-файл
+// downloadSampleFromFTP подключается к FTP и скачивает первый поддерживаемый файл прайса.
 func (s *Server) downloadSampleFromFTP(host string, port int, user, pass, remotePath string) (string, error) {
 	addr := fmt.Sprintf("%s:%d", host, port)
 	conn, err := ftp.Dial(addr, ftp.DialWithTimeout(30*time.Second))
@@ -1845,7 +1846,7 @@ func (s *Server) downloadSampleFromFTP(host string, port int, user, pass, remote
 	for _, entry := range entries {
 		if entry.Type == ftp.EntryTypeFile {
 			lower := strings.ToLower(entry.Name)
-			if strings.HasSuffix(lower, ".dbf") {
+			if dbfimport.IsSupportedDataFile(lower) || strings.HasSuffix(lower, ".zip") {
 				rp := remotePath
 				if !strings.HasSuffix(rp, "/") {
 					rp += "/"
@@ -1856,7 +1857,7 @@ func (s *Server) downloadSampleFromFTP(host string, port int, user, pass, remote
 		}
 	}
 	if targetFile == "" {
-		return "", fmt.Errorf("DBF-файлы не найдены в %s", remotePath)
+		return "", fmt.Errorf("файлы .dbf/.xlsx/.xlsm/.zip не найдены в %s", remotePath)
 	}
 
 	resp, err := conn.Retr(targetFile)

@@ -5,9 +5,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"es_api_service/internal/dbfimport"
+	"es_api_service/internal/matching"
+	intsync "es_api_service/internal/sync"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -479,35 +483,41 @@ func (s *Server) handleUpdatePriceList(w http.ResponseWriter, r *http.Request) {
 		updates = append(updates, "DefaultMarkupPct = CAST(@defaultMarkupPct AS DECIMAL(5,2))")
 		args = append(args, sql.Named("defaultMarkupPct", defaultMarkupValue))
 
-		// Каскадный апдейт MarkupPct в связанных SupplierPrice.
-		updatePricesQuery := `
-			UPDATE SupplierPrice AS sp
-			SET MarkupPct = CAST(@defaultMarkupPct AS DECIMAL(5,2)),
-				UpdatedAt = (NOW() AT TIME ZONE 'utc')
-			WHERE sp.IsActive = TRUE
-			  AND (
-				sp.PriceListID = CAST(@priceListID AS UUID)
-				OR EXISTS (
-					SELECT 1
-					FROM InvoiceImport ii
-					JOIN PriceList pl ON pl.PriceListID = CAST(@priceListID AS UUID)
-					WHERE ii.InvoiceImportID = sp.InvoiceImportID
-					  AND pl.ImportPointID IS NOT NULL
-					  AND ii.ImportPointID = pl.ImportPointID
-					  AND pl.SupplierID = sp.SupplierID
-				)
-			  )
-		`
-		res := g.Exec(updatePricesQuery,
+		// Каскадно обновляем MarkupPct только когда наценка реально изменилась.
+		var currentMarkup float64
+		if err := g.Raw(
+			`SELECT CAST(COALESCE(DefaultMarkupPct, 0) AS FLOAT) FROM PriceList WHERE PriceListID = CAST(@priceListID AS UUID)`,
 			sql.Named("priceListID", priceListID),
-			sql.Named("defaultMarkupPct", defaultMarkupValue),
-		)
-		if res.Error != nil {
-			if s.logger != nil {
-				s.logger.Warn("Не удалось обновить наценку в связанных прайсах: %v", res.Error)
+		).Row().Scan(&currentMarkup); err == nil && math.Abs(currentMarkup-defaultMarkupValue) > 0.0001 {
+			updatePricesQuery := `
+				UPDATE SupplierPrice AS sp
+				SET MarkupPct = CAST(@defaultMarkupPct AS DECIMAL(5,2)),
+					UpdatedAt = (NOW() AT TIME ZONE 'utc')
+				WHERE sp.IsActive = TRUE
+				  AND (
+					sp.PriceListID = CAST(@priceListID AS UUID)
+					OR EXISTS (
+						SELECT 1
+						FROM InvoiceImport ii
+						JOIN PriceList pl ON pl.PriceListID = CAST(@priceListID AS UUID)
+						WHERE ii.InvoiceImportID = sp.InvoiceImportID
+						  AND pl.ImportPointID IS NOT NULL
+						  AND ii.ImportPointID = pl.ImportPointID
+						  AND pl.SupplierID = sp.SupplierID
+					)
+				  )
+			`
+			res := g.Exec(updatePricesQuery,
+				sql.Named("priceListID", priceListID),
+				sql.Named("defaultMarkupPct", defaultMarkupValue),
+			)
+			if res.Error != nil {
+				if s.logger != nil {
+					s.logger.Warn("Не удалось обновить наценку в связанных прайсах: %v", res.Error)
+				}
+			} else if s.logger != nil {
+				s.logger.Info("Обновлена наценка для %d позиций прайса: PriceListID=%s, MarkupPct=%.2f%%", res.RowsAffected, priceListID, defaultMarkupValue)
 			}
-		} else if s.logger != nil {
-			s.logger.Info("Обновлена наценка для %d позиций прайса: PriceListID=%s, MarkupPct=%.2f%%", res.RowsAffected, priceListID, defaultMarkupValue)
 		}
 	}
 
@@ -1038,7 +1048,7 @@ LIMIT 1
 	})
 }
 
-// handleForceFetchPriceList сбрасывает NextUpdateAt
+// handleForceFetchPriceList запускает немедленный ручной забор прайса.
 func (s *Server) handleForceFetchPriceList(w http.ResponseWriter, r *http.Request, priceListID string) {
 	if _, err := uuid.Parse(priceListID); err != nil {
 		s.writeError(w, http.StatusBadRequest, "Недопустимый формат ID")
@@ -1048,29 +1058,38 @@ func (s *Server) handleForceFetchPriceList(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	res := s.database.GORMWith(ctx).Exec(`
-		UPDATE PriceList
-		SET NextUpdateAt = DATEADD(hour, -1, (NOW() AT TIME ZONE 'utc'))
-		WHERE PriceListID = CAST(@id AS UUID)
-		  AND IsActive = 1
-		  AND ScheduleCron IS NOT NULL AND ScheduleCron != ''`,
+	var exists int
+	err := s.database.GORMWith(ctx).Raw(`
+		SELECT 1
+		FROM PriceList pl
+		WHERE pl.PriceListID = CAST(@id AS UUID)
+		  AND pl.IsActive = 1
+		  AND pl.ImportPointID IS NOT NULL
+		LIMIT 1`,
 		sql.Named("id", priceListID),
-	)
-	if res.Error != nil {
-		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка: %v", res.Error))
-		return
-	}
-	if res.RowsAffected == 0 {
-		s.writeError(w, http.StatusNotFound, "Прайс не найден или не имеет расписания")
+	).Row().Scan(&exists)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			s.writeError(w, http.StatusNotFound, "Прайс не найден, неактивен или не имеет точки импорта")
+			return
+		}
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка проверки прайса: %v", err))
 		return
 	}
 
-	if s.logger != nil {
-		s.logger.Info("Принудительный забор прайса запланирован: %s", priceListID)
-	}
+	go func() {
+		importer := dbfimport.NewDBFImporter(s.database, s.logger)
+		matcher := matching.NewPriceMatcher(s.database, s.logger)
+		scheduler := intsync.NewPriceListScheduler(s.database, s.logger, importer, matcher)
+		runCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		if err := scheduler.ForceFetchPriceListNow(runCtx, priceListID); err != nil && s.logger != nil {
+			s.logger.Error("Ошибка ручного запуска обновления прайса %s: %v", priceListID, err)
+		}
+	}()
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status":  "scheduled",
-		"message": "Забор прайса запланирован, будет выполнен в течение минуты",
+		"status":  "started",
+		"message": "Ручное обновление прайса запущено",
 	})
 }

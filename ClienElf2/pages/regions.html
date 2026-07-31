@@ -16,9 +16,12 @@
     <script src="../js/nav-component.js"></script>
 
     <div class="container-fluid py-4 px-3 px-lg-5">
-        <div class="d-flex align-items-center gap-3 mb-4">
-            <h1 class="mb-0">Регионы</h1>
-            <span class="text-muted fs-6">Справочник (только для чтения)</span>
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h1 class="mb-0">Регионы</h1>
+                <span class="text-muted fs-6">Справочник регионов</span>
+            </div>
+            <button class="btn btn-success" id="btnAddRegion"><i class="bi bi-plus-lg"></i> Добавить</button>
         </div>
 
         <div class="card shadow-sm">
@@ -30,11 +33,13 @@
                                 <th>Код</th>
                                 <th>Название</th>
                                 <th>Столица</th>
-                                <th style="width:100px" data-no-filter>Действия</th>
+                                <th>Фед. округ</th>
+                                <th style="width:60px" data-no-filter>Акт.</th>
+                                <th style="width:120px" data-no-filter>Действия</th>
                             </tr>
                         </thead>
                         <tbody id="regionsTable">
-                            <tr><td colspan="4" class="loading">Загрузка данных...</td></tr>
+                            <tr><td colspan="6" class="loading">Загрузка данных...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -42,25 +47,42 @@
         </div>
     </div>
 
-    <!-- Модалка просмотра региона (Bootstrap Modal) -->
-    <div class="modal fade" id="regionModal" tabindex="-1">
+    <!-- Модалка создания / редактирования -->
+    <div class="modal fade" id="regionEditModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="modalTitle">Информация о регионе</h5>
+                    <h5 class="modal-title" id="regionEditTitle">Новый регион</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="info-grid">
-                        <div class="info-item"><label>Код:</label><span id="modalCode">-</span></div>
-                        <div class="info-item"><label>Название:</label><span id="modalName">-</span></div>
-                        <div class="info-item"><label>Столица:</label><span id="modalCapital">-</span></div>
-                        <div class="info-item"><label>Фед. округ:</label><span id="modalDistrict">-</span></div>
-                        <div class="info-item"><label>Статус:</label><span id="modalStatus">-</span></div>
-                    </div>
+                    <form id="regionForm">
+                        <input type="hidden" id="editRegionId" value="">
+                        <div class="mb-3">
+                            <label class="form-label">Код <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="editCode" required maxlength="32" placeholder="например 77">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Название <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="editName" required maxlength="200" placeholder="Москва">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Столица</label>
+                            <input type="text" class="form-control" id="editCapital" maxlength="200" placeholder="Москва">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Федеральный округ</label>
+                            <input type="text" class="form-control" id="editDistrict" maxlength="200" placeholder="Центральный">
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="editActive" checked>
+                            <label class="form-check-label" for="editActive">Активен</label>
+                        </div>
+                    </form>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary" id="btnSaveRegion">Сохранить</button>
                 </div>
             </div>
         </div>
@@ -72,6 +94,6 @@
     <script src="../js/api.js"></script>
     <script src="../js/toast.js"></script>
     <script src="../js/table-filters.js?v=6"></script>
-    <script src="../js/regions.js"></script>
+    <script src="../js/regions.js?v=2"></script>
 </body>
 </html>

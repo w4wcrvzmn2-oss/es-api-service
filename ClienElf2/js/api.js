@@ -49,6 +49,12 @@ class API {
         }
     }
     
+    static unwrapList(data) {
+        if (Array.isArray(data)) return data;
+        if (data && Array.isArray(data.value)) return data.value;
+        return [];
+    }
+
     static async get(endpoint) {
         try {
             const response = await this.request(endpoint, { method: 'GET' });
@@ -104,7 +110,9 @@ class API {
                 const errorText = await response.text();
                 console.error(`API PUT Error ${response.status}: ${endpoint}`);
                 console.error('Error response:', errorText);
-                throw new Error(errorText || `HTTP ${response.status}`);
+                let msg = `HTTP ${response.status}`;
+                try { msg = JSON.parse(errorText).error || msg; } catch(_) {}
+                throw new Error(msg);
             }
             return null;
         } catch (error) {

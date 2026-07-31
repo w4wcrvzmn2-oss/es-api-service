@@ -235,6 +235,8 @@ func (s *Server) setupAPIRoutes(mux *http.ServeMux) {
 	}
 
 	tableRoute("/api/region", "Region")
+	mux.HandleFunc("/api/region/create", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleCreateRegion)).ServeHTTP)))
+	mux.HandleFunc("/api/region/", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleRegionRouter)).ServeHTTP)))
 	tableRoute("/api/es_atc", "es_atc")
 	tableRoute("/api/es_country", "es_country")
 	tableRoute("/api/es_ef2", "es_ef2")
@@ -561,8 +563,9 @@ func (s *Server) healthCheck(w http.ResponseWriter, r *http.Request) {
 // GzipResponseWriter обёртка для gzip сжатия ответов
 type GzipResponseWriter struct {
 	http.ResponseWriter
-	writer  *gzip.Writer
+	writer *gzip.Writer
 	skipped bool
+	wroteHeader bool
 }
 
 // SkipCompression отключает gzip (для отдачи уже сжатого price_cache/*.json.gz).
@@ -571,13 +574,33 @@ func (w *GzipResponseWriter) SkipCompression() {
 	w.Header().Del("Content-Encoding")
 }
 
+// prepareGzipHeaders ставит Content-Encoding до отправки заголовков.
+// Без этого WriteHeader() у handler'ов (writeJSON/auth) уходит раньше,
+// тело сжимается, а браузер не распаковывает → SyntaxError в response.json().
+func (w *GzipResponseWriter) prepareGzipHeaders() {
+	if w.skipped || w.wroteHeader {
+		return
+	}
+	w.Header().Del("Content-Length")
+	w.Header().Set("Content-Encoding", "gzip")
+}
+
+// WriteHeader перехватывает статус, чтобы успеть выставить Content-Encoding.
+func (w *GzipResponseWriter) WriteHeader(statusCode int) {
+	if !w.skipped {
+		w.prepareGzipHeaders()
+	}
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
 // Write записывает данные через gzip компрессор (или напрямую при Skip).
 func (w *GzipResponseWriter) Write(data []byte) (int, error) {
 	if w.skipped {
 		return w.ResponseWriter.Write(data)
 	}
 	if w.writer == nil {
-		w.Header().Set("Content-Encoding", "gzip")
+		w.prepareGzipHeaders()
 		w.writer = gzip.NewWriter(w.ResponseWriter)
 	}
 	return w.writer.Write(data)

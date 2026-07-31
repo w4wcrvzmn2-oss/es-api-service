@@ -236,6 +236,8 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	pc := s.resolvePricingContext(ctx, r)
+
 	// Резолвим позиции до транзакции — чтобы битый supplier_price_id возвращал 404/400
 	// без открытия транзакции.
 	var resolvedItems []struct {
@@ -263,7 +265,7 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 				CASE WHEN p."ProductID" IS NULL THEN NULL ELSE CAST(p."ProductID" AS TEXT) END AS "ProductID",
 				CASE WHEN r."RegionID" IS NULL THEN NULL ELSE CAST(r."RegionID" AS TEXT) END AS "RegionID",
 				CASE WHEN spl."PriceListID" IS NULL THEN NULL ELSE CAST(spl."PriceListID" AS TEXT) END AS "PriceListID",
-				COALESCE(sp."FinalPrice", sp."Price") * (1 + COALESCE(plr."MarkupPct", 0) / 100.0) AS "UnitPrice",
+				`+sqlAdditiveFinalPriceExpr("sp", pc)+` AS "UnitPrice",
 				sp."ItemName" AS "ItemName",
 				sp."ItemCode" AS "ItemCode",
 				sp."Barcode" AS "Barcode",
@@ -272,8 +274,6 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 			LEFT JOIN "Product" p ON p."ProductID" = sp."GUID_ES"
 			LEFT JOIN "Region" r ON r."RegionID" = sp."RegionID"
 			LEFT JOIN "SupplierPriceList" spl ON spl."PriceListID" = sp."PriceListID"
-			LEFT JOIN "PriceListRegion" plr
-				ON plr."PriceListID" = sp."PriceListID" AND plr."RegionID" = sp."RegionID" AND plr."IsActive" = TRUE
 			WHERE sp."SupplierPriceID" = CAST(? AS UUID) AND sp."IsActive" = TRUE
 			LIMIT 1
 		`, db.UUIDParam(ri.SupplierPriceID)).Scan(&row).Error
@@ -724,13 +724,13 @@ func (s *Server) handleBuyerCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items := []BuyerCatalogItem{}
+	pc := s.resolvePricingContext(ctx, r)
 	err := base.
 		Select(`CAST(sp.SupplierPriceID AS TEXT) AS SupplierPriceID,
 			COALESCE(sp.ItemName, '') AS Name,
 			sup.Name AS Supplier,
-			COALESCE(sp.FinalPrice, sp.Price) * (1 + COALESCE(plr.MarkupPct, 0) / 100.0) AS Price,
+			`+sqlAdditiveFinalPriceExpr("sp", pc)+` AS Price,
 			sp.IsActive AS InStock`).
-		Joins("LEFT JOIN PriceListRegion plr ON plr.PriceListID = sp.PriceListID AND plr.RegionID = sp.RegionID AND plr.IsActive = 1").
 		Order("sp.ItemName").
 		Offset(offset).
 		Limit(limit).

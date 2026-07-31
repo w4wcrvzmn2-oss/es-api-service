@@ -3,17 +3,24 @@
 --
 -- Recommended migration path:
 -- 1) Install PostgreSQL 16+ on the new server
--- 2) CREATE DATABASE elfisa; CREATE DATABASE eplus_work;
--- 3) Use pgloader (or similar) from MSSQL FULL backup / live instance:
+-- 2) Run 001_create_databases.sql
+-- 3) Create schema in this order:
+--      psql -U es_api -d elfisa     -f 002_elfisa_schema.sql
+--      psql -U es_api -d eplus_work -f 002_eplus_work_schema.sql
+-- 4) Use pgloader (or similar) from MSSQL FULL backup / live instance:
 --      pgloader mssql://user:pass@host/elfisa postgresql://user:pass@localhost/elfisa
 --      pgloader mssql://user:pass@host/eplus_work postgresql://user:pass@localhost/eplus_work
--- 4) Ensure PascalCase identifiers are quoted (pgloader option: quote identifiers)
--- 5) Add UNIQUE constraints required by ON CONFLICT upserts:
+-- 5) Ensure PascalCase identifiers are quoted (pgloader option: quote identifiers)
+-- 6) If source MSSQL contains additional ES_* tables not covered by 002_eplus_work_schema.sql
+--    (for example ES_FIRMA / ES_MNN / ES_PHGROUP), generate DDL with
+--    mssql_export_schema_for_pg.sql and apply it before the first UniversalSync run.
+-- 7) Add UNIQUE constraints required by ON CONFLICT upserts:
 --      "SupplierItemMapping" ("SupplierID", "ItemCode")
 --      "PriceListRegion" ("PriceListID", "RegionID")
 --      "DBFFieldMapping" ("ImportPointID", "DBFFieldName")
 --      "es_ef2" ("GUID_ES")  -- usually already PK
--- 6) Point es_api_service.cfg db + source_db to Postgres (port 5432, sslmode disable/prefer)
+-- 8) Run 004_normalize_es_names.sql in elfisa if needed for lowercase/uppercase ES compatibility
+-- 9) Point es_api_service.cfg db + source_db to Postgres (port 5432, sslmode disable/prefer)
 --
 -- Example cfg fragment:
 -- db:

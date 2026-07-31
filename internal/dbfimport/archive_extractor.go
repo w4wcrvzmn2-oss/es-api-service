@@ -9,7 +9,8 @@ import (
 	"strings"
 )
 
-// ExtractArchive распаковывает архив и возвращает путь к первому найденному DBF файлу
+// ExtractArchive распаковывает архив и возвращает путь к первому найденному
+// поддерживаемому файлу данных (DBF/Excel).
 // Публичная функция для использования из других пакетов
 func ExtractArchive(archivePath string, logger Logger) (string, error) {
 	return extractArchiveInternal(archivePath, logger)
@@ -33,7 +34,8 @@ func extractArchiveInternal(archivePath string, logger Logger) (string, error) {
 	}
 }
 
-// extractZipInternal распаковывает ZIP архив и возвращает путь к первому найденному DBF файлу
+// extractZipInternal распаковывает ZIP архив и возвращает путь к первому
+// найденному поддерживаемому файлу данных.
 func extractZipInternal(zipPath string, logger Logger) (string, error) {
 	if logger != nil {
 		logger.Info("Распаковка ZIP архива: %s", zipPath)
@@ -56,13 +58,12 @@ func extractZipInternal(zipPath string, logger Logger) (string, error) {
 		return "", fmt.Errorf("не удалось определить временную директорию: %w", err)
 	}
 
-	// Ищем первый DBF файл в архиве
-	var dbfFilePath string
+	// Ищем первый поддерживаемый файл данных в архиве.
+	var dataFilePath string
 
 	// Распаковываем все файлы
 	for _, f := range r.File {
-		// Проверяем расширение файла
-		if strings.ToLower(filepath.Ext(f.Name)) == ".dbf" {
+		if IsSupportedDataFile(f.Name) {
 			extractedPath, err := safeZipExtractPath(tempDirAbs, f.Name)
 			if err != nil {
 				if logger != nil {
@@ -111,27 +112,27 @@ func extractZipInternal(zipPath string, logger Logger) (string, error) {
 				continue
 			}
 
-			// Сохраняем путь к первому найденному DBF файлу
-			if dbfFilePath == "" {
-				dbfFilePath = extractedPath
+			// Сохраняем путь к первому найденному поддерживаемому файлу данных.
+			if dataFilePath == "" {
+				dataFilePath = extractedPath
 				if logger != nil {
-					logger.Info("Найден DBF файл в архиве: %s", f.Name)
+					logger.Info("Найден файл данных в архиве: %s", f.Name)
 				}
 			}
 		}
 	}
 
-	if dbfFilePath == "" {
+	if dataFilePath == "" {
 		// Очищаем временную директорию
 		os.RemoveAll(tempDir)
-		return "", fmt.Errorf("DBF файл не найден в ZIP архиве")
+		return "", fmt.Errorf("поддерживаемый файл данных не найден в ZIP архиве")
 	}
 
 	if logger != nil {
-		logger.Info("Архив распакован. DBF файл: %s", dbfFilePath)
+		logger.Info("Архив распакован. Файл данных: %s", dataFilePath)
 	}
 
-	return dbfFilePath, nil
+	return dataFilePath, nil
 }
 
 func safeZipExtractPath(tempDir, entryName string) (string, error) {

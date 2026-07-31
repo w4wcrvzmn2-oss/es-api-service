@@ -90,7 +90,10 @@ async function loadSuppliers() {
             for (const supplier of suppliers) {
                 try {
                     const testResponse = await API.get(`/api/supplier-prices?supplier_id=${supplier.supplier_id}&limit=1`);
-                    if (testResponse && testResponse.total_prices > 0) {
+                    const totalPrices = testResponse?.stats?.total_in_db
+                        ?? testResponse?.total_prices
+                        ?? (Array.isArray(testResponse?.prices) ? testResponse.prices.length : 0);
+                    if (totalPrices > 0) {
                         select.value = supplier.supplier_id;
                         await loadPrices();
                         break;

@@ -123,11 +123,11 @@ func (us *UniversalSync) SyncAllTables(ctx context.Context) error {
 func (us *UniversalSync) getESTables(ctx context.Context) ([]string, error) {
 	// Получаем все таблицы, начинающиеся с ES
 	query := `
-		SELECT TABLE_NAME 
-		FROM INFORMATION_SCHEMA.TABLES 
-		WHERE TABLE_TYPE = 'BASE TABLE' 
-		  AND TABLE_NAME LIKE 'ES%'
-		ORDER BY TABLE_NAME
+		SELECT table_name
+		FROM information_schema.tables
+		WHERE table_type = 'BASE TABLE'
+		  AND table_name ILIKE 'es_%'
+		ORDER BY table_name
 	`
 
 	rows, err := us.sourceDB.GORMWith(ctx).Raw(query).Rows()
@@ -145,9 +145,10 @@ func (us *UniversalSync) getESTables(ctx context.Context) ([]string, error) {
 
 		// Строгая фильтрация: только ES_* (исключаем ESHOP_* и ESKLP_*)
 		// ES_ означает: ES + знак подчеркивания + любые символы
-		if strings.HasPrefix(tableName, "ES_") &&
-			!strings.HasPrefix(tableName, "ESHOP_") &&
-			!strings.HasPrefix(tableName, "ESKLP_") {
+		upperTableName := strings.ToUpper(tableName)
+		if strings.HasPrefix(upperTableName, "ES_") &&
+			!strings.HasPrefix(upperTableName, "ESHOP_") &&
+			!strings.HasPrefix(upperTableName, "ESKLP_") {
 			tables = append(tables, tableName)
 		}
 	}
@@ -191,17 +192,17 @@ func (us *UniversalSync) syncTable(ctx context.Context, tableName string) error 
 func (us *UniversalSync) getTableInfo(ctx context.Context, tableName string) (*TableInfo, error) {
 	// Получаем колонки таблицы
 	columnsQuery := `
-		SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, c.CHARACTER_MAXIMUM_LENGTH, 
-		       CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 1 ELSE 0 END as IS_PRIMARY_KEY
-		FROM INFORMATION_SCHEMA.COLUMNS c
+		SELECT c.column_name, c.data_type, c.is_nullable, c.character_maximum_length,
+		       CASE WHEN pk.column_name IS NOT NULL THEN 1 ELSE 0 END as is_primary_key
+		FROM information_schema.columns c
 		LEFT JOIN (
-			SELECT ku.TABLE_NAME, ku.COLUMN_NAME
-			FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
-			JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku ON tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME
-			WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
-		) pk ON c.TABLE_NAME = pk.TABLE_NAME AND c.COLUMN_NAME = pk.COLUMN_NAME
-		WHERE c.TABLE_NAME = @tableName
-		ORDER BY c.ORDINAL_POSITION
+			SELECT ku.table_name, ku.column_name
+			FROM information_schema.table_constraints tc
+			JOIN information_schema.key_column_usage ku ON tc.constraint_name = ku.constraint_name
+			WHERE tc.constraint_type = 'PRIMARY KEY'
+		) pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name
+		WHERE c.table_name = @tableName
+		ORDER BY c.ordinal_position
 	`
 
 	rows, err := us.sourceDB.GORMWith(ctx).Raw(columnsQuery, sql.Named("tableName", tableName)).Rows()
@@ -276,11 +277,11 @@ func (us *UniversalSync) getTableInfo(ctx context.Context, tableName string) (*T
 // getForeignKeys получает информацию о внешних ключах таблицы
 func (us *UniversalSync) getForeignKeys(ctx context.Context, tableName string) ([]ForeignKeyInfo, error) {
 	query := `
-		SELECT fk.COLUMN_NAME, pk.TABLE_NAME, pk.COLUMN_NAME
-		FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
-		JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE fk ON rc.CONSTRAINT_NAME = fk.CONSTRAINT_NAME
-		JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE pk ON rc.UNIQUE_CONSTRAINT_NAME = pk.CONSTRAINT_NAME
-		WHERE fk.TABLE_NAME = @tableName
+		SELECT fk.column_name, pk.table_name, pk.column_name
+		FROM information_schema.referential_constraints rc
+		JOIN information_schema.key_column_usage fk ON rc.constraint_name = fk.constraint_name
+		JOIN information_schema.key_column_usage pk ON rc.unique_constraint_name = pk.constraint_name
+		WHERE fk.table_name = @tableName
 	`
 
 	rows, err := us.sourceDB.GORMWith(ctx).Raw(query, sql.Named("tableName", tableName)).Rows()
@@ -319,12 +320,13 @@ func (us *UniversalSync) getSyncOrder(tableName string) int {
 		"ES_EF2":              1, // Препараты после справочников
 	}
 
-	if order, exists := priorityTables[tableName]; exists {
+	upperTableName := strings.ToUpper(tableName)
+	if order, exists := priorityTables[upperTableName]; exists {
 		return order
 	}
 
 	// Связующие таблицы синхронизируем в последнюю очередь
-	if strings.HasPrefix(tableName, "ES_ES_2_") {
+	if strings.HasPrefix(upperTableName, "ES_ES_2_") {
 		return 2
 	}
 
@@ -396,7 +398,7 @@ func (us *UniversalSync) fetchTableData(ctx context.Context, tableName string, t
 
 // tableExists проверяет существование таблицы в target базе
 func (us *UniversalSync) tableExists(ctx context.Context, tableName string) bool {
-	query := "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @tableName"
+	query := "SELECT COUNT(*) FROM information_schema.tables WHERE lower(table_name) = lower(@tableName)"
 	var count int
 	err := us.targetDB.GORMWith(ctx).Raw(query, sql.Named("tableName", tableName)).Row().Scan(&count)
 	return err == nil && count > 0
