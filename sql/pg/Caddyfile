@@ -9,8 +9,17 @@
 	}
 }
 
+(proxy_api) {
+	# Real client IP for Go rate limits / login lockout
+	header_up X-Real-IP {remote_host}
+	header_up X-Forwarded-For {remote_host}
+	header_up X-Forwarded-Proto {scheme}
+}
+
 24pharmdata.ru {
-	reverse_proxy 127.0.0.1:8080
+	reverse_proxy 127.0.0.1:8080 {
+		import proxy_api
+	}
 }
 
 www.24pharmdata.ru {
@@ -18,13 +27,15 @@ www.24pharmdata.ru {
 }
 
 phd.24pharmdata.ru {
-	reverse_proxy 127.0.0.1:8081
+	reverse_proxy 127.0.0.1:8081 {
+		import proxy_api
+	}
 }
 
 git.24pharmdata.ru {
-	reverse_proxy 127.0.0.1:3000
+	reverse_proxy 127.0.0.1:3000 {
+		import proxy_api
+	}
 }
 
-http://195.14.114.171 {
-	reverse_proxy 127.0.0.1:8080
-}
+# No public site on bare origin IP — use domain names only.

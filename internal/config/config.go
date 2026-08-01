@@ -64,6 +64,17 @@ type Config struct {
 		Enabled bool   `yaml:"enabled"`
 	} `yaml:"logging"`
 
+	// Security — анти-брутфорс и HTTP flood (in-process).
+	Security struct {
+		TrustProxyHeaders bool `yaml:"trust_proxy_headers"`
+		LoginMaxAttempts  int  `yaml:"login_max_attempts"`
+		LoginWindowSec    int  `yaml:"login_window_sec"`
+		LoginLockoutSec   int  `yaml:"login_lockout_sec"`
+		LoginRatePerMin   int  `yaml:"login_rate_per_min"`
+		APIRatePerMin     int  `yaml:"api_rate_per_min"`
+		StaticRatePerMin  int  `yaml:"static_rate_per_min"`
+	} `yaml:"security"`
+
 	// FieldsConfig загружается отдельно из api_fields_config.yaml
 	FieldsConfig *FieldsConfig `yaml:"-"`
 }
@@ -166,6 +177,27 @@ func LoadConfig() (*Config, error) {
 
 	if !config.Logging.Enabled {
 		config.Logging.Enabled = true // по умолчанию логирование включено
+	}
+
+	// Security defaults (behind Caddy trust X-Real-IP / X-Forwarded-For for per-IP limits)
+	config.Security.TrustProxyHeaders = true
+	if config.Security.LoginMaxAttempts == 0 {
+		config.Security.LoginMaxAttempts = 5
+	}
+	if config.Security.LoginWindowSec == 0 {
+		config.Security.LoginWindowSec = 900
+	}
+	if config.Security.LoginLockoutSec == 0 {
+		config.Security.LoginLockoutSec = 900
+	}
+	if config.Security.LoginRatePerMin == 0 {
+		config.Security.LoginRatePerMin = 20
+	}
+	if config.Security.APIRatePerMin == 0 {
+		config.Security.APIRatePerMin = 180
+	}
+	if config.Security.StaticRatePerMin == 0 {
+		config.Security.StaticRatePerMin = 600
 	}
 
 	// Загружаем конфигурацию полей

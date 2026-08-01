@@ -63,14 +63,16 @@ type AuthService struct {
 	config   *config.Config
 	database *db.Database
 	logger   *logger.Logger
+	limiter  *SecurityLimiter
 }
 
 // NewAuthService создаёт новый AuthService
-func NewAuthService(cfg *config.Config, database *db.Database, fileLogger *logger.Logger) *AuthService {
+func NewAuthService(cfg *config.Config, database *db.Database, fileLogger *logger.Logger, limiter *SecurityLimiter) *AuthService {
 	return &AuthService{
 		config:   cfg,
 		database: database,
 		logger:   fileLogger,
+		limiter:  limiter,
 	}
 }
 
@@ -92,10 +94,17 @@ func (a *AuthService) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	trustProxy := true
+	if a.limiter != nil {
+		trustProxy = a.limiter.lim.TrustProxyHeaders
+	}
+	ip := clientIP(r, trustProxy)
+
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		if a.logger != nil {
-			a.logger.Warn("Неверный формат JSON при авторизации от %s: %v", r.RemoteAddr, err)
+			a.logger.Warn("Неверный формат JSON при авторизации от %s: %v", ip, err)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -103,8 +112,19 @@ func (a *AuthService) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.Username = strings.TrimSpace(req.Username)
+	if a.limiter != nil {
+		if locked, retry := a.limiter.isLoginLocked(ip, req.Username); locked {
+			if a.logger != nil {
+				a.logger.Warn("Login lockout username=%s ip=%s retry=%v", req.Username, ip, retry)
+			}
+			writeRateLimited(w, retry)
+			return
+		}
+	}
+
 	if a.logger != nil {
-		a.logger.Info("Попытка авторизации пользователя '%s' от %s", req.Username, r.RemoteAddr)
+		a.logger.Info("Попытка авторизации пользователя '%s' от %s", req.Username, ip)
 	}
 
 	var role, supplierID, buyerUserID, redirectURL string
@@ -125,13 +145,20 @@ func (a *AuthService) Login(w http.ResponseWriter, r *http.Request) {
 		buyerUserID = buid
 		redirectURL = "/buyer/index.html"
 	} else {
+		if a.limiter != nil {
+			a.limiter.recordLoginFailure(ip, req.Username)
+		}
 		if a.logger != nil {
-			a.logger.Warn("Неудачная попытка авторизации для пользователя '%s' от %s", req.Username, r.RemoteAddr)
+			a.logger.Warn("Неудачная попытка авторизации для пользователя '%s' от %s", req.Username, ip)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(ErrorResponse{Error: "Неверные учётные данные"})
 		return
+	}
+
+	if a.limiter != nil {
+		a.limiter.clearLoginFailures(ip, req.Username)
 	}
 
 	token, err := a.generateToken(req.Username, role, supplierID, buyerUserID)
@@ -146,7 +173,7 @@ func (a *AuthService) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if a.logger != nil {
-		a.logger.Info("Успешная авторизация пользователя '%s' (role=%s) от %s", req.Username, role, r.RemoteAddr)
+		a.logger.Info("Успешная авторизация пользователя '%s' (role=%s) от %s", req.Username, role, ip)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

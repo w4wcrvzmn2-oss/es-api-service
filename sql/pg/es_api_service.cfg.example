@@ -2,7 +2,8 @@
 # Скопируйте рядом с es_api_service.exe и поправьте пароли.
 
 http:
-  addr: "0.0.0.0"
+  # Only Caddy on localhost should reach the API (hides origin from direct floods)
+  addr: "127.0.0.1"
   port: 8080
   read_timeout_sec: 30
   write_timeout_sec: 120
@@ -10,7 +11,7 @@ http:
 
 # второй порт под ClienElf2 — раскомментируйте при необходимости
 # http2:
-#   addr: "0.0.0.0"
+#   addr: "127.0.0.1"
 #   port: 8081
 #   static_dir: "C:\\es_api_service\\ClienElf2"
 
@@ -19,6 +20,16 @@ auth:
   jwt_secret: "CHANGE_ME_LONG_RANDOM_SECRET"
   token_ttl_minutes: 1440
   users: []
+
+# Anti-bruteforce / HTTP flood (in-process)
+security:
+  trust_proxy_headers: true
+  login_max_attempts: 5
+  login_window_sec: 900
+  login_lockout_sec: 900
+  login_rate_per_min: 20
+  api_rate_per_min: 180
+  static_rate_per_min: 600
 
 db:
   server: "127.0.0.1"

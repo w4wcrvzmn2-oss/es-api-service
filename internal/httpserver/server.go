@@ -29,6 +29,7 @@ type Server struct {
 	config      *config.Config
 	database    *db.Database
 	authService *AuthService
+	limiter     *SecurityLimiter
 	logger      *logger.Logger
 	fileLogger  *logger.Logger
 	dbLogger    *logger.DBLogger
@@ -36,7 +37,16 @@ type Server struct {
 
 // NewServer создаёт новый HTTP сервер
 func NewServer(cfg *config.Config, database *db.Database, fileLogger *logger.Logger) *Server {
-	authService := NewAuthService(cfg, database, fileLogger)
+	limiter := newSecurityLimiter(SecurityLimits{
+		TrustProxyHeaders: cfg.Security.TrustProxyHeaders,
+		LoginMaxAttempts:  cfg.Security.LoginMaxAttempts,
+		LoginWindow:       time.Duration(cfg.Security.LoginWindowSec) * time.Second,
+		LoginLockout:      time.Duration(cfg.Security.LoginLockoutSec) * time.Second,
+		LoginRatePerMin:   cfg.Security.LoginRatePerMin,
+		APIRatePerMin:     cfg.Security.APIRatePerMin,
+		StaticRatePerMin:  cfg.Security.StaticRatePerMin,
+	})
+	authService := NewAuthService(cfg, database, fileLogger, limiter)
 
 	dbLogger := logger.NewDBLogger(database, fileLogger)
 
@@ -44,6 +54,7 @@ func NewServer(cfg *config.Config, database *db.Database, fileLogger *logger.Log
 		config:      cfg,
 		database:    database,
 		authService: authService,
+		limiter:     limiter,
 		logger:      fileLogger,
 		fileLogger:  fileLogger,
 		dbLogger:    dbLogger,
@@ -52,13 +63,15 @@ func NewServer(cfg *config.Config, database *db.Database, fileLogger *logger.Log
 	mux := http.NewServeMux()
 	server.setupRoutes(mux)
 
+	handler := server.recoveryMiddleware(server.securityMiddleware(server.gzipMiddleware(mux)))
 	server.server = &http.Server{
 		Addr:              cfg.GetAddress(),
-		Handler:           server.recoveryMiddleware(server.gzipMiddleware(mux)),
+		Handler:           handler,
 		ReadHeaderTimeout: 15 * time.Second,
 		ReadTimeout:       cfg.GetReadTimeout(),
 		WriteTimeout:      cfg.GetWriteTimeout(),
 		IdleTimeout:       cfg.GetIdleTimeout(),
+		MaxHeaderBytes:    1 << 20, // 1 MiB
 	}
 
 	// Создаем второй HTTP сервер для ClienElf2 если настроен
@@ -66,13 +79,15 @@ func NewServer(cfg *config.Config, database *db.Database, fileLogger *logger.Log
 		mux2 := http.NewServeMux()
 		server.setupRoutes2(mux2)
 
+		handler2 := server.recoveryMiddleware(server.securityMiddleware(server.gzipMiddleware(mux2)))
 		server.server2 = &http.Server{
 			Addr:              cfg.GetAddress2(),
-			Handler:           server.recoveryMiddleware(server.gzipMiddleware(mux2)),
+			Handler:           handler2,
 			ReadHeaderTimeout: 15 * time.Second,
 			ReadTimeout:       cfg.GetReadTimeout(),
 			WriteTimeout:      cfg.GetWriteTimeout(),
 			IdleTimeout:       cfg.GetIdleTimeout(),
+			MaxHeaderBytes:    1 << 20,
 		}
 	}
 
@@ -708,7 +723,8 @@ func (s *Server) loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		ipAddr := r.RemoteAddr
+		trustProxy := s.limiter == nil || s.limiter.lim.TrustProxyHeaders
+		ipAddr := clientIP(r, trustProxy)
 		userAgent := r.Header.Get("User-Agent")
 		if s.dbLogger != nil {
 			s.dbLogger.SetUserContext(nil, nil, &ipAddr, &userAgent)
