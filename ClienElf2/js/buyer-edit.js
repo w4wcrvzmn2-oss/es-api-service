@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('pageTitle').textContent = 'Редактирование покупателя';
         document.getElementById('deleteBtn').style.display = 'inline-block';
         await loadBuyer(currentBuyerId);
-        // Кабинет и точки доставки доступны только у существующего покупателя.
+        // Кабинет и грузополучатели доступны только у существующего покупателя.
         document.getElementById('locationsCard').style.display = '';
         await loadLocations(currentBuyerId);
         await loadAccount(currentBuyerId);
@@ -130,19 +130,8 @@ async function handleSubmit(e) {
             console.error('Не удалось сохранить прайсы покупателя:', err);
         }
 
-        // При создании — заводим точку доставки из адреса, чтобы сразу был Location ID.
-        if (isCreate && address) {
-            try {
-                await API.post('/api/buyer-locations', {
-                    buyer_id: buyerId,
-                    address: address,
-                    region_id: regionId || null,
-                    is_default: true
-                });
-            } catch (err) {
-                console.error('Не удалось создать точку доставки:', err);
-            }
-        }
+        // Грузополучатель создаётся на сервере вместе с покупателем (BuyerLocation).
+        // Доп. точки добавляют уже на странице редактирования.
 
         if (isCreate) {
             // Переходим в режим редактирования нового покупателя — там виден Location ID.
@@ -244,7 +233,7 @@ async function loadLocations(buyerId) {
     try {
         const locs = await API.get(`/api/buyer-locations?buyer_id=${buyerId}`) || [];
         if (!Array.isArray(locs) || locs.length === 0) {
-            list.innerHTML = '<div class="text-muted">Точек доставки нет. Добавьте ниже — появится Location ID.</div>';
+            list.innerHTML = '<div class="text-muted">Грузополучателей нет. Добавьте ниже — появится Location ID для десктопа.</div>';
             return;
         }
         list.innerHTML = locs.map(l => {
@@ -261,14 +250,14 @@ async function loadLocations(buyerId) {
             </div>`;
         }).join('');
     } catch (err) {
-        list.innerHTML = '<div class="text-danger">Ошибка загрузки точек доставки</div>';
+        list.innerHTML = '<div class="text-danger">Ошибка загрузки грузополучателей</div>';
     }
 }
 
 async function addLocation() {
     if (!currentBuyerId) return;
     const addr = document.getElementById('locAddress').value.trim();
-    if (!addr) { Toast.error('Адрес обязателен', 'Укажите адрес точки'); return; }
+    if (!addr) { Toast.error('Адрес обязателен', 'Укажите наименование или адрес грузополучателя'); return; }
     const region = document.getElementById('locRegion').value || null;
     const isDefault = document.getElementById('locDefault').checked;
     try {
@@ -281,9 +270,9 @@ async function addLocation() {
         document.getElementById('locAddress').value = '';
         document.getElementById('locDefault').checked = false;
         await loadLocations(currentBuyerId);
-        Toast.success('Точка добавлена', 'Location ID создан');
+        Toast.success('Грузополучатель добавлен', 'Location ID создан');
     } catch (err) {
-        Toast.error('Ошибка', err.message || 'Не удалось добавить точку');
+        Toast.error('Ошибка', err.message || 'Не удалось добавить грузополучателя');
     }
 }
 
@@ -300,15 +289,15 @@ async function deleteLocation(id) {
         await API.delete(`/api/buyer-locations/${id}`);
         if (row) row.remove();
         if (list && !list.querySelector('button[onclick^="deleteLocation"]')) {
-            list.innerHTML = '<div class="text-muted">Точек доставки нет. Добавьте ниже — появится Location ID.</div>';
+            list.innerHTML = '<div class="text-muted">Грузополучателей нет. Добавьте ниже — появится Location ID для десктопа.</div>';
         }
-        Toast.success('Удалено', 'Точка доставки удалена');
+        Toast.success('Удалено', 'Грузополучатель удалён');
     } catch (err) {
         if (row) {
             row.style.opacity = '';
             row.style.pointerEvents = '';
         }
-        Toast.error('Ошибка', err.message || 'Не удалось удалить точку');
+        Toast.error('Ошибка', err.message || 'Не удалось удалить грузополучателя');
     }
 }
 

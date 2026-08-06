@@ -113,18 +113,18 @@
             </div>
         </div>
 
-        <!-- Точки доставки (Location ID) — видны в режиме редактирования -->
+        <!-- Грузополучатели (Location ID) — видны в режиме редактирования -->
         <div class="card shadow-sm mt-4" id="locationsCard" style="display:none">
             <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0">Точки доставки (Location ID)</h5>
-                <span class="text-muted small">Location ID нужен для десктоп-клиента</span>
+                <h5 class="mb-0">Грузополучатели</h5>
+                <span class="text-muted small">Создаются здесь; Location ID подхватывает десктоп с сервера</span>
             </div>
             <div class="card-body">
                 <div id="locationsList" class="mb-3"><div class="text-muted">Загрузка...</div></div>
                 <div class="row g-2 align-items-end">
                     <div class="col-md-5">
-                        <label for="locAddress" class="form-label">Адрес точки</label>
-                        <input type="text" class="form-control" id="locAddress">
+                        <label for="locAddress" class="form-label">Наименование / адрес</label>
+                        <input type="text" class="form-control" id="locAddress" placeholder="Аптека на Ленина, адрес…">
                     </div>
                     <div class="col-md-3">
                         <label for="locRegion" class="form-label">Регион</label>

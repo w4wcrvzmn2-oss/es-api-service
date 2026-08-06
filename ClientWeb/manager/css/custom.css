@@ -1,0 +1,574 @@
+/* ── Brand Colors ── */
+:root {
+    --elf-primary: #31528f;
+    --elf-accent: #ed7d31;
+}
+
+html, body { height: 100%; margin: 0; }
+
+.btn-primary {
+    --bs-btn-bg: #ed7d31;
+    --bs-btn-border-color: #ed7d31;
+    --bs-btn-hover-bg: #d96a20;
+    --bs-btn-hover-border-color: #d96a20;
+    --bs-btn-active-bg: #c45f1a;
+    --bs-btn-active-border-color: #c45f1a;
+}
+
+.navbar { box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+
+h1, h2, h3 { color: var(--elf-primary); }
+
+/* ── Table header brand gradient ── */
+.table > thead,
+.datatable-table > thead {
+    background: linear-gradient(135deg, #31528f 0%, #3d64ac 100%) !important;
+}
+.table > thead th,
+.table > thead > tr > th,
+.table > :not(caption) > thead > tr > th,
+.datatable-table > thead th,
+.datatable-table > thead > tr > th {
+    color: #fff !important;
+    background-color: transparent !important;
+    --bs-table-bg: transparent !important;
+    --bs-table-accent-bg: transparent !important;
+    font-weight: 600;
+    vertical-align: middle;
+    border-bottom-color: #27447a !important;
+    padding: .6rem .75rem;
+}
+
+/* ── Fixed table layout — no column jumping ── */
+#tblLinks, #tblPriceItems {
+    table-layout: fixed;
+    width: 100%;
+}
+#tblLinks td, #tblPriceItems td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#tblLinks th, #tblPriceItems th {
+    white-space: normal;
+    word-break: break-word;
+}
+#tblLinks td:first-child, #tblPriceItems td:nth-child(2),
+#tblPriceItems td:nth-child(3), #tblPriceItems td:last-child,
+#tblLinks td:nth-child(5), #tblLinks td:nth-child(6) {
+    white-space: normal;
+    word-break: break-word;
+}
+
+/* ── Table utility classes (used by JS) ── */
+.empty-row {
+    text-align: center;
+    color: #999;
+    font-style: italic;
+}
+
+.loading {
+    text-align: center;
+    color: #888;
+    padding: 2rem !important;
+}
+
+.loading::before {
+    content: '';
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    border: .2em solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spinner-border .75s linear infinite;
+    margin-right: .5rem;
+    vertical-align: middle;
+}
+
+.loading-spinner {
+    display: inline-block;
+    width: 1.2rem;
+    height: 1.2rem;
+    border: .2em solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spinner-border .75s linear infinite;
+    vertical-align: middle;
+}
+
+/* ── Action icon buttons in tables ── */
+.btn-icon {
+    background: none;
+    border: none;
+    font-size: 1.15rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background .15s;
+    text-decoration: none;
+    display: inline-block;
+}
+.btn-icon:hover { background: #e9ecef; }
+.btn-danger-icon:hover { background: #f8d7da; }
+
+/* ── Checkbox grid (supplier/price regions) ── */
+.checkbox-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: .5rem;
+}
+.checkbox-grid .checkbox-label,
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .45rem .6rem;
+    background: #f8f9fa;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background .15s;
+    font-size: .9rem;
+}
+.checkbox-grid .checkbox-label:hover,
+.checkbox-label:hover { background: #e2e6ea; }
+.checkbox-label input[type="checkbox"] {
+    width: 1.1rem;
+    height: 1.1rem;
+    cursor: pointer;
+}
+
+/* ── Schedule builder (price-edit) ── */
+.schedule-builder {
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: .5rem;
+    padding: .75rem;
+    background: #fafbfc;
+}
+.schedule-row {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    flex-wrap: wrap;
+}
+.schedule-select {
+    padding: .4rem .6rem;
+    border: 1px solid #ccc;
+    border-radius: .375rem;
+    font-size: .88rem;
+    background: #fff;
+}
+.schedule-select-sm {
+    width: 70px;
+    text-align: center;
+}
+.schedule-time {
+    display: flex;
+    align-items: center;
+    gap: .3rem;
+}
+.schedule-days {
+    display: flex;
+    gap: .3rem;
+    margin-top: .5rem;
+    flex-wrap: wrap;
+}
+.schedule-day-label {
+    display: flex;
+    align-items: center;
+    gap: .2rem;
+    padding: .35rem .6rem;
+    border: 1px solid #ccc;
+    border-radius: .375rem;
+    cursor: pointer;
+    font-size: .85rem;
+    background: #fff;
+    user-select: none;
+    transition: background .15s, border-color .15s;
+}
+.schedule-day-label:has(input:checked) {
+    background: var(--elf-primary);
+    color: #fff;
+    border-color: var(--elf-primary);
+}
+
+/* ── Source type toggle (access-point-edit) ── */
+.source-type-toggle {
+    display: flex;
+    gap: 1rem;
+    margin-top: 4px;
+}
+.radio-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    padding: 8px 16px;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    transition: all .2s;
+}
+.radio-label:has(input:checked) {
+    border-color: var(--elf-primary);
+    background: #eef3fb;
+}
+.radio-label input[type="radio"] { margin: 0; }
+
+/* ── Info boxes (regions modal, links modal) ── */
+.info-grid { display: grid; gap: .8rem; }
+.info-item { display: flex; gap: .5rem; }
+.info-item label { font-weight: 600; color: var(--elf-primary); min-width: 150px; }
+
+.info-section { margin-bottom: 1.2rem; }
+.info-section h4 { margin-bottom: .4rem; color: #555; font-size: .9rem; }
+.info-box {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: .375rem;
+    padding: .75rem 1rem;
+}
+.info-box.success { background: #d4edda; border-color: #c3e6cb; }
+
+/* ── Search results in links modal ── */
+.search-result-item:hover { background: #f0f0f0; }
+
+/* ── Stat cards on index/links ── */
+.stat-label { font-size: .88rem; color: #666; }
+.stat-value { font-size: 1.8rem; font-weight: 700; color: var(--elf-primary); }
+
+/* ── Simple-DataTables integration ── */
+.datatable-wrapper { margin-top: .5rem; }
+.datatable-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+    padding: .5rem .75rem;
+    justify-content: flex-end;
+}
+.datatable-top .elf-export-bar { display: flex; gap: .3rem; }
+.datatable-bottom {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+    padding: .5rem .75rem;
+    font-size: .85rem;
+    color: #666;
+}
+.datatable-bottom .datatable-info { flex: 1; }
+.datatable-bottom .datatable-dropdown { margin-left: auto; white-space: nowrap; }
+.datatable-sorter {
+    cursor: pointer;
+    position: relative;
+    padding-right: 1.2rem;
+}
+.datatable-sorter::before,
+.datatable-sorter::after {
+    content: '';
+    position: absolute;
+    right: 2px;
+    border: 4px solid transparent;
+    opacity: .4;
+}
+.datatable-sorter::before { border-bottom-color: #fff; top: calc(50% - 8px); }
+.datatable-sorter::after { border-top-color: #fff; top: calc(50% + 1px); }
+.datatable-sorter.datatable-ascending::before { opacity: 1; }
+.datatable-sorter.datatable-descending::after { opacity: 1; }
+.datatable-table thead th { white-space: nowrap; }
+.datatable-pagination-list { flex-wrap: wrap; }
+.datatable-empty { text-align: center; color: #999; font-style: italic; padding: 2rem !important; }
+.datatable-input { max-width: 400px; width: 100%; }
+.datatable-selector { max-width: 80px; }
+
+/* ── Column filters (TableFilters) ── */
+/* ── Filter icon in header ── */
+.elf-cf-icon {
+    cursor: pointer;
+    font-size: .55rem;
+    opacity: .45;
+    vertical-align: middle;
+    margin-left: 4px;
+    transition: opacity .15s, color .15s;
+}
+.elf-cf-icon:hover { opacity: 1; }
+.elf-cf-icon.active { opacity: 1; color: var(--elf-accent); }
+
+/* ── Dropdown panel ── */
+.elf-cf-dropdown {
+    position: absolute;
+    z-index: 9999;
+    background: #fff;
+    border: 1px solid #bfc8d6;
+    border-radius: .5rem;
+    box-shadow: 0 6px 24px rgba(0,0,0,.15);
+    width: 340px;
+    font-family: inherit;
+}
+
+/* ── Search row ── */
+.elf-cf-search-wrap {
+    display: flex;
+    align-items: center;
+    padding: 8px 10px 6px;
+    gap: 6px;
+}
+.elf-cf-search {
+    border: 1px solid #ced4da !important;
+    border-radius: .35rem !important;
+    font-size: .82rem !important;
+    flex: 1;
+    padding: .3rem .55rem !important;
+}
+.elf-cf-search:focus {
+    border-color: var(--elf-primary) !important;
+    box-shadow: 0 0 0 2px rgba(49,82,143,.15) !important;
+}
+.elf-cf-apply {
+    border-radius: .35rem !important;
+    padding: .3rem .6rem;
+    flex-shrink: 0;
+}
+
+/* ── Separator ── */
+.elf-cf-sep {
+    height: 1px;
+    background: #e9ecef;
+    margin: 0 10px;
+}
+
+/* ── Checkbox list ── */
+.elf-cf-list {
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+.elf-cf-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 5px 12px;
+    font-size: .82rem;
+    cursor: pointer;
+    line-height: 1.35;
+    transition: background .1s;
+}
+.elf-cf-item span {
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+}
+.elf-cf-item:hover { background: #f0f4ff; }
+.elf-cf-item-all {
+    font-weight: 600;
+    color: #31528f;
+    border-bottom: 1px solid #e9ecef;
+    padding-bottom: 6px;
+    margin-bottom: 2px;
+}
+.elf-cf-cb {
+    margin: 2px 0 0 0 !important;
+    flex-shrink: 0;
+    cursor: pointer;
+    width: 15px;
+    height: 15px;
+}
+
+/* ── Footer with Reset / OK / Cancel ── */
+.elf-cf-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-top: 1px solid #e9ecef;
+    background: #fafbfc;
+    border-radius: 0 0 .5rem .5rem;
+}
+.elf-cf-reset { margin-right: auto; }
+.elf-filter-toggle { white-space: nowrap; }
+.elf-filter-toggle.active {
+    color: var(--elf-accent) !important;
+    border-color: var(--elf-accent) !important;
+}
+
+/* ── Sortable table headers ── */
+th.sortable {
+    cursor: pointer;
+    position: relative;
+    padding-right: 1.4rem !important;
+    user-select: none;
+}
+th.sortable::after {
+    content: '\2195';
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: .35;
+    font-size: .75rem;
+}
+th.sortable.sort-asc::after { content: '\2191'; opacity: 1; }
+th.sortable.sort-desc::after { content: '\2193'; opacity: 1; }
+th.sortable:hover { opacity: .85; }
+
+/* ── Login page ── */
+.login-page {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #31528f 0%, #3d64ac 50%, #ed7d31 100%);
+    overflow: auto;
+}
+.login-btn {
+    background: linear-gradient(135deg, #ed7d31 0%, #ff8c42 100%);
+    color: white;
+    border: none;
+    border-radius: .375rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform .2s, box-shadow .2s;
+}
+.login-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(237,125,49,.4);
+    color: white;
+}
+.login-btn:disabled { opacity: .65; cursor: not-allowed; transform: none; }
+
+/* ── Toast Notifications (elf-* prefix to avoid Bootstrap conflict) ── */
+.elf-toast-container {
+    position: fixed;
+    top: 4.5rem;
+    right: 1.2rem;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+    max-width: 440px;
+    pointer-events: none;
+}
+.elf-toast {
+    pointer-events: auto;
+    display: flex;
+    gap: .7rem;
+    padding: .9rem 1rem;
+    border-radius: .625rem;
+    box-shadow: 0 6px 24px rgba(0,0,0,.15), 0 1px 4px rgba(0,0,0,.08);
+    background: #fff;
+    color: #333;
+    font-size: .88rem;
+    line-height: 1.45;
+    animation: elfToastIn .35s ease-out;
+    border-left: 4px solid #aaa;
+    position: relative;
+    overflow: hidden;
+}
+.elf-toast.elf-toast-out { animation: elfToastOut .3s ease-in forwards; }
+.elf-toast-icon { font-size: 1.3rem; flex-shrink: 0; margin-top: 1px; }
+.elf-toast-body { flex: 1; min-width: 0; }
+.elf-toast-title { font-weight: 600; margin-bottom: .25rem; font-size: .92rem; }
+.elf-toast-message { white-space: pre-line; word-break: break-word; }
+.elf-toast-close {
+    position: absolute; top: .5rem; right: .6rem;
+    background: none; border: none; font-size: 1.1rem;
+    cursor: pointer; color: #999; line-height: 1; padding: 2px;
+}
+.elf-toast-close:hover { color: #333; }
+.elf-toast-progress {
+    position: absolute; bottom: 0; left: 0;
+    height: 3px; background: rgba(0,0,0,.12);
+    animation: elfToastProgress linear forwards;
+}
+.elf-toast-success { border-left-color: #198754; }
+.elf-toast-error   { border-left-color: #dc3545; }
+.elf-toast-warning { border-left-color: #ffc107; }
+.elf-toast-info    { border-left-color: #31528f; }
+
+.elf-toast-detail-list { margin: .4rem 0 0; padding: 0; list-style: none; }
+.elf-toast-detail-list li { padding: .15rem 0; padding-left: .8rem; position: relative; }
+.elf-toast-detail-list li::before { content: '\2013'; position: absolute; left: 0; color: #999; }
+.elf-toast-price-group { font-weight: 600; margin-top: .3rem; margin-bottom: .1rem; }
+
+@keyframes elfToastIn  { from { opacity:0; transform:translateX(60px); } to { opacity:1; transform:translateX(0); } }
+@keyframes elfToastOut { from { opacity:1; transform:translateX(0); } to { opacity:0; transform:translateX(60px); } }
+@keyframes elfToastProgress { from { width:100%; } to { width:0%; } }
+
+/* ============================================================
+   Дизайн-система «Электронная Фармация» — кабинет управления.
+   Акцент: синий #2b6cab + оранжевый #d97b1f. Поверх локального Bootstrap.
+   ============================================================ */
+:root {
+    --elf-primary: #2b6cab; --elf-primary-dark: #22578c; --elf-primary-soft: #eaf2f9;
+    --elf-accent: #d97b1f;
+    --ef-border: #e4e7ec; --ef-border-soft: #eef0f3; --ef-field: #d0d5dd;
+    --ef-muted: #667085; --ef-thead: #f8f9fb;
+}
+body { background: #f4f5f7; color: #1b2430; font-size: 14px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+h1, h2, h3, .h1, .h2, .h3 { color: #1b2430 !important; font-weight: 700; letter-spacing: -.01em; }
+
+/* Навбар — белый, тонкий, синий акцент */
+.navbar { background: #fff !important; border-bottom: 1px solid var(--ef-border); box-shadow: none !important; }
+.navbar .navbar-brand, .navbar .nav-link, .navbar .navbar-text { color: #1b2430 !important; }
+.navbar .nav-link:hover { color: var(--elf-primary-dark) !important; }
+.navbar .nav-link.active { color: var(--elf-primary-dark) !important; background: var(--elf-primary-soft);
+    border-radius: 8px; font-weight: 600; }
+
+/* Менеджер: навигация всегда видна (без «гамбургера») */
+.mgr-topnav { z-index: 1030; }
+.mgr-topnav .navbar-nav .nav-link {
+    padding: .45rem .75rem;
+    white-space: nowrap;
+}
+@media (max-width: 575.98px) {
+    .mgr-topnav .container-fluid { justify-content: center; }
+    .mgr-topnav .navbar-brand { width: 100%; justify-content: center; }
+    .mgr-topnav .navbar-nav { width: 100%; justify-content: center; }
+}
+
+/* Кнопки */
+.btn { border-radius: 8px; font-weight: 600; }
+.btn-primary {
+    --bs-btn-bg: var(--elf-primary); --bs-btn-border-color: var(--elf-primary);
+    --bs-btn-hover-bg: var(--elf-primary-dark); --bs-btn-hover-border-color: var(--elf-primary-dark);
+    --bs-btn-active-bg: var(--elf-primary-dark); --bs-btn-active-border-color: var(--elf-primary-dark);
+    --bs-btn-disabled-bg: var(--elf-primary); --bs-btn-disabled-border-color: var(--elf-primary);
+}
+.btn-warning {
+    --bs-btn-bg: var(--elf-accent); --bs-btn-border-color: var(--elf-accent); --bs-btn-color: #fff;
+    --bs-btn-hover-bg: #c06a15; --bs-btn-hover-border-color: #c06a15; --bs-btn-hover-color: #fff;
+}
+.btn-secondary, .btn-outline-secondary { --bs-btn-color: #475467; }
+.btn:focus-visible { box-shadow: 0 0 0 3px var(--elf-primary-soft) !important; }
+
+/* Карточки, поля */
+.card { border: 1px solid var(--ef-border); border-radius: 10px; box-shadow: 0 1px 2px rgba(16,24,40,.06); }
+.card-header { background: #fff; border-bottom: 1px solid var(--ef-border-soft); font-weight: 700; }
+.form-control, .form-select { border: 1px solid var(--ef-field); border-radius: 8px; font-size: 13px; color: #1b2430; }
+.form-control:focus, .form-select:focus { border-color: var(--elf-primary); box-shadow: 0 0 0 3px var(--elf-primary-soft); }
+
+/* Таблицы — светлая шапка капсом (перебиваем старый синий градиент) */
+.table > thead, .datatable-table > thead { background: var(--ef-thead) !important; }
+.table > thead th, .table > thead > tr > th, .table > :not(caption) > thead > tr > th,
+.datatable-table > thead th, .datatable-table > thead > tr > th {
+    background: var(--ef-thead) !important; color: var(--ef-muted) !important;
+    --bs-table-bg: transparent !important; --bs-table-accent-bg: transparent !important; --bs-table-color: var(--ef-muted) !important;
+    font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    border-bottom: 1px solid var(--ef-border) !important; padding: .55rem .75rem; vertical-align: middle;
+}
+.table > tbody td { border-bottom: 1px solid var(--ef-border-soft); font-size: 13px; }
+.table > tbody tr:hover { background: var(--ef-thead); }
+
+/* Datatable-сортировщик — тёмные стрелки на светлой шапке */
+.datatable-sorter::before { border-bottom-color: var(--ef-muted) !important; }
+.datatable-sorter::after { border-top-color: var(--ef-muted) !important; }
+.datatable-sorter.datatable-ascending::before { border-bottom-color: var(--elf-primary-dark) !important; }
+.datatable-sorter.datatable-descending::after { border-top-color: var(--elf-primary-dark) !important; }
+
+/* Бейджи, тосты */
+.badge.bg-primary { background: var(--elf-primary-soft) !important; color: var(--elf-primary-dark) !important; }
+.elf-toast-info { border-left-color: var(--elf-primary) !important; }
+.elf-toast-success { border-left-color: #2e8a57 !important; }

@@ -79,10 +79,25 @@ type Config struct {
 	FieldsConfig *FieldsConfig `yaml:"-"`
 }
 
-// User представляет пользователя для аутентификации
+// User представляет пользователя для аутентификации (кабинет admin/manager).
 type User struct {
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
+	// Role: admin | manager. Пустое значение = admin (обратная совместимость).
+	Role string `yaml:"role"`
+}
+
+// EffectiveRole возвращает роль пользователя конфигурации.
+func (u User) EffectiveRole() string {
+	r := strings.TrimSpace(strings.ToLower(u.Role))
+	switch r {
+	case "manager":
+		return "manager"
+	case "admin", "":
+		return "admin"
+	default:
+		return "admin"
+	}
 }
 
 // LoadConfig загружает конфигурацию из файла .cfg рядом с исполняемым файлом

@@ -24,15 +24,16 @@ import (
 
 // Server представляет HTTP сервер
 type Server struct {
-	server      *http.Server
-	server2     *http.Server // Второй сервер для ClienElf2
-	config      *config.Config
-	database    *db.Database
-	authService *AuthService
-	limiter     *SecurityLimiter
-	logger      *logger.Logger
-	fileLogger  *logger.Logger
-	dbLogger    *logger.DBLogger
+	server             *http.Server
+	server2            *http.Server // Второй сервер для ClienElf2
+	config             *config.Config
+	database           *db.Database
+	authService        *AuthService
+	limiter            *SecurityLimiter
+	priceListScheduler *sync.PriceListScheduler
+	logger             *logger.Logger
+	fileLogger         *logger.Logger
+	dbLogger           *logger.DBLogger
 }
 
 // NewServer создаёт новый HTTP сервер
@@ -94,6 +95,11 @@ func NewServer(cfg *config.Config, database *db.Database, fileLogger *logger.Log
 	return server
 }
 
+// SetPriceListScheduler передаёт общий планировщик (нужен для ручного «Обновить» с тем же inFlight-lock).
+func (s *Server) SetPriceListScheduler(pls *sync.PriceListScheduler) {
+	s.priceListScheduler = pls
+}
+
 // setupRoutes настраивает маршруты для основного сервера (ClientWeb)
 func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
@@ -101,6 +107,10 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/health", s.corsMiddleware(s.loggingMiddleware(s.healthCheck)))
 
 	s.setupAPIRoutes(mux)
+	// Кабинет поставщика (/supplier/* + /api/sc/*) должен работать и на основном домене 8080 —
+	// иначе login redirect /supplier/index.html попадает в SPA-fallback ClientWeb (ломается CSS/JS).
+	s.setupSupplierRoutes(mux)
+	s.setupSupplierStaticFiles(mux)
 	s.setupStaticFiles(mux)
 }
 
@@ -236,6 +246,7 @@ func (s *Server) setupRoutes2(mux *http.ServeMux) {
 
 	// Маршруты кабинета поставщика
 	s.setupSupplierRoutes(mux)
+	s.setupSupplierStaticFiles(mux)
 
 	// Статические файлы из ClienElf2
 	s.setupStaticFiles2(mux)
@@ -288,6 +299,7 @@ func (s *Server) setupAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/import-points", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetImportPoints)).ServeHTTP)))
 	mux.HandleFunc("/api/import-points/", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleImportPointsRouter)).ServeHTTP)))
 	mux.HandleFunc("/api/import-points/create", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleCreateImportPoint)).ServeHTTP)))
+	mux.HandleFunc("/api/ftp/test", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleFTPTest)).ServeHTTP)))
 
 	// Маппинги полей
 	mux.HandleFunc("/api/field-mappings", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetFieldMappings)).ServeHTTP)))
@@ -301,7 +313,16 @@ func (s *Server) setupAPIRoutes(mux *http.ServeMux) {
 
 	// Импорт файлов
 	mux.HandleFunc("/api/import/file", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleImportFile)).ServeHTTP)))
-	mux.HandleFunc("/api/invoice-imports", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetInvoiceImports)).ServeHTTP)))
+	mux.HandleFunc("/api/invoice-imports", s.corsMiddleware(s.loggingMiddleware(
+		s.authService.JWTMiddleware(
+			s.authService.RequireRole("admin", "manager")(http.HandlerFunc(s.handleInvoiceImportsRouter)),
+		).ServeHTTP,
+	)))
+	mux.HandleFunc("/api/invoice-imports/", s.corsMiddleware(s.loggingMiddleware(
+		s.authService.JWTMiddleware(
+			s.authService.RequireRole("admin", "manager")(http.HandlerFunc(s.handleInvoiceImportsRouter)),
+		).ServeHTTP,
+	)))
 
 	// Сопоставление прайсов
 	mux.HandleFunc("/api/match/invoice-data", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleMatchInvoiceData)).ServeHTTP)))
@@ -332,15 +353,27 @@ func (s *Server) setupAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/audit-logs", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetAuditLogs)).ServeHTTP)))
 	mux.HandleFunc("/api/audit-logs/stats", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetAuditLogStats)).ServeHTTP)))
 
-	// Заказы
+	// Кабинет менеджера: поиск препарата с ценами поставщиков
+	mux.HandleFunc("/api/manager/drug-offers", s.corsMiddleware(s.loggingMiddleware(
+		s.authService.JWTMiddleware(
+			s.authService.RequireRole("admin", "manager")(http.HandlerFunc(s.handleManagerDrugOffers)),
+		).ServeHTTP,
+	)))
+	mux.HandleFunc("/api/manager/dashboard", s.corsMiddleware(s.loggingMiddleware(
+		s.authService.JWTMiddleware(
+			s.authService.RequireRole("admin", "manager")(http.HandlerFunc(s.handleManagerDashboard)),
+		).ServeHTTP,
+	)))
+
+	// Заказы (admin + manager)
 	mux.HandleFunc("/api/orders", s.corsMiddleware(s.loggingMiddleware(
 		s.authService.JWTMiddleware(
-			s.authService.RequireRole("admin")(http.HandlerFunc(s.handleOrdersRouter)),
+			s.authService.RequireRole("admin", "manager")(http.HandlerFunc(s.handleOrdersRouter)),
 		).ServeHTTP,
 	)))
 	mux.HandleFunc("/api/orders/", s.corsMiddleware(s.loggingMiddleware(
 		s.authService.JWTMiddleware(
-			s.authService.RequireRole("admin")(http.HandlerFunc(s.handleOrdersRouter)),
+			s.authService.RequireRole("admin", "manager")(http.HandlerFunc(s.handleOrdersRouter)),
 		).ServeHTTP,
 	)))
 	mux.HandleFunc("/api/order-statuses", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetOrderStatuses)).ServeHTTP)))
@@ -471,7 +504,12 @@ func (s *Server) setupStaticFiles2(mux *http.ServeMux) {
 		io.Copy(w, file)
 	}
 
-	// Обработчик для статических файлов кабинета поставщика (ClienSupplier)
+	// Регистрируем обработчик для всех путей (должен быть последним)
+	mux.HandleFunc("/", staticHandler)
+}
+
+// setupSupplierStaticFiles раздаёт кабинет поставщика из ./ClienSupplier по префиксу /supplier/.
+func (s *Server) setupSupplierStaticFiles(mux *http.ServeMux) {
 	supplierDir := "./ClienSupplier"
 	supplierHandler := func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
@@ -492,6 +530,12 @@ func (s *Server) setupStaticFiles2(mux *http.ServeMux) {
 		filePath := filepath.Join(supplierDir, reqPath)
 		fileInfo, err := os.Stat(filePath)
 		if err != nil || fileInfo.IsDir() {
+			ext := strings.ToLower(filepath.Ext(reqPath))
+			// Для ассетов (.css/.js/...) не подменять HTML — иначе «слетает дизайн».
+			if ext != "" && ext != ".html" {
+				http.Error(w, "File not found", http.StatusNotFound)
+				return
+			}
 			filePath = filepath.Join(supplierDir, "index.html")
 			fileInfo, err = os.Stat(filePath)
 			if err != nil {
@@ -521,6 +565,8 @@ func (s *Server) setupStaticFiles2(mux *http.ServeMux) {
 			w.Header().Set("Content-Type", "image/jpeg")
 		case ".svg":
 			w.Header().Set("Content-Type", "image/svg+xml")
+		case ".woff", ".woff2", ".ttf", ".eot":
+			w.Header().Set("Content-Type", "application/octet-stream")
 		default:
 			w.Header().Set("Content-Type", "application/octet-stream")
 		}
@@ -535,9 +581,6 @@ func (s *Server) setupStaticFiles2(mux *http.ServeMux) {
 		io.Copy(w, file)
 	}
 	mux.HandleFunc("/supplier/", supplierHandler)
-
-	// Регистрируем обработчик для всех путей (должен быть последним)
-	mux.HandleFunc("/", staticHandler)
 }
 
 // healthCheck обрабатывает проверку здоровья сервиса

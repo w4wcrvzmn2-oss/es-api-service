@@ -201,6 +201,34 @@ func (s *Server) handleCreateBuyer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Грузополучатель (BuyerLocation) создаём сразу вместе с покупателем —
+	// в десктопе точки больше не заводят вручную/тестово.
+	locAddr := strings.TrimSpace(req.Name)
+	if v := nilIfEmpty(req.Address); v != nil {
+		locAddr = *v
+	}
+	if locAddr == "" {
+		locAddr = "Основной адрес"
+	}
+	locID := uuid.New().String()
+	var regionPtr *string
+	if regionID != "" {
+		regionPtr = &regionID
+	}
+	loc := models.BuyerLocation{
+		BuyerLocationID: locID,
+		BuyerID:         buyerID,
+		Address:         locAddr,
+		RegionID:        regionPtr,
+		IsDefault:       true,
+		CreatedAt:       time.Now().UTC(),
+	}
+	if err := s.database.GORMWith(ctx).Table("BuyerLocation").Create(&loc).Error; err != nil {
+		s.logger.Error("Покупатель %s создан, но грузополучатель не создан: %v", buyerID, err)
+	} else {
+		s.logger.Info("Создан грузополучатель %s для покупателя %s", locID, buyerID)
+	}
+
 	s.logger.Info("Создан покупатель: %s - %s", buyerID, req.Name)
 	s.handleGetBuyerByID(w, r, buyerID)
 }

@@ -80,6 +80,12 @@
                             <input type="text" class="form-control" id="ftpRemotePath" name="ftpRemotePath" placeholder="/prices/">
                             <div class="form-text">Удалённая папка на FTP, откуда забирать файлы прайсов</div>
                         </div>
+                        <div class="mb-3 d-flex flex-wrap align-items-center gap-2">
+                            <button type="button" class="btn btn-outline-primary" id="btnFtpTest" onclick="testFtpConnection()">
+                                <i class="bi bi-plug"></i> Проверить соединение
+                            </button>
+                            <span id="ftpTestStatus" class="small"></span>
+                        </div>
                     </div>
 
                     <div class="form-check mb-3">

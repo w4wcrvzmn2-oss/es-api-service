@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"es_api_service/internal/db"
 	"es_api_service/internal/models"
 	"es_api_service/internal/orderexport"
 
@@ -40,9 +39,9 @@ func (s *Server) handleSCExportConfig(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		var cfg models.SupplierExportConfig
 		err := s.database.GORMWith(ctx).
-			Where("SupplierID = ?", db.UUIDParam(sid)).
-			Take(&cfg).Error
-		if err == gorm.ErrRecordNotFound {
+			Raw(`SELECT * FROM "SupplierExportConfig" WHERE "SupplierID" = CAST(? AS UUID) LIMIT 1`, sid).
+			Scan(&cfg).Error
+		if err == gorm.ErrRecordNotFound || (err == nil && cfg.SupplierExportConfigID == "") {
 			writeJSON(w, http.StatusOK, models.SupplierExportConfig{
 				SupplierID: sid,
 				Method:     "none",
@@ -82,11 +81,27 @@ func (s *Server) handleSCExportConfig(w http.ResponseWriter, r *http.Request) {
 		req.UpdatedAt = time.Now().UTC()
 
 		err := s.database.GORMWith(ctx).Transaction(func(tx *gorm.DB) error {
-			if e := tx.Exec(`DELETE FROM SupplierExportConfig WHERE SupplierID = ?`, db.UUIDParam(sid)).Error; e != nil {
+			if e := tx.Exec(`DELETE FROM "SupplierExportConfig" WHERE "SupplierID" = CAST(? AS UUID)`, sid).Error; e != nil {
 				return e
 			}
 			req.SupplierExportConfigID = uuid.New().String()
-			return tx.Create(&req).Error
+			return tx.Exec(`
+				INSERT INTO "SupplierExportConfig" (
+					"SupplierExportConfigID","SupplierID","Method","Format",
+					"FtpHost","FtpPort","FtpUser","FtpPassword","FtpDir",
+					"EmailTo","SmtpHost","SmtpPort","SmtpUser","SmtpPassword","SmtpFrom",
+					"IsActive","UpdatedAt"
+				) VALUES (
+					CAST(? AS UUID), CAST(? AS UUID), ?, ?,
+					?, ?, ?, ?, ?,
+					?, ?, ?, ?, ?, ?,
+					?, ?
+				)`,
+				req.SupplierExportConfigID, req.SupplierID, req.Method, req.Format,
+				req.FtpHost, req.FtpPort, req.FtpUser, req.FtpPassword, req.FtpDir,
+				req.EmailTo, req.SmtpHost, req.SmtpPort, req.SmtpUser, req.SmtpPassword, req.SmtpFrom,
+				req.IsActive, req.UpdatedAt,
+			).Error
 		})
 		if err != nil {
 			if s.logger != nil {
@@ -116,8 +131,10 @@ func (s *Server) handleSCOrderDelivery(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		var cfg models.SupplierExportConfig
-		err := s.database.GORMWith(ctx).Where("SupplierID = ?", db.UUIDParam(sid)).Take(&cfg).Error
-		if err == gorm.ErrRecordNotFound {
+		err := s.database.GORMWith(ctx).
+			Raw(`SELECT * FROM "SupplierExportConfig" WHERE "SupplierID" = CAST(? AS UUID) LIMIT 1`, sid).
+			Scan(&cfg).Error
+		if err == gorm.ErrRecordNotFound || (err == nil && cfg.SupplierExportConfigID == "") {
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"format": "DBF", "method": "Email",
 				"ftp_host": "", "ftp_path": "", "ftp_user": "", "ftp_password": "",
@@ -196,10 +213,26 @@ func (s *Server) handleSCOrderDelivery(w http.ResponseWriter, r *http.Request) {
 			cfg.EmailTo = &body.Email
 		}
 		err := s.database.GORMWith(ctx).Transaction(func(tx *gorm.DB) error {
-			if e := tx.Exec(`DELETE FROM SupplierExportConfig WHERE SupplierID = ?`, db.UUIDParam(sid)).Error; e != nil {
+			if e := tx.Exec(`DELETE FROM "SupplierExportConfig" WHERE "SupplierID" = CAST(? AS UUID)`, sid).Error; e != nil {
 				return e
 			}
-			return tx.Create(&cfg).Error
+			return tx.Exec(`
+				INSERT INTO "SupplierExportConfig" (
+					"SupplierExportConfigID","SupplierID","Method","Format",
+					"FtpHost","FtpPort","FtpUser","FtpPassword","FtpDir",
+					"EmailTo","SmtpHost","SmtpPort","SmtpUser","SmtpPassword","SmtpFrom",
+					"IsActive","UpdatedAt"
+				) VALUES (
+					CAST(? AS UUID), CAST(? AS UUID), ?, ?,
+					?, ?, ?, ?, ?,
+					?, ?, ?, ?, ?, ?,
+					?, ?
+				)`,
+				cfg.SupplierExportConfigID, cfg.SupplierID, cfg.Method, cfg.Format,
+				cfg.FtpHost, cfg.FtpPort, cfg.FtpUser, cfg.FtpPassword, cfg.FtpDir,
+				cfg.EmailTo, cfg.SmtpHost, cfg.SmtpPort, cfg.SmtpUser, cfg.SmtpPassword, cfg.SmtpFrom,
+				cfg.IsActive, cfg.UpdatedAt,
+			).Error
 		})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Ошибка сохранения настроек"})
@@ -246,81 +279,83 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	type row struct {
-		OrderID      string
-		OrderDate    time.Time
-		Buyer        string
-		Address      string
-		Code         sql.NullString
-		Name         sql.NullString
-		SuppName     sql.NullString
-		Barcode      sql.NullString
-		Manufacturer sql.NullString
-		Country      sql.NullString
-		Series       sql.NullString
-		Batch        sql.NullString
-		Expiry       sql.NullTime
-		Qty          float64
-		Price        float64
+		OrderID      string         `gorm:"column:order_id"`
+		GlobalSign   sql.NullString `gorm:"column:global_sign"`
+		OrderDate    time.Time      `gorm:"column:order_date"`
+		Buyer        string         `gorm:"column:buyer"`
+		Address      string         `gorm:"column:address"`
+		Code         sql.NullString `gorm:"column:code"`
+		Name         sql.NullString `gorm:"column:name"`
+		SuppName     sql.NullString `gorm:"column:supp_name"`
+		Barcode      sql.NullString `gorm:"column:barcode"`
+		Manufacturer sql.NullString `gorm:"column:manufacturer"`
+		Country      sql.NullString `gorm:"column:country"`
+		Series       sql.NullString `gorm:"column:series"`
+		Batch        sql.NullString `gorm:"column:batch"`
+		Expiry       sql.NullTime   `gorm:"column:expiry"`
+		Qty          float64        `gorm:"column:qty"`
+		Price        float64        `gorm:"column:price"`
 	}
 	var rows []row
 	err := s.database.GORMWith(ctx).Raw(`
 		SELECT
-			CAST(o.OrderID AS TEXT) AS OrderID,
-			o.CreatedAt AS OrderDate,
-			b.Name AS Buyer,
-			COALESCE(bl.Address, '') AS Address,
-			COALESCE(NULLIF(LTRIM(RTRIM(oi.ItemCode)), ''), sp.ItemCode, spfb.ItemCode) AS Code,
+			CAST(o."OrderID" AS TEXT) AS order_id,
+			o."GlobalSign" AS global_sign,
+			o."CreatedAt" AS order_date,
+			b."Name" AS buyer,
+			COALESCE(bl."Address", '') AS address,
+			COALESCE(NULLIF(TRIM(oi."ItemCode"), ''), sp."ItemCode", spfb."ItemCode") AS code,
 			COALESCE(
-				NULLIF(LTRIM(RTRIM(oi.ItemName)), ''),
-				NULLIF(LTRIM(RTRIM(sp.ItemName)), ''),
-				NULLIF(LTRIM(RTRIM(sp.SupplierItemName)), ''),
-				NULLIF(LTRIM(RTRIM(spfb.ItemName)), ''),
-				NULLIF(LTRIM(RTRIM(spfb.SupplierItemName)), ''),
-				p.Name,
+				NULLIF(TRIM(oi."ItemName"), ''),
+				NULLIF(TRIM(sp."ItemName"), ''),
+				NULLIF(TRIM(sp."SupplierItemName"), ''),
+				NULLIF(TRIM(spfb."ItemName"), ''),
+				NULLIF(TRIM(spfb."SupplierItemName"), ''),
+				p."Name",
 				''
-			) AS Name,
-			COALESCE(sp.SupplierItemName, spfb.SupplierItemName) AS SuppName,
-			COALESCE(NULLIF(LTRIM(RTRIM(oi.Barcode)), ''), sp.Barcode, spfb.Barcode) AS Barcode,
-			COALESCE(sp.Manufacturer, spfb.Manufacturer) AS Manufacturer,
-			COALESCE(sp.Country, spfb.Country) AS Country,
-			COALESCE(sp.Series, spfb.Series) AS Series,
-			COALESCE(sp.BatchNumber, spfb.BatchNumber) AS Batch,
-			COALESCE(sp.ExpiryDate, spfb.ExpiryDate) AS Expiry,
-			oi.Qty AS Qty,
-			oi.UnitPrice AS Price
-		FROM OrderItem oi
-		INNER JOIN "Order" o ON o.OrderID = oi.OrderID
-		INNER JOIN BuyerUser bu ON bu.BuyerUserID = o.BuyerUserID
-		INNER JOIN Buyer b ON b.BuyerID = bu.BuyerID
-		LEFT JOIN BuyerLocation bl ON bl.BuyerLocationID = o.BuyerLocationID
-		LEFT JOIN Product p ON p.ProductID = oi.ProductID
-		LEFT JOIN SupplierPrice sp ON sp.SupplierPriceID = oi.SupplierPriceID
+			) AS name,
+			COALESCE(sp."SupplierItemName", spfb."SupplierItemName") AS supp_name,
+			COALESCE(NULLIF(TRIM(oi."Barcode"), ''), sp."Barcode", spfb."Barcode") AS barcode,
+			COALESCE(sp."Manufacturer", spfb."Manufacturer") AS manufacturer,
+			COALESCE(sp."Country", spfb."Country") AS country,
+			COALESCE(sp."Series", spfb."Series") AS series,
+			COALESCE(sp."BatchNumber", spfb."BatchNumber") AS batch,
+			COALESCE(sp."ExpiryDate", spfb."ExpiryDate") AS expiry,
+			oi."Qty" AS qty,
+			oi."UnitPrice" AS price
+		FROM "OrderItem" oi
+		INNER JOIN "Order" o ON o."OrderID" = oi."OrderID"
+		INNER JOIN "BuyerUser" bu ON bu."BuyerUserID" = o."BuyerUserID"
+		INNER JOIN "Buyer" b ON b."BuyerID" = bu."BuyerID"
+		LEFT JOIN "BuyerLocation" bl ON bl."BuyerLocationID" = o."BuyerLocationID"
+		LEFT JOIN "Product" p ON p."ProductID" = oi."ProductID"
+		LEFT JOIN "SupplierPrice" sp ON sp."SupplierPriceID" = oi."SupplierPriceID"
 		LEFT JOIN LATERAL (
-			SELECT spx.ItemCode, spx.ItemName, spx.SupplierItemName, spx.Barcode,
-				spx.Manufacturer, spx.Country, spx.Series, spx.BatchNumber, spx.ExpiryDate
-			FROM SupplierPrice spx
-			WHERE sp.SupplierPriceID IS NULL
-			  AND spx.SupplierID = oi.SupplierID
+			SELECT spx."ItemCode", spx."ItemName", spx."SupplierItemName", spx."Barcode",
+				spx."Manufacturer", spx."Country", spx."Series", spx."BatchNumber", spx."ExpiryDate"
+			FROM "SupplierPrice" spx
+			WHERE oi."SupplierPriceID" IS NULL
+			  AND spx."SupplierID" = oi."SupplierID"
 			  AND (
-			    (oi.ProductID IS NOT NULL AND spx.GUID_ES = oi.ProductID)
-			    OR ABS(COALESCE(spx.FinalPrice, spx.Price) - oi.UnitPrice) < 0.05
+			    (oi."ProductID" IS NOT NULL AND spx."GUID_ES" = oi."ProductID")
+			    OR (COALESCE(spx."FinalPrice", spx."Price") - oi."UnitPrice") BETWEEN -0.05 AND 0.05
 			  )
 			ORDER BY
-			  CASE WHEN oi.ProductID IS NOT NULL AND spx.GUID_ES = oi.ProductID THEN 0 ELSE 1 END,
-			  ABS(COALESCE(spx.FinalPrice, spx.Price) - oi.UnitPrice),
-			  spx.UpdatedAt DESC
-		) spfb
-		WHERE oi.SupplierID = CAST(@sid AS UUID)
-		  AND o.CreatedAt >= @from
-		  AND o.CreatedAt < DATEADD(day, 1, CAST(@to AS DATE))
-		ORDER BY o.CreatedAt, o.OrderID
-LIMIT 1
-`, sql.Named("sid", sid), sql.Named("from", from), sql.Named("to", to)).Scan(&rows).Error
+			  CASE WHEN oi."ProductID" IS NOT NULL AND spx."GUID_ES" = oi."ProductID" THEN 0 ELSE 1 END,
+			  (COALESCE(spx."FinalPrice", spx."Price") - oi."UnitPrice") * (COALESCE(spx."FinalPrice", spx."Price") - oi."UnitPrice"),
+			  spx."UpdatedAt" DESC
+			LIMIT 1
+		) spfb ON TRUE
+		WHERE oi."SupplierID" = CAST(? AS UUID)
+		  AND o."CreatedAt" >= CAST(? AS date)
+		  AND o."CreatedAt" < (CAST(? AS date) + INTERVAL '1 day')
+		ORDER BY o."CreatedAt", o."OrderID"
+	`, sid, from, to).Scan(&rows).Error
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Error("Ошибка выборки заказов для выгрузки: %v", err)
 		}
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Ошибка выборки заказов"})
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Ошибка выборки заказов: " + err.Error()})
 		return
 	}
 	if len(rows) == 0 {
@@ -338,6 +373,7 @@ LIMIT 1
 		}
 		line := orderexport.OrderLine{
 			OrderID:      rw.OrderID,
+			GlobalSign:   nullStr(rw.GlobalSign),
 			OrderDate:    rw.OrderDate,
 			Buyer:        rw.Buyer,
 			Address:      rw.Address,
@@ -389,11 +425,11 @@ LIMIT 1
 	}
 
 	var cfg models.SupplierExportConfig
-	cfgErr := s.database.GORMWith(ctx).Where("SupplierID = ?", db.UUIDParam(sid)).Take(&cfg).Error
-	if cfgErr == gorm.ErrRecordNotFound {
-		cfg.Method = "none"
-	} else if cfgErr != nil {
-		if s.logger != nil {
+	cfgErr := s.database.GORMWith(ctx).
+		Raw(`SELECT * FROM "SupplierExportConfig" WHERE "SupplierID" = CAST(? AS UUID) LIMIT 1`, sid).
+		Scan(&cfg).Error
+	if cfgErr != nil || cfg.SupplierExportConfigID == "" {
+		if cfgErr != nil && cfgErr != gorm.ErrRecordNotFound && s.logger != nil {
 			s.logger.Error("Ошибка чтения настроек выгрузки: %v", cfgErr)
 		}
 		cfg.Method = "none"

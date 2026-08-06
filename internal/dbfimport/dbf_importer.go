@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/LindsayBradford/go-dbf/godbf"
 	"github.com/google/uuid"
 )
 
@@ -154,7 +155,12 @@ func (di *DBFImporter) ImportInvoice(ctx context.Context, importPointID, filePat
 		di.logger.Info("Запись об импорте создана: InvoiceImportID=%s", invoiceImport.InvoiceImportID)
 	}
 
-	// Читаем файл прайса целиком через общий reader для DBF/Excel.
+	// DBF (Katren ~75MB): не грузим весь файл в []map — иначе OOM и рестарт службы каждые ~40с.
+	if DetectDataFileFormat(filePath) == "dbf" {
+		return di.importInvoiceDBFStream(ctx, invoiceImport, importPointID, filePath, mappings)
+	}
+
+	// Excel и прочее — прежний путь (файлы обычно меньше).
 	if di.logger != nil {
 		di.logger.Info("Чтение файла прайса: %s", filePath)
 	}
@@ -494,6 +500,184 @@ finished:
 	}
 
 	return invoiceImport, nil
+}
+
+// importInvoiceDBFStream читает DBF построчно и пишет батчами — без загрузки всего файла в RAM.
+func (di *DBFImporter) importInvoiceDBFStream(ctx context.Context, invoiceImport *models.InvoiceImport, importPointID, filePath string, mappings []models.DBFFieldMapping) (result *models.InvoiceImport, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			errMsg := fmt.Sprintf("panic при потоковом импорте DBF: %v", r)
+			if di.logger != nil {
+				di.logger.Error("%s file=%s processed_before_panic", errMsg, filePath)
+			}
+			invoiceImport.ImportStatus = "FAILED"
+			invoiceImport.ErrorMessage = &errMsg
+			now := time.Now()
+			invoiceImport.CompletedAt = &now
+			_ = di.updateInvoiceImport(ctx, invoiceImport)
+			result = nil
+			err = fmt.Errorf("%s", errMsg)
+		}
+	}()
+
+	if di.logger != nil {
+		di.logger.Info("Потоковое чтение DBF: %s", filePath)
+	}
+
+	dbfTable, errOpen := godbf.NewFromFile(filePath, "CP866")
+	if errOpen != nil {
+		errMsg := fmt.Sprintf("не удалось открыть DBF файл: %v", errOpen)
+		invoiceImport.ImportStatus = "FAILED"
+		invoiceImport.ErrorMessage = &errMsg
+		di.updateInvoiceImport(ctx, invoiceImport)
+		return nil, fmt.Errorf("%s", errMsg)
+	}
+
+	fieldNames := dbfTable.FieldNames()
+	headerCount := dbfTable.NumberOfRecords()
+	if headerCount < 0 {
+		headerCount = 0
+	}
+	invoiceImport.RecordsTotal = headerCount
+
+	if len(mappings) == 0 {
+		errMsg := "маппинг полей не настроен для точки импорта"
+		invoiceImport.ImportStatus = "FAILED"
+		invoiceImport.ErrorMessage = &errMsg
+		di.updateInvoiceImport(ctx, invoiceImport)
+		return nil, fmt.Errorf("%s", errMsg)
+	}
+
+	fieldMap := make(map[string]models.DBFFieldMapping, len(mappings))
+	for _, mapping := range mappings {
+		fieldMap[mapping.DBFFieldName] = mapping
+	}
+
+	if errs := di.validateDBFStructure(fieldNames, mappings); len(errs) > 0 {
+		errMsg := fmt.Sprintf("Ошибки валидации структуры файла данных:\n%s", strings.Join(errs, "\n"))
+		invoiceImport.ImportStatus = "FAILED"
+		invoiceImport.ErrorMessage = &errMsg
+		di.updateInvoiceImport(ctx, invoiceImport)
+		return nil, fmt.Errorf("%s", errMsg)
+	}
+
+	supplierID, errSup := di.getSupplierIDFromImportPoint(ctx, importPointID)
+	if errSup != nil {
+		errMsg := fmt.Sprintf("не удалось получить SupplierID: %v", errSup)
+		invoiceImport.ImportStatus = "FAILED"
+		invoiceImport.ErrorMessage = &errMsg
+		di.updateInvoiceImport(ctx, invoiceImport)
+		return nil, errSup
+	}
+
+	if di.logger != nil {
+		di.logger.Info("DBF потоковый импорт: полей=%d, записей(header)=%d, SupplierID=%s", len(fieldNames), headerCount, supplierID)
+	}
+
+	const batchSize = 200
+	batch := make([]*models.InvoiceData, 0, batchSize)
+	processed := 0
+	errorsCount := 0
+
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		if saveErr := di.saveInvoiceDataBatch(ctx, batch); saveErr != nil {
+			errorsCount += len(batch)
+			if di.logger != nil {
+				di.logger.Error("Ошибка batch сохранения %d записей: %v", len(batch), saveErr)
+			}
+		} else {
+			processed += len(batch)
+		}
+		batch = batch[:0]
+	}
+
+	// Строго в пределах NumberOfRecords — выход за header у godbf часто даёт panic → 7031 и рестарт службы.
+	for i := 0; i < headerCount; i++ {
+		select {
+		case <-ctx.Done():
+			flush()
+			errMsg := "импорт прерван: контекст отменен"
+			invoiceImport.ImportStatus = "FAILED"
+			invoiceImport.ErrorMessage = &errMsg
+			invoiceImport.RecordsProcessed = processed
+			invoiceImport.RecordsError = errorsCount
+			now := time.Now()
+			invoiceImport.CompletedAt = &now
+			di.updateInvoiceImport(ctx, invoiceImport)
+			return nil, ctx.Err()
+		default:
+		}
+
+		record, rowOK := readDBFRecordSafe(dbfTable, fieldNames, i)
+		if !rowOK {
+			errorsCount++
+			continue
+		}
+
+		invoiceData, mapErr := di.mapDBFRecordToInvoiceData(ctx, record, fieldMap, supplierID, invoiceImport.InvoiceImportID)
+		if mapErr != nil {
+			errorsCount++
+			continue
+		}
+		batch = append(batch, invoiceData)
+		if len(batch) >= batchSize {
+			flush()
+			if processed > 0 && processed%2000 == 0 && di.logger != nil {
+				di.logger.Info("Прогресс потокового импорта DBF: %d/%d успешно, ошибок=%d", processed, headerCount, errorsCount)
+			}
+		}
+	}
+
+	flush()
+
+	now := time.Now()
+	invoiceImport.CompletedAt = &now
+	invoiceImport.RecordsTotal = headerCount
+	invoiceImport.RecordsProcessed = processed
+	invoiceImport.RecordsError = errorsCount
+
+	if processed == 0 {
+		invoiceImport.ImportStatus = "FAILED"
+		errMsg := fmt.Sprintf("Не удалось импортировать ни одной записи (ошибок: %d)", errorsCount)
+		invoiceImport.ErrorMessage = &errMsg
+	} else {
+		invoiceImport.ImportStatus = "COMPLETED"
+	}
+
+	if updErr := di.updateInvoiceImport(ctx, invoiceImport); updErr != nil && di.logger != nil {
+		di.logger.Error("Ошибка обновления статуса импорта: %v", updErr)
+	}
+	if di.logger != nil {
+		di.logger.Info("Потоковый импорт DBF завершен: InvoiceImportID=%s Status=%s Processed=%d Errors=%d",
+			invoiceImport.InvoiceImportID, invoiceImport.ImportStatus, processed, errorsCount)
+	}
+	if processed == 0 {
+		return nil, fmt.Errorf("не удалось импортировать ни одной записи")
+	}
+	return invoiceImport, nil
+}
+
+// readDBFRecordSafe читает одну строку DBF; panic в godbf не роняет процесс.
+func readDBFRecordSafe(dbfTable *godbf.DbfTable, fieldNames []string, row int) (record map[string]interface{}, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			ok = false
+			record = nil
+		}
+	}()
+	record = make(map[string]interface{}, len(fieldNames))
+	for _, fieldName := range fieldNames {
+		fieldValue, ferr := dbfTable.FieldValueByName(row, fieldName)
+		if ferr != nil {
+			record[fieldName] = ""
+			continue
+		}
+		record[fieldName] = fieldValue
+	}
+	return record, true
 }
 
 // min возвращает минимальное из двух чисел

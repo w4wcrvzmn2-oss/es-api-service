@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Дашборд — Менеджер | PharmData</title>
+    <meta name="theme-color" content="#2b6cab">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%232b6cab'/><rect x='42' y='22' width='16' height='56' rx='5' fill='%23fff'/><rect x='22' y='42' width='56' height='16' rx='5' fill='%23fff'/></svg>">
+    <link href="vendor/bootstrap.min.css" rel="stylesheet">
+    <link href="vendor/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/custom.css">
+</head>
+<body class="bg-light">
+    <script src="../auth.js"></script>
+    <script>if (!AuthManager.requireRole('admin', 'manager')) {}</script>
+    <script src="js/nav-manager.js"></script>
+
+    <div class="container-fluid py-4 px-3 px-lg-5">
+        <div class="d-flex align-items-center flex-wrap gap-2 mb-4">
+            <h1 class="mb-0">Дашборд</h1>
+            <button class="btn btn-outline-secondary btn-sm ms-auto" onclick="loadDash()">
+                <i class="bi bi-arrow-clockwise"></i> Обновить
+            </button>
+        </div>
+
+        <div class="row g-3 mb-4" id="cards">
+            <div class="col-12"><div class="card"><div class="card-body loading">Загрузка…</div></div></div>
+        </div>
+
+        <div class="row g-3">
+            <div class="col-lg-6">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header d-flex align-items-center">
+                        <span><i class="bi bi-cart3 me-1"></i> Последние заказы</span>
+                        <a href="orders.html?status=Draft" class="btn btn-sm btn-outline-secondary ms-auto">Draft →</a>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead><tr><th>Дата</th><th>Аптека</th><th>Статус</th><th>Сумма</th></tr></thead>
+                                <tbody id="recentOrders"><tr><td colspan="4" class="loading">…</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header d-flex align-items-center">
+                        <span><i class="bi bi-exclamation-triangle me-1"></i> Сбойные импорты</span>
+                        <a href="imports.html?status=FAILED" class="btn btn-sm btn-outline-secondary ms-auto">FAILED →</a>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead><tr><th>Файл</th><th>Поставщик</th><th>Ошибка</th></tr></thead>
+                                <tbody id="failedImports"><tr><td colspan="3" class="loading">…</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="vendor/bootstrap.bundle.min.js"></script>
+    <script src="js/toast.js"></script>
+    <script src="js/manager-common.js"></script>
+    <script>
+        function card(lbl, val, tone) {
+            const cls = tone === 'danger' ? 'text-danger' : tone === 'warn' ? 'text-warning' : 'text-success';
+            return `<div class="col-6 col-md-4 col-xl-2">
+                <div class="card text-center border h-100">
+                    <div class="card-body py-3">
+                        <div class="stat-label">${lbl}</div>
+                        <div class="stat-value ${cls}">${val}</div>
+                    </div>
+                </div>
+            </div>`;
+        }
+        async function loadDash() {
+            try {
+                const d = await mgrApi('/api/manager/dashboard');
+                document.getElementById('cards').innerHTML = [
+                    card('Draft', mgrNum(d.draft_orders), 'warn'),
+                    card('Placed', mgrNum(d.placed_orders), 'ok'),
+                    card('FAILED', mgrNum(d.failed_imports), 'danger'),
+                    card('PROCESSING', mgrNum(d.processing_imports)),
+                    card('Прайсы', mgrNum(d.active_price_lists)),
+                    card('Сопоставлено', mgrNum(d.matched_prices)),
+                ].join('');
+
+                const orders = d.recent_orders || [];
+                document.getElementById('recentOrders').innerHTML = orders.length
+                    ? orders.map(o => `<tr>
+                        <td>${mgrEsc((o.created_at||'').toString().replace('T',' ').slice(0,16))}</td>
+                        <td><a href="orders.html?id=${encodeURIComponent(o.order_id)}">${mgrEsc(o.buyer_name||'—')}</a></td>
+                        <td><span class="badge ${o.status_name==='Draft'?'bg-warning text-dark':'bg-primary'}">${mgrEsc(o.status_name||'—')}</span></td>
+                        <td>${mgrMoney(o.total_amount)}</td>
+                    </tr>`).join('')
+                    : '<tr><td colspan="4" class="empty-row">Нет заказов</td></tr>';
+
+                const fails = d.recent_failed_imports || [];
+                document.getElementById('failedImports').innerHTML = fails.length
+                    ? fails.map(f => `<tr>
+                        <td><a href="imports.html">${mgrEsc(f.file_name||mgrShortId(f.invoice_import_id))}</a></td>
+                        <td>${mgrEsc(f.supplier_name||'—')}</td>
+                        <td class="text-danger small" title="${mgrEsc(f.error_message||'')}">${mgrEsc((f.error_message||'—').slice(0,60))}</td>
+                    </tr>`).join('')
+                    : '<tr><td colspan="3" class="empty-row">Нет сбойных импортов</td></tr>';
+            } catch (e) {
+                mgrToast(e.message, 'error');
+            }
+        }
+        loadDash();
+    </script>
+</body>
+</html>

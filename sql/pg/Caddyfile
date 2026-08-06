@@ -1,24 +1,21 @@
 # Path on server: D:\Caddy\Caddyfile
 # es_api: 8080 = ClientWeb, 8081 = ClienElf2
+#
+# IMPORTANT: copy this file to D:\Caddy\Caddyfile and restart Caddy.
+# If HTTPS returns {"status":"up"} on /health — Caddy is NOT pointing at es_api (8080).
 
 {
 	email admin@24pharmdata.ru
-	# HTTP/1.1 only (this Caddy build: h1, h2, h2c, h3 — no h1c)
 	servers {
 		protocols h1
 	}
 }
 
-(proxy_api) {
-	# Real client IP for Go rate limits / login lockout
-	header_up X-Real-IP {remote_host}
-	header_up X-Forwarded-For {remote_host}
-	header_up X-Forwarded-Proto {scheme}
-}
-
 24pharmdata.ru {
 	reverse_proxy 127.0.0.1:8080 {
-		import proxy_api
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
 	}
 }
 
@@ -26,16 +23,45 @@ www.24pharmdata.ru {
 	redir https://24pharmdata.ru{uri} permanent
 }
 
+# Публичная раздача установщика ЭльФиСА.
+# Файлы класть в D:\cdn\elfisa\ (ElfisaPharmacy-Setup.exe).
+# Корень / сразу отдаёт Setup с Content-Disposition: attachment.
+cdn.24pharmdata.ru {
+	root * D:\cdn\elfisa
+	encode zstd gzip
+
+	@root path /
+	handle @root {
+		header Content-Type "application/octet-stream"
+		header Content-Disposition "attachment; filename=\"ElfisaPharmacy-Setup.exe\""
+		header Cache-Control "public, max-age=300"
+		rewrite * /ElfisaPharmacy-Setup.exe
+		file_server
+	}
+
+	handle {
+		header Content-Disposition "attachment"
+		header Cache-Control "public, max-age=300"
+		file_server
+	}
+}
+
 phd.24pharmdata.ru {
 	reverse_proxy 127.0.0.1:8081 {
-		import proxy_api
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
 	}
 }
 
 git.24pharmdata.ru {
 	reverse_proxy 127.0.0.1:3000 {
-		import proxy_api
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
 	}
 }
 
-# No public site on bare origin IP — use domain names only.
+http://195.14.114.171 {
+	reverse_proxy 127.0.0.1:8080
+}

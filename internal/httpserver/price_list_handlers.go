@@ -1078,12 +1078,25 @@ func (s *Server) handleForceFetchPriceList(w http.ResponseWriter, r *http.Reques
 	}
 
 	go func() {
-		importer := dbfimport.NewDBFImporter(s.database, s.logger)
-		matcher := matching.NewPriceMatcher(s.database, s.logger)
-		scheduler := intsync.NewPriceListScheduler(s.database, s.logger, importer, matcher)
-		runCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer func() {
+			if r := recover(); r != nil {
+				if s.logger != nil {
+					s.logger.Error("PANIC ручного обновления прайса %s: %v", priceListID, r)
+				}
+			}
+		}()
+		runCtx, cancel := context.WithTimeout(context.Background(), 3*time.Hour)
 		defer cancel()
-		if err := scheduler.ForceFetchPriceListNow(runCtx, priceListID); err != nil && s.logger != nil {
+		var err error
+		if s.priceListScheduler != nil {
+			err = s.priceListScheduler.ForceFetchPriceListNow(runCtx, priceListID)
+		} else {
+			importer := dbfimport.NewDBFImporter(s.database, s.logger)
+			matcher := matching.NewPriceMatcher(s.database, s.logger)
+			scheduler := intsync.NewPriceListScheduler(s.database, s.logger, importer, matcher)
+			err = scheduler.ForceFetchPriceListNow(runCtx, priceListID)
+		}
+		if err != nil && s.logger != nil {
 			s.logger.Error("Ошибка ручного запуска обновления прайса %s: %v", priceListID, err)
 		}
 	}()

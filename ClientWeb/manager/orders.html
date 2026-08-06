@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Заказы — Менеджер | PharmData</title>
+    <meta name="theme-color" content="#2b6cab">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%232b6cab'/><rect x='42' y='22' width='16' height='56' rx='5' fill='%23fff'/><rect x='22' y='42' width='56' height='16' rx='5' fill='%23fff'/></svg>">
+    <link href="vendor/bootstrap.min.css" rel="stylesheet">
+    <link href="vendor/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/custom.css">
+</head>
+<body class="bg-light">
+    <script src="../auth.js"></script>
+    <script>if (!AuthManager.requireRole('admin', 'manager')) {}</script>
+    <script src="js/nav-manager.js"></script>
+
+    <div class="container-fluid py-4 px-3 px-lg-5">
+        <h1 class="mb-4">Заказы</h1>
+
+        <div class="card shadow-sm mb-3">
+            <div class="card-body">
+                <div class="row g-2 align-items-end">
+                    <div class="col-auto">
+                        <label class="form-label mb-1">Статус</label>
+                        <select id="fltStatus" class="form-select form-select-sm" style="min-width:140px">
+                            <option value="">Все</option>
+                            <option value="Draft">Draft</option>
+                            <option value="Placed">Placed</option>
+                            <option value="Cancelled">Cancelled</option>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <button class="btn btn-primary btn-sm" onclick="loadOrders()"><i class="bi bi-funnel"></i> Показать</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-3">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover table-striped align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Дата</th><th>Аптека</th><th>Адрес</th><th>Статус</th><th>Сумма</th><th style="width:100px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="list"><tr><td colspan="6" class="loading">Загрузка…</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm d-none" id="detail">
+            <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+                <span>Карточка заказа <span class="text-muted small" id="detId"></span></span>
+                <div class="ms-auto d-flex flex-wrap gap-1" id="detActions"></div>
+            </div>
+            <div class="card-body">
+                <div id="detMeta" class="text-muted small mb-3"></div>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead><tr><th>Поставщик</th><th>Препарат</th><th>Кол-во</th><th>Цена</th><th>Сумма</th></tr></thead>
+                        <tbody id="detItems"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="vendor/bootstrap.bundle.min.js"></script>
+    <script src="js/toast.js"></script>
+    <script src="js/manager-common.js"></script>
+    <script>
+        const params = new URLSearchParams(location.search);
+        if (params.get('status')) document.getElementById('fltStatus').value = params.get('status');
+        let currentOrderId = null;
+
+        async function loadOrders() {
+            try {
+                const st = document.getElementById('fltStatus').value;
+                let url = '/api/orders?limit=100';
+                if (st) url += '&status=' + encodeURIComponent(st);
+                const data = await mgrApi(url);
+                const orders = Array.isArray(data) ? data : (data.orders || []);
+                document.getElementById('list').innerHTML = orders.length
+                    ? orders.map(o => `<tr>
+                        <td>${mgrEsc((o.created_at||'').toString().replace('T',' ').slice(0,16))}</td>
+                        <td>${mgrEsc(o.buyer_name||o.buyer_user_name||'—')}</td>
+                        <td>${mgrEsc(o.location_address||'—')}</td>
+                        <td><span class="badge bg-primary">${mgrEsc(o.order_status_name||'—')}</span></td>
+                        <td>${mgrMoney(o.total_amount)}</td>
+                        <td><button class="btn btn-sm btn-outline-secondary" onclick="openOrder('${o.order_id}')"><i class="bi bi-eye"></i></button></td>
+                    </tr>`).join('')
+                    : '<tr><td colspan="6" class="empty-row">Нет заказов</td></tr>';
+                if (params.get('id')) openOrder(params.get('id'));
+            } catch (e) { mgrToast(e.message, 'error'); }
+        }
+
+        async function openOrder(id) {
+            currentOrderId = id;
+            try {
+                const data = await mgrApi('/api/orders/' + encodeURIComponent(id));
+                const o = data.order || data;
+                const items = data.items || [];
+                document.getElementById('detail').classList.remove('d-none');
+                document.getElementById('detId').textContent = id;
+                document.getElementById('detMeta').innerHTML =
+                    `${mgrEsc(o.buyer_name||'')} · ${mgrEsc(o.location_address||'—')} · ` +
+                    `<strong>${mgrEsc(o.order_status_name||'')}</strong> · ${mgrMoney(o.total_amount)}` +
+                    (o.comment ? `<br>Комментарий: ${mgrEsc(o.comment)}` : '');
+                document.getElementById('detActions').innerHTML = `
+                    <button class="btn btn-primary btn-sm" onclick="placeOrder()"><i class="bi bi-check2"></i> Place</button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="setStatus('Draft')">Draft</button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="setStatus('Cancelled')">Отменить</button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="downloadExport('${id}')"><i class="bi bi-download"></i> CSV</button>
+                `;
+                document.getElementById('detItems').innerHTML = items.length
+                    ? items.map(it => `<tr>
+                        <td>${mgrEsc(it.supplier_name||'—')}</td>
+                        <td>${mgrEsc(it.product_name||it.item_name||'—')}</td>
+                        <td>${mgrNum(it.qty)}</td>
+                        <td>${mgrMoney(it.unit_price)}</td>
+                        <td>${mgrMoney((it.qty||0)*(it.unit_price||0))}</td>
+                    </tr>`).join('')
+                    : '<tr><td colspan="5" class="empty-row">Нет позиций</td></tr>';
+                document.getElementById('detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } catch (e) { mgrToast(e.message, 'error'); }
+        }
+
+        async function downloadExport(id) {
+            try {
+                const res = await AuthManager.authenticatedFetch('/api/orders/' + encodeURIComponent(id) + '/export');
+                if (!res.ok) throw new Error('Ошибка выгрузки');
+                const blob = await res.blob();
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'order-' + id.slice(0, 8) + '.csv';
+                a.click();
+                URL.revokeObjectURL(a.href);
+            } catch (e) { mgrToast(e.message, 'error'); }
+        }
+
+        async function placeOrder() {
+            if (!currentOrderId) return;
+            try {
+                await mgrApi('/api/orders/' + encodeURIComponent(currentOrderId) + '/place', { method: 'POST' });
+                mgrToast('Заказ оформлен', 'success');
+                await openOrder(currentOrderId);
+                loadOrders();
+            } catch (e) { mgrToast(e.message, 'error'); }
+        }
+
+        async function setStatus(status) {
+            if (!currentOrderId) return;
+            try {
+                await mgrApi('/api/orders/' + encodeURIComponent(currentOrderId) + '/status', {
+                    method: 'PATCH', body: JSON.stringify({ status })
+                });
+                mgrToast('Статус: ' + status, 'success');
+                await openOrder(currentOrderId);
+                loadOrders();
+            } catch (e) { mgrToast(e.message, 'error'); }
+        }
+
+        loadOrders();
+    </script>
+</body>
+</html>

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Препараты — Менеджер | PharmData</title>
+    <meta name="theme-color" content="#2b6cab">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%232b6cab'/><rect x='42' y='22' width='16' height='56' rx='5' fill='%23fff'/><rect x='22' y='42' width='56' height='16' rx='5' fill='%23fff'/></svg>">
+    <link href="vendor/bootstrap.min.css" rel="stylesheet">
+    <link href="vendor/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/custom.css">
+</head>
+<body class="bg-light">
+    <script src="../auth.js"></script>
+    <script>if (!AuthManager.requireRole('admin', 'manager')) {}</script>
+    <script src="js/nav-manager.js"></script>
+
+    <div class="container-fluid py-4 px-3 px-lg-5">
+        <h1 class="mb-4">Поиск препаратов</h1>
+
+        <div class="card shadow-sm mb-3">
+            <div class="card-body">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-8">
+                        <label class="form-label mb-1">МНН, название или штрихкод</label>
+                        <input id="q" type="search" class="form-control" placeholder="Например: парацетамол…" autofocus>
+                    </div>
+                    <div class="col-auto">
+                        <button class="btn btn-primary" onclick="search()"><i class="bi bi-search"></i> Найти</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="results">
+            <div class="card shadow-sm"><div class="card-body empty-row">Введите запрос и нажмите «Найти»</div></div>
+        </div>
+    </div>
+
+    <script src="vendor/bootstrap.bundle.min.js"></script>
+    <script src="js/toast.js"></script>
+    <script src="js/manager-common.js"></script>
+    <script>
+        document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+
+        async function search() {
+            const q = document.getElementById('q').value.trim();
+            if (!q) { mgrToast('Введите запрос', 'warning'); return; }
+            try {
+                document.getElementById('results').innerHTML = '<div class="card shadow-sm"><div class="card-body loading">Поиск…</div></div>';
+                const data = await mgrApi('/api/manager/drug-offers?q=' + encodeURIComponent(q) + '&limit=20');
+                const drugs = data.drugs || [];
+                if (!drugs.length) {
+                    document.getElementById('results').innerHTML = '<div class="card shadow-sm"><div class="card-body empty-row">Ничего не найдено</div></div>';
+                    return;
+                }
+                document.getElementById('results').innerHTML = drugs.map(d => {
+                    const offers = d.offers || [];
+                    const table = offers.length
+                        ? `<div class="table-responsive"><table class="table table-hover align-middle mb-0">
+                            <thead><tr><th>Поставщик</th><th>Регион</th><th>Цена</th><th>Итого</th><th>Остаток</th><th>Дата</th></tr></thead>
+                            <tbody>${offers.map(o => `<tr>
+                                <td>${mgrEsc(o.supplier_name)}</td>
+                                <td>${mgrEsc(o.region_name||'—')}</td>
+                                <td class="fw-semibold">${mgrMoney(o.price)}</td>
+                                <td class="fw-semibold">${mgrMoney(o.final_price)}</td>
+                                <td>${o.quantity != null ? mgrNum(o.quantity) : '—'}</td>
+                                <td>${mgrEsc(o.invoice_date||'—')}</td>
+                            </tr>`).join('')}</tbody></table></div>`
+                        : '<div class="card-body empty-row py-3">Нет активных предложений</div>';
+                    return `<div class="card shadow-sm mb-3">
+                        <div class="card-header">
+                            <div class="fw-bold">${mgrEsc(d.name)}</div>
+                            <div class="small text-muted mt-1">
+                                ${d.inn ? 'МНН: ' + mgrEsc(d.inn) + ' · ' : ''}
+                                ${d.producer_name ? mgrEsc(d.producer_name) + ' · ' : ''}
+                                ${d.barcode ? 'ШК: ' + mgrEsc(d.barcode) + ' · ' : ''}
+                                офферов: ${offers.length}
+                            </div>
+                        </div>
+                        ${table}
+                    </div>`;
+                }).join('');
+            } catch (e) { mgrToast(e.message, 'error'); }
+        }
+    </script>
+</body>
+</html>

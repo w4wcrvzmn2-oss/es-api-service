@@ -59,6 +59,12 @@
                                 <label class="form-label">Каталог</label>
                                 <input type="text" class="form-control" id="ftp_dir" placeholder="/orders">
                             </div>
+                            <div class="col-12 d-flex flex-wrap align-items-center gap-2">
+                                <button type="button" class="btn btn-outline-primary" id="btnFtpTest" onclick="testFtpConnection()">
+                                    <i class="bi bi-plug"></i> Проверить соединение
+                                </button>
+                                <span id="ftpTestStatus" class="small"></span>
+                            </div>
                         </div>
                     </fieldset>
 
@@ -116,6 +122,45 @@
         function setVal(id, v) { document.getElementById(id).value = (v == null ? '' : v); }
         function getVal(id) { const v = document.getElementById(id).value.trim(); return v === '' ? null : v; }
         function getInt(id, def) { const n = parseInt(document.getElementById(id).value, 10); return isFinite(n) && n > 0 ? n : def; }
+
+        async function testFtpConnection() {
+            const btn = document.getElementById('btnFtpTest');
+            const status = document.getElementById('ftpTestStatus');
+            const host = (document.getElementById('ftp_host').value || '').trim();
+            if (!host) {
+                status.className = 'small text-danger';
+                status.textContent = 'Укажите FTP-хост';
+                return;
+            }
+            btn.disabled = true;
+            status.className = 'small text-muted';
+            status.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Проверка…';
+            try {
+                const res = await API.post('/api/sc/ftp-test', {
+                    host,
+                    port: getInt('ftp_port', 21),
+                    user: getVal('ftp_user') || '',
+                    password: document.getElementById('ftp_password').value || '',
+                    path: getVal('ftp_dir') || ''
+                });
+                if (res && res.ok) {
+                    status.className = 'small text-success fw-semibold';
+                    status.textContent = '✓ ' + (res.message || 'Соединение успешно');
+                    if (window.Toast && Toast.success) Toast.success('FTP', res.message || 'Соединение успешно');
+                } else {
+                    const detail = (res && (res.error || res.message)) || 'Не удалось проверить FTP';
+                    status.className = 'small text-danger';
+                    status.textContent = '✗ ' + detail;
+                    if (window.Toast && Toast.error) Toast.error('FTP', detail);
+                }
+            } catch (err) {
+                status.className = 'small text-danger';
+                status.textContent = '✗ ' + (err.message || 'Ошибка проверки');
+                if (window.Toast && Toast.error) Toast.error('FTP', err.message || 'Ошибка проверки');
+            } finally {
+                btn.disabled = false;
+            }
+        }
 
         async function loadConfig() {
             try {

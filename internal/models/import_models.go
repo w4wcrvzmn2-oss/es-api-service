@@ -238,6 +238,7 @@ type Order struct {
 	PlacedAt           *time.Time `json:"placed_at,omitempty"`
 	TotalAmount        *float64   `json:"total_amount,omitempty"`
 	Comment            *string    `json:"comment,omitempty"`
+	GlobalSign         *string    `json:"global_sign,omitempty"`
 	// Расширенные поля для отображения — не в БД.
 	BuyerUserName   *string `json:"buyer_user_name,omitempty" gorm:"-"`
 	BuyerName       *string `json:"buyer_name,omitempty" gorm:"-"`

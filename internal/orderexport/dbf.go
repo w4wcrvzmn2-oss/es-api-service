@@ -14,6 +14,7 @@ import (
 // OrderLine — одна строка выгрузки (позиция заказа).
 type OrderLine struct {
 	OrderID      string
+	GlobalSign   string
 	OrderDate    time.Time
 	Buyer        string
 	Address      string
@@ -42,6 +43,7 @@ type fieldDesc struct {
 func BuildOrdersDBF(lines []OrderLine) ([]byte, error) {
 	fields := []fieldDesc{
 		{"ORDER_ID", 'C', 36, 0},
+		{"GLOBAL_SIGN", 'C', 16, 0},
 		{"ORD_DATE", 'D', 8, 0},
 		{"BUYER", 'C', 80, 0},
 		{"ADDRESS", 'C', 120, 0},
@@ -131,6 +133,7 @@ func BuildOrdersDBF(lines []OrderLine) ([]byte, error) {
 		}
 
 		writeC(line.OrderID, 36)
+		writeC(line.GlobalSign, 16)
 		writeD(line.OrderDate)
 		writeC(line.Buyer, 80)
 		writeC(line.Address, 120)

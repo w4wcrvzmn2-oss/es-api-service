@@ -59,6 +59,12 @@
                         <input type="checkbox" class="form-check-input" id="fldFtpPassive" checked>
                         <label class="form-check-label" for="fldFtpPassive">Пассивный режим</label>
                     </div>
+                    <div class="mb-3 d-flex flex-wrap align-items-center gap-2">
+                        <button type="button" class="btn btn-outline-primary" id="btnFtpTest" onclick="testFtpConnection()">
+                            <i class="bi bi-plug"></i> Проверить соединение
+                        </button>
+                        <span id="ftpTestStatus" class="small"></span>
+                    </div>
                 </div>
 
                 <div id="emailFields">
@@ -84,6 +90,45 @@
         const method = document.getElementById('fldMethod').value;
         document.getElementById('ftpFields').classList.toggle('d-none', method === 'Email');
         document.getElementById('emailFields').classList.toggle('d-none', method !== 'Email');
+    }
+
+    async function testFtpConnection() {
+        const btn = document.getElementById('btnFtpTest');
+        const status = document.getElementById('ftpTestStatus');
+        const host = (document.getElementById('fldFtpHost').value || '').trim();
+        if (!host) {
+            status.className = 'small text-danger';
+            status.textContent = 'Укажите FTP-хост';
+            return;
+        }
+        btn.disabled = true;
+        status.className = 'small text-muted';
+        status.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Проверка…';
+        try {
+            const res = await API.post('/api/sc/ftp-test', {
+                host,
+                port: 21,
+                user: document.getElementById('fldFtpUser').value || '',
+                password: document.getElementById('fldFtpPassword').value || '',
+                path: document.getElementById('fldFtpPath').value || ''
+            });
+            if (res && res.ok) {
+                status.className = 'small text-success fw-semibold';
+                status.textContent = '✓ ' + (res.message || 'Соединение успешно');
+                Toast.success('FTP', res.message || 'Соединение успешно');
+            } else {
+                const detail = (res && (res.error || res.message)) || 'Не удалось проверить FTP';
+                status.className = 'small text-danger';
+                status.textContent = '✗ ' + detail;
+                Toast.error('FTP', detail);
+            }
+        } catch (e) {
+            status.className = 'small text-danger';
+            status.textContent = '✗ ' + (e.message || 'Ошибка проверки');
+            Toast.error('FTP', e.message || 'Ошибка проверки');
+        } finally {
+            btn.disabled = false;
+        }
     }
 
     async function loadSettings() {

@@ -21,9 +21,10 @@ import (
 // ===============================
 
 type BuyerOrderCreateRequest struct {
-	LocationID *string             `json:"location_id,omitempty"`
-	Comment    *string             `json:"comment,omitempty"`
-	Items      []BuyerOrderItemReq `json:"items"`
+	LocationID  *string             `json:"location_id,omitempty"`
+	Comment     *string             `json:"comment,omitempty"`
+	GlobalSign  *string             `json:"global_sign,omitempty"`
+	Items       []BuyerOrderItemReq `json:"items"`
 }
 
 type BuyerOrderItemReq struct {
@@ -37,6 +38,7 @@ type BuyerOrderItemReq struct {
 type BuyerOrderResponse struct {
 	OrderID     string    `json:"order_id"`
 	Status      string    `json:"status"`
+	GlobalSign  string    `json:"global_sign,omitempty"`
 	TotalAmount float64   `json:"total_amount"`
 	ItemsCount  int       `json:"items_count"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -45,6 +47,7 @@ type BuyerOrderResponse struct {
 type BuyerOrderListItem struct {
 	OrderID         string     `json:"order_id"`
 	Status          string     `json:"status"`
+	GlobalSign      *string    `json:"global_sign,omitempty"`
 	TotalAmount     *float64   `json:"total_amount,omitempty"`
 	ItemsCount      int        `json:"items_count"`
 	CreatedAt       time.Time  `json:"created_at"`
@@ -56,6 +59,7 @@ type BuyerOrderListItem struct {
 type BuyerOrderDetail struct {
 	OrderID         string              `json:"order_id"`
 	Status          string              `json:"status"`
+	GlobalSign      *string             `json:"global_sign,omitempty"`
 	TotalAmount     *float64            `json:"total_amount,omitempty"`
 	CreatedAt       time.Time           `json:"created_at"`
 	PlacedAt        *time.Time          `json:"placed_at,omitempty"`
@@ -93,6 +97,24 @@ func (s *Server) handleBuyerOrdersRouter(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if strings.HasPrefix(path, "locations") {
+		if r.Method == http.MethodGet {
+			s.handleBuyerGetMyLocations(w, r)
+		} else {
+			s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
+		}
+		return
+	}
+
+	if strings.HasPrefix(path, "global-sign") || strings.HasPrefix(path, "order-numbers") {
+		if r.Method == http.MethodPost || r.Method == http.MethodGet {
+			s.handleBuyerNextGlobalSign(w, r)
+		} else {
+			s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
+		}
+		return
+	}
+
 	if !strings.HasPrefix(path, "orders") {
 		s.writeError(w, http.StatusNotFound, "Маршрут не найден")
 		return
@@ -115,8 +137,20 @@ func (s *Server) handleBuyerOrdersRouter(w http.ResponseWriter, r *http.Request)
 
 	if strings.HasSuffix(sub, "/cancel") {
 		orderID := strings.TrimSuffix(sub, "/cancel")
+		orderID = strings.TrimSuffix(orderID, "/")
 		if r.Method == http.MethodPost {
 			s.handleBuyerCancelOrder(w, r, orderID)
+		} else {
+			s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
+		}
+		return
+	}
+
+	if strings.HasSuffix(sub, "/place") {
+		orderID := strings.TrimSuffix(sub, "/place")
+		orderID = strings.TrimSuffix(orderID, "/")
+		if r.Method == http.MethodPost {
+			s.handleBuyerPlaceOrder(w, r, orderID)
 		} else {
 			s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
 		}
@@ -178,6 +212,105 @@ func (s *Server) resolveBuyerUser(ctx context.Context, r *http.Request) (string,
 		return "", "", false
 	}
 	return res.BuyerUserID, res.BuyerApplicationID, true
+}
+
+// resolveOrderLocationID проверяет location_id покупателя.
+// Если передан валидный — возвращает его; иначе подставляет default/первый адрес
+// покупателя; если адресов нет — создаёт «Основной адрес».
+func (s *Server) resolveOrderLocationID(ctx context.Context, buyerUserID string, requested *string) (*string, error) {
+	if requested != nil && *requested != "" {
+		var cnt int64
+		if err := s.database.GORMWith(ctx).Raw(`
+			SELECT COUNT(*)
+			FROM "BuyerLocation" bl
+			INNER JOIN "BuyerUser" bu ON bu."BuyerID" = bl."BuyerID"
+			WHERE bl."BuyerLocationID" = CAST(? AS UUID) AND bu."BuyerUserID" = CAST(? AS UUID)`,
+			db.UUIDParam(*requested), db.UUIDParam(buyerUserID)).Scan(&cnt).Error; err != nil {
+			return nil, err
+		}
+		if cnt > 0 {
+			return requested, nil
+		}
+		s.logger.Warn("location_id %s не принадлежит покупателю %s — подставляем адрес покупателя", *requested, buyerUserID)
+	}
+
+	var buyerID string
+	if err := s.database.GORMWith(ctx).Raw(`
+		SELECT CAST("BuyerID" AS TEXT) FROM "BuyerUser" WHERE "BuyerUserID" = CAST(? AS UUID) LIMIT 1`,
+		db.UUIDParam(buyerUserID)).Scan(&buyerID).Error; err != nil {
+		return nil, err
+	}
+	if buyerID == "" {
+		return nil, fmt.Errorf("BuyerID не найден для BuyerUser %s", buyerUserID)
+	}
+
+	var locID string
+	if err := s.database.GORMWith(ctx).Raw(`
+		SELECT CAST("BuyerLocationID" AS TEXT)
+		FROM "BuyerLocation"
+		WHERE "BuyerID" = CAST(? AS UUID)
+		ORDER BY "IsDefault" DESC, "CreatedAt"
+		LIMIT 1`,
+		db.UUIDParam(buyerID)).Scan(&locID).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	if locID != "" {
+		return &locID, nil
+	}
+
+	newID := uuid.New().String()
+	now := time.Now().UTC()
+	if err := s.database.GORMWith(ctx).Exec(`
+		INSERT INTO "BuyerLocation" ("BuyerLocationID", "BuyerID", "Address", "RegionID", "IsDefault", "CreatedAt")
+		VALUES (?, ?, ?, NULL, TRUE, ?)`,
+		db.UUIDParam(newID), db.UUIDParam(buyerID), "Основной адрес", now).Error; err != nil {
+		return nil, fmt.Errorf("создание BuyerLocation: %w", err)
+	}
+	s.logger.Info("Создан BuyerLocation %s для BuyerID %s (авто при заказе)", newID, buyerID)
+	return &newID, nil
+}
+
+// handleBuyerGetMyLocations — GET /api/buyer/locations (адреса текущего покупателя из JWT)
+func (s *Server) handleBuyerGetMyLocations(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			s.logger.Error("Паника в handleBuyerGetMyLocations: %v", rec)
+			s.writeError(w, http.StatusInternalServerError, "Внутренняя ошибка сервера")
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	buyerUserID, _, ok := s.resolveBuyerUser(ctx, r)
+	if !ok {
+		s.writeError(w, http.StatusUnauthorized, "Покупатель не найден для данного пользователя")
+		return
+	}
+
+	locations := []locationWithRegion{}
+	err := s.database.GORMWith(ctx).Raw(`
+		SELECT
+			CAST(bl."BuyerLocationID" AS TEXT) AS "BuyerLocationID",
+			CAST(bl."BuyerID" AS TEXT) AS "BuyerID",
+			bl."Address" AS "Address",
+			CAST(bl."RegionID" AS TEXT) AS "RegionID",
+			bl."IsDefault" AS "IsDefault",
+			bl."CreatedAt" AS "CreatedAt",
+			r."Name" AS "RegionName"
+		FROM "BuyerLocation" bl
+		INNER JOIN "BuyerUser" bu ON bu."BuyerID" = bl."BuyerID"
+		LEFT JOIN "Region" r ON bl."RegionID" = r."RegionID"
+		WHERE bu."BuyerUserID" = CAST(? AS UUID)
+		ORDER BY bl."IsDefault" DESC, bl."CreatedAt"
+		LIMIT 100
+	`, db.UUIDParam(buyerUserID)).Scan(&locations).Error
+	if err != nil {
+		s.logger.Error("Ошибка получения адресов покупателя: %v", err)
+		s.writeError(w, http.StatusInternalServerError, "Ошибка получения адресов")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, locations)
 }
 
 // ensureOrderStatusID возвращает OrderStatusID по имени; при отсутствии создаёт.
@@ -305,25 +438,15 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 		locationID = req.LocationID
 	}
 
-	// Проверяем адрес доставки заранее: если location_id не существует или
-	// не принадлежит покупателю — отдаём понятный 400, а не FK-ошибку 500 при вставке.
-	if locationID != nil {
-		var cnt int64
-		if err := s.database.GORMWith(ctx).Raw(`
-			SELECT COUNT(*)
-			FROM "BuyerLocation" bl
-			INNER JOIN "BuyerUser" bu ON bu."BuyerID" = bl."BuyerID"
-			WHERE bl."BuyerLocationID" = CAST(? AS UUID) AND bu."BuyerUserID" = CAST(? AS UUID)`,
-			db.UUIDParam(*locationID), db.UUIDParam(buyerUserID)).Scan(&cnt).Error; err != nil {
-			s.logger.Error("Ошибка проверки адреса доставки: %v", err)
-			s.writeError(w, http.StatusInternalServerError, "Ошибка проверки адреса доставки")
-			return
-		}
-		if cnt == 0 {
-			s.writeError(w, http.StatusBadRequest, "Адрес доставки (location_id) не найден или не принадлежит покупателю. Возьмите Location ID из карточки покупателя.")
-			return
-		}
+	// location_id должен принадлежать покупателю. Если прислали чужой/тестовый UUID
+	// (часто из desktop seed) — подставляем реальный адрес покупателя или создаём его.
+	resolvedLoc, errLoc := s.resolveOrderLocationID(ctx, buyerUserID, locationID)
+	if errLoc != nil {
+		s.logger.Error("Ошибка разрешения адреса доставки: %v", errLoc)
+		s.writeError(w, http.StatusInternalServerError, "Ошибка проверки адреса доставки")
+		return
 	}
+	locationID = resolvedLoc
 
 	commentStr := ""
 	if req.Comment != nil {
@@ -331,30 +454,41 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 	}
 
 	now := time.Now().UTC()
+	var assignedSign string
 
 	// Атомарная транзакция: заказ + все позиции одной транзакцией.
 	// Закрывает [QG-RISK] из MD/15 (раньше при сбое INSERT позиции заказ оставался «пустым»).
+	// Desktop «Отправить заказ» — разовый POST с позициями, не черновик корзины.
+	// Сразу Placed, иначе менеджер/поставщик видят Draft, а аптека уже «ОТПРАВЛЕН».
 	err := s.database.GORMWith(ctx).Transaction(func(tx *gorm.DB) error {
-		draftStatusID, err := s.ensureOrderStatusID(tx, "Draft", "Черновик заказа")
+		placedStatusID, err := s.ensureOrderStatusID(tx, "Placed", "Заказ размещён")
 		if err != nil {
 			return fmt.Errorf("status: %w", err)
 		}
+
+		sign, err := s.resolveGlobalSignForCreate(tx, req.GlobalSign)
+		if err != nil {
+			return fmt.Errorf("global_sign: %w", err)
+		}
+		assignedSign = sign
 
 		// GORM-driver/sqlserver квотирует имена через "...", а в MSSQL имя "Order"
 		// (зарезервированное слово) понимается только в квадратных скобках.
 		// Поэтому INSERT и UPDATE по "Order" делаем через сырой Exec.
 		if err := tx.Exec(`
-			INSERT INTO "Order" (OrderID, BuyerUserID, BuyerApplicationID, BuyerLocationID, OrderStatusID, TotalAmount, Comment, CreatedAt)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO "Order" (OrderID, BuyerUserID, BuyerApplicationID, BuyerLocationID, OrderStatusID, TotalAmount, Comment, CreatedAt, PlacedAt, "GlobalSign")
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			db.UUIDParam(orderID),
 			db.UUIDParam(buyerUserID),
 			db.UUIDParam(appID),
 			db.UUIDParamPtr(locationID),
-			db.UUIDParam(draftStatusID),
+			db.UUIDParam(placedStatusID),
 			totalAmount,
 			commentStr,
 			now,
+			now,
+			sign,
 		).Error; err != nil {
 			return fmt.Errorf("Order insert: %w", err)
 		}
@@ -390,10 +524,11 @@ func (s *Server) handleBuyerCreateOrder(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.logger.Info("Покупатель %s создал заказ %s, позиций: %d, сумма: %.2f", buyerUserID, orderID, len(resolvedItems), totalAmount)
+	s.logger.Info("Покупатель %s создал заказ %s (Placed, %s), позиций: %d, сумма: %.2f", buyerUserID, orderID, assignedSign, len(resolvedItems), totalAmount)
 	s.writeJSON(w, http.StatusCreated, BuyerOrderResponse{
 		OrderID:     orderID,
-		Status:      "Draft",
+		Status:      "Placed",
+		GlobalSign:  assignedSign,
 		TotalAmount: totalAmount,
 		ItemsCount:  len(resolvedItems),
 		CreatedAt:   now,
@@ -449,6 +584,7 @@ func (s *Server) handleBuyerGetOrders(w http.ResponseWriter, r *http.Request) {
 	err := base.
 		Select(`CAST(o.OrderID AS TEXT) AS OrderID,
 			os.Name AS Status,
+			o."GlobalSign" AS GlobalSign,
 			o.TotalAmount,
 			(SELECT COUNT(*) FROM OrderItem WHERE OrderID = o.OrderID) AS ItemsCount,
 			o.CreatedAt,
@@ -494,6 +630,7 @@ func (s *Server) handleBuyerGetOrderByID(w http.ResponseWriter, r *http.Request,
 		OrderID         string
 		OwnerID         string
 		Status          string
+		GlobalSign      *string
 		TotalAmount     *float64
 		CreatedAt       time.Time
 		PlacedAt        *time.Time
@@ -506,6 +643,7 @@ func (s *Server) handleBuyerGetOrderByID(w http.ResponseWriter, r *http.Request,
 		Select(`CAST(o.OrderID AS TEXT) AS OrderID,
 			CAST(o.BuyerUserID AS TEXT) AS OwnerID,
 			os.Name AS Status,
+			o."GlobalSign" AS GlobalSign,
 			o.TotalAmount,
 			o.CreatedAt,
 			o.PlacedAt,
@@ -532,6 +670,7 @@ func (s *Server) handleBuyerGetOrderByID(w http.ResponseWriter, r *http.Request,
 	d := BuyerOrderDetail{
 		OrderID:         row.OrderID,
 		Status:          row.Status,
+		GlobalSign:      row.GlobalSign,
 		TotalAmount:     row.TotalAmount,
 		CreatedAt:       row.CreatedAt,
 		PlacedAt:        row.PlacedAt,
@@ -580,6 +719,114 @@ func (s *Server) handleBuyerGetOrderByID(w http.ResponseWriter, r *http.Request,
 	}
 
 	s.writeJSON(w, http.StatusOK, d)
+}
+
+// handleBuyerNextGlobalSign — GET/POST /api/buyer/global-sign/next
+// Резервирует следующий глобальный номер EX-####### для десктопа до создания заказа.
+func (s *Server) handleBuyerNextGlobalSign(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			s.logger.Error("Паника в handleBuyerNextGlobalSign: %v", rec)
+			s.writeError(w, http.StatusInternalServerError, "Внутренняя ошибка сервера")
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	if _, _, ok := s.resolveBuyerUser(ctx, r); !ok {
+		s.writeError(w, http.StatusUnauthorized, "Покупатель не найден")
+		return
+	}
+
+	var sign string
+	err := s.database.GORMWith(ctx).Transaction(func(tx *gorm.DB) error {
+		var e error
+		sign, e = s.reserveGlobalSign(tx)
+		return e
+	})
+	if err != nil {
+		s.logger.Error("Ошибка резервирования GlobalSign: %v", err)
+		s.writeError(w, http.StatusInternalServerError, "Не удалось выделить номер заказа")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"global_sign": sign,
+	})
+}
+
+// handleBuyerPlaceOrder — POST /api/buyer/orders/{id}/place
+// Оформляет черновик (Draft → Placed). Для совместимости со старыми клиентами.
+func (s *Server) handleBuyerPlaceOrder(w http.ResponseWriter, r *http.Request, orderID string) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			s.logger.Error("Паника в handleBuyerPlaceOrder: %v", rec)
+			s.writeError(w, http.StatusInternalServerError, "Внутренняя ошибка сервера")
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	buyerUserID, _, ok := s.resolveBuyerUser(ctx, r)
+	if !ok {
+		s.writeError(w, http.StatusUnauthorized, "Покупатель не найден")
+		return
+	}
+
+	type checkRow struct {
+		OwnerID       string
+		CurrentStatus string
+	}
+	var chk checkRow
+	err := s.database.GORMWith(ctx).
+		Table(`"Order" AS o`).
+		Select(`CAST(o.BuyerUserID AS TEXT) AS OwnerID, os.Name AS CurrentStatus`).
+		Joins("INNER JOIN OrderStatus os ON o.OrderStatusID = os.OrderStatusID").
+		Where("o.OrderID = ?", db.UUIDParam(orderID)).
+		Take(&chk).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		s.writeError(w, http.StatusNotFound, "Заказ не найден")
+		return
+	}
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Ошибка получения заказа")
+		return
+	}
+	if !strings.EqualFold(chk.OwnerID, buyerUserID) {
+		s.writeError(w, http.StatusForbidden, "Нет доступа к данному заказу")
+		return
+	}
+	if chk.CurrentStatus == "Placed" {
+		s.handleBuyerGetOrderByID(w, r, orderID)
+		return
+	}
+	if chk.CurrentStatus != "Draft" {
+		s.writeError(w, http.StatusConflict, fmt.Sprintf("Нельзя оформить заказ в статусе «%s». Допустимый: Draft", chk.CurrentStatus))
+		return
+	}
+
+	err = s.database.GORMWith(ctx).Transaction(func(tx *gorm.DB) error {
+		placedID, err := s.ensureOrderStatusID(tx, "Placed", "Заказ размещён")
+		if err != nil {
+			return err
+		}
+		return tx.Exec(`
+			UPDATE "Order"
+			SET OrderStatusID = CAST(? AS UUID),
+			    PlacedAt = (NOW() AT TIME ZONE 'utc')
+			WHERE OrderID = CAST(? AS UUID)`,
+			placedID, orderID).Error
+	})
+	if err != nil {
+		s.logger.Error("Ошибка оформления заказа покупателем: %v", err)
+		s.writeError(w, http.StatusInternalServerError, "Ошибка оформления заказа")
+		return
+	}
+
+	s.logger.Info("Покупатель %s оформил заказ %s (Placed)", buyerUserID, orderID)
+	s.handleBuyerGetOrderByID(w, r, orderID)
 }
 
 // handleBuyerCancelOrder — POST /api/buyer/orders/{id}/cancel

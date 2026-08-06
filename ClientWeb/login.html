@@ -79,7 +79,14 @@
     <script>
         // Проверяем, авторизован ли пользователь
         if (AuthManager.isAuthenticated()) {
-            window.location.href = 'index.html';
+            const role = AuthManager.getRole();
+            if (role === 'manager') {
+                window.location.href = 'manager/index.html';
+            } else if (role === 'supplier') {
+                window.location.href = '/supplier/index.html';
+            } else {
+                window.location.href = 'index.html';
+            }
         }
 
         // Проверяем, что страница открыта через HTTP/HTTPS, а не file://
@@ -138,13 +145,17 @@
                     }
                     // Покупатели работают через десктоп-приложение, не через веб
                     if (result.role === 'buyer') {
+                        localStorage.removeItem(AuthManager.STORAGE_TOKEN_KEY);
+                        localStorage.removeItem(AuthManager.STORAGE_USER_INFO_KEY);
+                        localStorage.removeItem('authToken');
+                        localStorage.removeItem('userInfo');
                         errorDiv.textContent = 'Это учётная запись покупателя — вход через десктоп-приложение, не через сайт.';
                         errorDiv.style.display = 'block';
                         return;
                     }
                     // Сервер сам определил роль и вернул, куда вести:
-                    // admin -> index.html, supplier -> /supplier/index.html
-                    const dest = result.redirectUrl || 'index.html';
+                    // admin -> index.html, manager -> manager/index.html, supplier -> /supplier/index.html
+                    const dest = result.redirectUrl || (result.role === 'manager' ? 'manager/index.html' : 'index.html');
                     console.log('Авторизация успешна, роль:', result.role, '-> переход:', dest);
                     window.location.href = dest;
                 } else {

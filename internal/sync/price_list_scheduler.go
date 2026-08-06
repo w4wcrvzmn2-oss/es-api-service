@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	stdsync "sync"
 	"time"
 
 	"github.com/jlaffaye/ftp"
@@ -23,6 +24,9 @@ import (
 // errFTPNoNewFiles — на FTP пусто, это не сбой расписания.
 var errFTPNoNewFiles = errors.New("на FTP нет файлов для импорта")
 
+// stuckImportTimeout — крупные DBF (Katren ~75MB) могут импортироваться дольше 30 минут.
+const stuckImportTimeout = 120 * time.Minute
+
 // PriceListScheduler управляет автоматическим обновлением прайс-листов по расписанию
 type PriceListScheduler struct {
 	database *db.Database
@@ -30,6 +34,10 @@ type PriceListScheduler struct {
 	cron     *cron.Cron
 	importer *dbfimport.DBFImporter
 	matcher  *matching.PriceMatcher
+	// inFlight — in-process lock по ImportPointID (скачивание FTP + импорт).
+	// Иначе несколько тиков cron успевают стартовать, пока PROCESSING ещё не записан в БД.
+	inFlight  stdsync.Map
+	startedAt time.Time
 }
 
 // NewPriceListScheduler создает новый планировщик прайс-листов
@@ -37,12 +45,22 @@ func NewPriceListScheduler(database *db.Database, logger *logger.Logger, importe
 	// Используем парсер без секунд для внутреннего планировщика (формат: мин час день месяц день_недели)
 	cronParser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	return &PriceListScheduler{
-		database: database,
-		logger:   logger,
-		cron:     cron.New(cron.WithParser(cronParser)),
-		importer: importer,
-		matcher:  matcher,
+		database:  database,
+		logger:    logger,
+		cron:      cron.New(cron.WithParser(cronParser)),
+		importer:  importer,
+		matcher:   matcher,
+		startedAt: time.Now(),
 	}
+}
+
+func (pls *PriceListScheduler) tryBeginImport(importPointID string) bool {
+	_, loaded := pls.inFlight.LoadOrStore(importPointID, struct{}{})
+	return !loaded
+}
+
+func (pls *PriceListScheduler) endImport(importPointID string) {
+	pls.inFlight.Delete(importPointID)
 }
 
 // Start запускает планировщик
@@ -52,6 +70,11 @@ func (pls *PriceListScheduler) Start() {
 	}
 
 	_, err := pls.cron.AddFunc("* * * * *", func() {
+		defer func() {
+			if r := recover(); r != nil && pls.logger != nil {
+				pls.logger.Error("PANIC в планировщике прайс-листов: %v", r)
+			}
+		}()
 		pls.checkAndUpdatePriceLists()
 	})
 	if err != nil {
@@ -63,11 +86,14 @@ func (pls *PriceListScheduler) Start() {
 
 	pls.cron.Start()
 	if pls.logger != nil {
-		pls.logger.Info("Планировщик обновления прайс-листов запущен (проверка каждую минуту)")
+		pls.logger.Info("Планировщик обновления прайс-листов запущен (проверка каждую минуту, автозапуск через 5 мин после старта)")
 	}
 
-	// Выполняем начальную проверку
-	go pls.checkAndUpdatePriceLists()
+	// Не дергаем тяжёлые импорты сразу после рестарта (иначе crash-loop на больших DBF).
+	go func() {
+		time.Sleep(5 * time.Minute)
+		pls.checkAndUpdatePriceLists()
+	}()
 }
 
 // Stop останавливает планировщик
@@ -82,7 +108,14 @@ func (pls *PriceListScheduler) Stop() {
 
 // checkAndUpdatePriceLists проверяет все активные прайс-листы и обновляет их по расписанию
 func (pls *PriceListScheduler) checkAndUpdatePriceLists() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// После рестарта службы не стартуем автоимпорты сразу — иначе большой DBF
+	// (Katren) снова валит процесс и получается цикл рестартов.
+	if time.Since(pls.startedAt) < 5*time.Minute {
+		return
+	}
+
+	// Импорт крупного FTP/DBF может идти час+; 5 минут убивали процесс через ctx.Done().
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Hour)
 	defer cancel()
 
 	query := `
@@ -152,15 +185,24 @@ func (pls *PriceListScheduler) checkAndUpdatePriceLists() {
 		}
 
 		if shouldUpdate {
-			// Сначала очищаем зависшие импорты (PROCESSING старше 30 минут), помечаем их как FAILED
+			if !pls.tryBeginImport(importPointID) {
+				if pls.logger != nil {
+					pls.logger.Warn("Пропуск обновления прайс-листа %s: импорт точки %s уже идёт в этом процессе", priceListID, importPointID)
+				}
+				nextRetry := nowUTC.Add(5 * time.Minute)
+				pls.updateNextUpdateAt(ctx, priceListID, nextRetry)
+				continue
+			}
+
+			// Сначала очищаем зависшие импорты (PROCESSING старше stuckImportTimeout)
 			cleanupQuery := `
 				UPDATE InvoiceImport 
 				SET ImportStatus = 'FAILED',
-				    ErrorMessage = 'Импорт завис (превышено время ожидания 30 минут)',
+				    ErrorMessage = 'Импорт завис (превышено время ожидания 120 минут)',
 				    CompletedAt = (NOW() AT TIME ZONE 'utc')
 				WHERE ImportPointID = CAST(@importPointID AS UUID)
 				  AND ImportStatus = 'PROCESSING'
-				  AND StartedAt <= DATEADD(minute, -30, (NOW() AT TIME ZONE 'utc'))
+				  AND StartedAt <= ((NOW() AT TIME ZONE 'utc') - INTERVAL '120 minutes')
 			`
 			res := pls.database.GORMWith(ctx).Exec(cleanupQuery, sql.Named("importPointID", importPointID))
 			if res.Error != nil {
@@ -171,17 +213,18 @@ func (pls *PriceListScheduler) checkAndUpdatePriceLists() {
 				pls.logger.Info("Очищено зависших импортов: %d для точки импорта %s", res.RowsAffected, importPointID)
 			}
 
-			// Теперь проверяем активные импорты (PROCESSING), но не старше 30 минут (защита от зависших импортов)
+			// Активные импорты в БД (в т.ч. после рестарта процесса)
 			checkActiveQuery := `
 				SELECT COUNT(*) 
 				FROM InvoiceImport 
 				WHERE ImportPointID = CAST(@importPointID AS UUID)
 				  AND ImportStatus = 'PROCESSING'
-				  AND StartedAt > DATEADD(minute, -30, (NOW() AT TIME ZONE 'utc'))
+				  AND StartedAt > ((NOW() AT TIME ZONE 'utc') - INTERVAL '120 minutes')
 			`
 			var activeCount int
 			err = pls.database.GORMWith(ctx).Raw(checkActiveQuery, sql.Named("importPointID", importPointID)).Row().Scan(&activeCount)
 			if err != nil && err != sql.ErrNoRows {
+				pls.endImport(importPointID)
 				if pls.logger != nil {
 					pls.logger.Error("Ошибка проверки активных импортов для точки %s: %v", importPointID, err)
 				}
@@ -189,6 +232,7 @@ func (pls *PriceListScheduler) checkAndUpdatePriceLists() {
 			}
 
 			if activeCount > 0 {
+				pls.endImport(importPointID)
 				if pls.logger != nil {
 					pls.logger.Warn("Пропуск обновления прайс-листа %s: для точки импорта %s уже выполняется импорт (PROCESSING). Запрос отклонен.", priceListID, importPointID)
 				}
@@ -234,6 +278,7 @@ func (pls *PriceListScheduler) checkAndUpdatePriceLists() {
 				}
 				importErr = pls.updatePriceListFromImportPoint(ctx, priceListID, importPointID, filePath)
 			}
+			pls.endImport(importPointID)
 
 			if importErr != nil {
 				nextUpdate := pls.calculateNextUpdate(scheduleCron, now)
@@ -318,12 +363,28 @@ func (pls *PriceListScheduler) ForceFetchPriceListNow(ctx context.Context, price
 		return fmt.Errorf("ошибка получения прайс-листа: %w", err)
 	}
 
+	if !pls.tryBeginImport(importPointID) {
+		return fmt.Errorf("для этой точки импорта уже выполняется импорт")
+	}
+	defer pls.endImport(importPointID)
+
+	// Сброс зависших (после рестартов службы) — иначе ручное обновление вечно «занято»
+	_ = pls.database.GORMWith(ctx).Exec(`
+		UPDATE InvoiceImport
+		SET ImportStatus = 'FAILED',
+		    ErrorMessage = 'Импорт завис (превышено время ожидания 120 минут)',
+		    CompletedAt = (NOW() AT TIME ZONE 'utc')
+		WHERE ImportPointID = CAST(@importPointID AS UUID)
+		  AND ImportStatus = 'PROCESSING'
+		  AND StartedAt <= ((NOW() AT TIME ZONE 'utc') - INTERVAL '120 minutes')
+	`, sql.Named("importPointID", importPointID))
+
 	checkActiveQuery := `
 		SELECT COUNT(*) 
 		FROM InvoiceImport 
 		WHERE ImportPointID = CAST(@importPointID AS UUID)
 		  AND ImportStatus = 'PROCESSING'
-		  AND StartedAt > DATEADD(minute, -30, (NOW() AT TIME ZONE 'utc'))
+		  AND StartedAt > ((NOW() AT TIME ZONE 'utc') - INTERVAL '120 minutes')
 	`
 	var activeCount int
 	err = pls.database.GORMWith(ctx).Raw(checkActiveQuery, sql.Named("importPointID", importPointID)).Row().Scan(&activeCount)
@@ -331,7 +392,7 @@ func (pls *PriceListScheduler) ForceFetchPriceListNow(ctx context.Context, price
 		return fmt.Errorf("ошибка проверки активных импортов: %w", err)
 	}
 	if activeCount > 0 {
-		return fmt.Errorf("для этой точки импорта уже выполняется импорт")
+		return fmt.Errorf("для этой точки импорта уже выполняется импорт — дождитесь окончания (крупный файл Katren может идти 30–90 мин) или сбросьте PROCESSING в InvoiceImport")
 	}
 
 	if pls.logger != nil {

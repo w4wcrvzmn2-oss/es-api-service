@@ -98,16 +98,18 @@ class AuthManager {
                     localStorage.setItem(this.STORAGE_USERNAME_KEY, username);
                     localStorage.setItem(this.STORAGE_API_URL_KEY, normalizedUrl);
                     
+                    const role = data.role || 'admin';
                     // Сохраняем информацию о пользователе
                     localStorage.setItem(this.STORAGE_USER_INFO_KEY, JSON.stringify({
                         username: username,
+                        role: role,
                         loginTime: new Date().toISOString()
                     }));
 
                     // Кросс-кабинетная сессия: кабинеты поставщика и управления
                     // читают токен из общих ключей authToken/userInfo.
                     localStorage.setItem('authToken', token);
-                    localStorage.setItem('userInfo', JSON.stringify({ username: username }));
+                    localStorage.setItem('userInfo', JSON.stringify({ username: username, role: role }));
 
                     // Проверяем, что токен действительно сохранился
                     const savedToken = localStorage.getItem(this.STORAGE_TOKEN_KEY);
@@ -132,6 +134,39 @@ class AuthManager {
         }
     }
 
+    static getRole() {
+        const info = this.getUserInfo();
+        return (info && info.role) || 'admin';
+    }
+
+    static getLoginPath() {
+        const path = (typeof window !== 'undefined' && window.location && window.location.pathname) || '';
+        if (path.includes('/manager/') || /\/manager$/.test(path)) {
+            return '../login.html';
+        }
+        return 'login.html';
+    }
+
+    /** Проверка роли на страницах кабинета. Редирект при несоответствии. */
+    static requireRole(...roles) {
+        if (!this.isAuthenticated()) {
+            window.location.href = this.getLoginPath();
+            return false;
+        }
+        const role = this.getRole();
+        if (roles.length && roles.indexOf(role) === -1) {
+            if (role === 'manager') {
+                window.location.href = '/manager/index.html';
+            } else if (role === 'admin') {
+                window.location.href = '/index.html';
+            } else {
+                window.location.href = this.getLoginPath();
+            }
+            return false;
+        }
+        return true;
+    }
+
     // Выход
     static logout() {
         localStorage.removeItem(this.STORAGE_TOKEN_KEY);
@@ -141,7 +176,7 @@ class AuthManager {
         // /login.html увидит сессию и снова уведёт в панель.
         localStorage.removeItem('authToken');
         localStorage.removeItem('userInfo');
-        window.location.href = 'login.html';
+        window.location.href = this.getLoginPath();
     }
 
     // Проверка здоровья сервиса

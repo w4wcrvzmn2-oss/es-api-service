@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -546,36 +547,40 @@ func (s *Server) handleSCPriceUploadLog(w http.ResponseWriter, r *http.Request) 
 		to = time.Now().Format("2006-01-02")
 	}
 
-	where := `pl.SupplierID=CAST(@sid AS UUID)
-		AND ii.CompletedAt >= @from AND ii.CompletedAt < DATEADD(day,1,CAST(@to AS DATE))`
+	where := `pl."SupplierID"=CAST(? AS UUID)
+		AND ii."CompletedAt" >= CAST(? AS date)
+		AND ii."CompletedAt" < (CAST(? AS date) + INTERVAL '1 day')`
+	args := []interface{}{sid, from, to}
 	if plID != "" {
-		where += ` AND pl.PriceListID=CAST(@plid AS UUID)`
+		where += ` AND pl."PriceListID"=CAST(? AS UUID)`
+		args = append(args, plID)
 	}
 
-	q := fmt.Sprintf(`SELECT pl.Name AS PriceName,
-			ii.CompletedAt AS DownloadTime,
-			ii.ImportStatus AS Status,
-			COALESCE(ii.RecordsProcessed, 0) AS RecordsProcessed,
-			(SELECT COUNT(*) FROM SupplierPrice sp WHERE sp.InvoiceImportID=ii.InvoiceImportID AND sp.GUID_ES IS NOT NULL) AS FormalizedCount,
-			(SELECT COUNT(*) FROM SupplierPrice sp WHERE sp.InvoiceImportID=ii.InvoiceImportID AND sp.GUID_ES IS NULL) AS UnformalizedCount
-		FROM InvoiceImport ii
-		JOIN PriceList pl ON pl.ImportPointID = ii.ImportPointID
+	// Без JOIN/COUNT по SupplierPrice: на больших прайсах (20k+) это даёт таймаут.
+	// Колонки формализации в логе — 0 (считаются на странице прайс-листов по текущему состоянию).
+	q := fmt.Sprintf(`SELECT pl."Name" AS price_name,
+			ii."CompletedAt" AS download_time,
+			ii."ImportStatus" AS status,
+			COALESCE(ii."RecordsProcessed", 0) AS records_processed,
+			0 AS formalized_count,
+			0 AS unformalized_count
+		FROM "InvoiceImport" ii
+		JOIN "PriceList" pl ON pl."ImportPointID" = ii."ImportPointID"
 		WHERE %s
-		ORDER BY ii.CompletedAt DESC`, where)
+		ORDER BY ii."CompletedAt" DESC
+		LIMIT 200`, where)
 
 	type LogRow struct {
-		PriceName         string     `json:"price_name"`
-		DownloadTime      *time.Time `json:"-"`
+		PriceName         string     `json:"price_name" gorm:"column:price_name"`
+		DownloadTime      *time.Time `json:"-" gorm:"column:download_time"`
 		DownloadTimeStr   *string    `json:"download_time" gorm:"-"`
-		Status            string     `json:"status"`
-		RecordsProcessed  int        `json:"records_processed"`
-		FormalizedCount   int        `json:"formalized_count"`
-		UnformalizedCount int        `json:"unformalized_count"`
+		Status            string     `json:"status" gorm:"column:status"`
+		RecordsProcessed  int        `json:"records_processed" gorm:"column:records_processed"`
+		FormalizedCount   int        `json:"formalized_count" gorm:"column:formalized_count"`
+		UnformalizedCount int        `json:"unformalized_count" gorm:"column:unformalized_count"`
 	}
 	var result []LogRow
-	err := s.database.GORMWith(r.Context()).Raw(q,
-		sql.Named("sid", sid), sql.Named("from", from), sql.Named("to", to), sql.Named("plid", plID),
-	).Scan(&result).Error
+	err := s.database.GORMWith(r.Context()).Raw(q, args...).Scan(&result).Error
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
@@ -888,9 +893,6 @@ func (s *Server) handleSCOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Страница шлёт date_from/date_to (поддержим и старые from/to). Пусто → последний месяц.
-	// Даты по умолчанию в UTC — CreatedAt хранится в UTC, иначе на сервере в другом часовом
-	// поясе свежие заказы «сегодня» выпадали из диапазона.
 	from := r.URL.Query().Get("date_from")
 	if from == "" {
 		from = r.URL.Query().Get("from")
@@ -899,7 +901,7 @@ func (s *Server) handleSCOrders(w http.ResponseWriter, r *http.Request) {
 	if to == "" {
 		to = r.URL.Query().Get("to")
 	}
-	search := r.URL.Query().Get("search")
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
 	if from == "" {
 		from = time.Now().UTC().AddDate(0, -1, 0).Format("2006-01-02")
 	}
@@ -907,44 +909,52 @@ func (s *Server) handleSCOrders(w http.ResponseWriter, r *http.Request) {
 		to = time.Now().UTC().Format("2006-01-02")
 	}
 
-	where := `oi.SupplierID=CAST(@sid AS UUID)
-		AND o.CreatedAt >= @from AND o.CreatedAt < DATEADD(day,1,CAST(@to AS DATE))`
+	args := []interface{}{sid, from, to}
+	searchSQL := ""
 	if search != "" {
-		where += ` AND (b.Name LIKE '%'+@search+'%' OR CAST(o.OrderID AS TEXT) LIKE '%'+@search+'%')`
+		searchSQL = ` AND (b."Name" ILIKE ? OR CAST(o."OrderID" AS TEXT) ILIKE ? OR COALESCE(bl."Address", '') ILIKE ?)`
+		like := "%" + search + "%"
+		args = append(args, like, like, like)
 	}
 
-	// Форма ответа и имена полей согласованы со страницей orders.html:
-	// {items:[{order_id, order_date, buyer_name, delivery_address, total_items, total_amount, status_name}], total}.
-	q := fmt.Sprintf(`SELECT CAST(o.OrderID AS TEXT) AS OrderID,
-			b.Name AS BuyerName,
-			COALESCE(bl.Address, '') AS DeliveryAddress,
-			o.CreatedAt AS OrderDate,
-			os.Name AS StatusName,
-			SUM(oi.Qty * oi.UnitPrice) AS TotalAmount,
-			COUNT(oi.OrderLineID) AS TotalItems
-		FROM "Order" o
-		JOIN BuyerUser bu ON o.BuyerUserID = bu.BuyerUserID
-		JOIN Buyer b ON bu.BuyerID = b.BuyerID
-		JOIN OrderItem oi ON oi.OrderID = o.OrderID
-		LEFT JOIN OrderStatus os ON o.OrderStatusID = os.OrderStatusID
-		LEFT JOIN BuyerLocation bl ON bl.BuyerLocationID = o.BuyerLocationID
-		WHERE %s
-		GROUP BY o.OrderID, b.Name, bl.Address, o.CreatedAt, os.Name
-		ORDER BY o.CreatedAt DESC`, where)
+	// Сначала узкий набор OrderItem поставщика, потом шапка заказа — без тяжёлого GROUP BY по всем JOIN.
+	q := `
+		SELECT CAST(o."OrderID" AS TEXT) AS order_id,
+			b."Name" AS buyer_name,
+			COALESCE(bl."Address", '') AS delivery_address,
+			o."CreatedAt" AS order_date,
+			os."Name" AS status_name,
+			agg.total_amount,
+			agg.total_items
+		FROM (
+			SELECT oi."OrderID" AS order_id,
+				SUM(oi."Qty" * oi."UnitPrice") AS total_amount,
+				COUNT(*)::int AS total_items
+			FROM "OrderItem" oi
+			WHERE oi."SupplierID" = CAST(? AS UUID)
+			GROUP BY oi."OrderID"
+		) agg
+		INNER JOIN "Order" o ON o."OrderID" = agg.order_id
+		INNER JOIN "BuyerUser" bu ON bu."BuyerUserID" = o."BuyerUserID"
+		INNER JOIN "Buyer" b ON b."BuyerID" = bu."BuyerID"
+		LEFT JOIN "OrderStatus" os ON os."OrderStatusID" = o."OrderStatusID"
+		LEFT JOIN "BuyerLocation" bl ON bl."BuyerLocationID" = o."BuyerLocationID"
+		WHERE o."CreatedAt" >= CAST(? AS date)
+		  AND o."CreatedAt" < (CAST(? AS date) + INTERVAL '1 day')` + searchSQL + `
+		ORDER BY o."CreatedAt" DESC
+		LIMIT 5000`
 
 	type OrderRow struct {
-		OrderID         string    `json:"order_id"`
-		BuyerName       string    `json:"buyer_name"`
-		DeliveryAddress string    `json:"delivery_address"`
-		OrderDate       time.Time `json:"order_date"`
-		StatusName      *string   `json:"status_name"`
-		TotalAmount     float64   `json:"total_amount"`
-		TotalItems      int       `json:"total_items"`
+		OrderID         string    `json:"order_id" gorm:"column:order_id"`
+		BuyerName       string    `json:"buyer_name" gorm:"column:buyer_name"`
+		DeliveryAddress string    `json:"delivery_address" gorm:"column:delivery_address"`
+		OrderDate       time.Time `json:"order_date" gorm:"column:order_date"`
+		StatusName      *string   `json:"status_name" gorm:"column:status_name"`
+		TotalAmount     float64   `json:"total_amount" gorm:"column:total_amount"`
+		TotalItems      int       `json:"total_items" gorm:"column:total_items"`
 	}
 	var result []OrderRow
-	err := s.database.GORMWith(r.Context()).Raw(q,
-		sql.Named("sid", sid), sql.Named("from", from), sql.Named("to", to), sql.Named("search", search),
-	).Scan(&result).Error
+	err := s.database.GORMWith(r.Context()).Raw(q, args...).Scan(&result).Error
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
@@ -1039,5 +1049,6 @@ func (s *Server) setupSupplierRoutes(mux *http.ServeMux) {
 	scRoute("/api/sc/orders/export", s.handleSCOrdersExport)
 	scRoute("/api/sc/export-config", s.handleSCExportConfig)
 	scRoute("/api/sc/order-delivery", s.handleSCOrderDelivery)
+	scRoute("/api/sc/ftp-test", s.handleFTPTest)
 	scRoute("/api/sc/change-password", s.handleSCChangePassword)
 }

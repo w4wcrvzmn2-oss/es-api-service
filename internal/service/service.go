@@ -174,6 +174,9 @@ func (s *ESAPIService) Start(srv service.Service) error {
 
 		s.priceListScheduler = sync.NewPriceListScheduler(s.database, s.fileLogger, importer, matcher)
 		s.priceListScheduler.Start()
+		if s.httpServer != nil {
+			s.httpServer.SetPriceListScheduler(s.priceListScheduler)
+		}
 		s.logger.Info("Планировщик обновления прайс-листов запущен")
 		if s.fileLogger != nil {
 			s.fileLogger.Info("Планировщик обновления прайс-листов запущен")

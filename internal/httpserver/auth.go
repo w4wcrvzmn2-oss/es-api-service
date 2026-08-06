@@ -129,11 +129,15 @@ func (a *AuthService) Login(w http.ResponseWriter, r *http.Request) {
 
 	var role, supplierID, buyerUserID, redirectURL string
 
-	// Фаза 1: проверка в конфиге (admin)
+	// Фаза 1: проверка в конфиге (admin / manager)
 	user := a.config.FindUser(req.Username)
 	if user != nil && verifyPassword(user.Password, req.Password) {
-		role = "admin"
-		redirectURL = "index.html"
+		role = user.EffectiveRole()
+		if role == "manager" {
+			redirectURL = "manager/index.html"
+		} else {
+			redirectURL = "index.html"
+		}
 	} else if sid, err := a.findSupplierByCredentials(r.Context(), req.Username, req.Password); err == nil && sid != "" {
 		// Фаза 2: проверка в таблице Supplier (поставщик)
 		role = "supplier"

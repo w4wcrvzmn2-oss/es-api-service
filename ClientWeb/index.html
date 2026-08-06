@@ -27,10 +27,9 @@
     <script src="loading.js"></script>
     <script src="navigation.js"></script>
     <script>
-        // Проверка авторизации
-        if (!AuthManager.isAuthenticated()) {
-            window.location.href = 'login.html';
-        }
+        // Проверка авторизации — только admin
+        if (!AuthManager.requireRole('admin')) { /* redirect */ }
+
     </script>
 
     <div class="dashboard">

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1054,66 +1055,139 @@ LIMIT 200
 	s.writeJSON(w, http.StatusOK, mappings)
 }
 
-// handleGetInvoiceImports возвращает список импортов прайсов
+// invoiceImportView — DTO списка импортов для менеджера/админа.
+type invoiceImportView struct {
+	InvoiceImportID  string  `json:"invoice_import_id"`
+	ImportPointID    string  `json:"import_point_id"`
+	ImportPointName  *string `json:"import_point_name,omitempty"`
+	SupplierID       *string `json:"supplier_id,omitempty"`
+	SupplierName     *string `json:"supplier_name,omitempty"`
+	FileName         string  `json:"file_name"`
+	FilePath         string  `json:"file_path"`
+	FileSize         *int64  `json:"file_size,omitempty"`
+	RecordsTotal     int     `json:"records_total"`
+	RecordsProcessed int     `json:"records_processed"`
+	RecordsSkipped   int     `json:"records_skipped"`
+	RecordsError     int     `json:"records_error"`
+	ImportStatus     string  `json:"import_status"`
+	ErrorMessage     *string `json:"error_message,omitempty"`
+	StartedAt        *string `json:"started_at,omitempty"`
+	CompletedAt      *string `json:"completed_at,omitempty"`
+	CreatedAt        string  `json:"created_at"`
+}
+
+// handleInvoiceImportsRouter — /api/invoice-imports и /api/invoice-imports/{id}/...
+func (s *Server) handleInvoiceImportsRouter(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/invoice-imports")
+	path = strings.TrimPrefix(path, "/")
+
+	if path == "" {
+		if r.Method == http.MethodGet {
+			s.handleGetInvoiceImports(w, r)
+			return
+		}
+		s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
+		return
+	}
+
+	parts := strings.Split(path, "/")
+	importID := parts[0]
+	if _, err := uuid.Parse(importID); err != nil {
+		s.writeError(w, http.StatusBadRequest, "Недопустимый ID импорта")
+		return
+	}
+
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+
+	switch action {
+	case "":
+		if r.Method == http.MethodDelete {
+			s.handleDeleteInvoiceImport(w, r, importID)
+			return
+		}
+		if r.Method == http.MethodGet {
+			s.handleGetInvoiceImports(w, r) // filter by id via query not needed; list is enough
+			return
+		}
+	case "download":
+		if r.Method == http.MethodGet {
+			s.handleDownloadInvoiceImport(w, r, importID)
+			return
+		}
+	case "reassign":
+		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
+			s.handleReassignInvoiceImport(w, r, importID)
+			return
+		}
+	}
+	s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
+}
+
+// handleGetInvoiceImports возвращает список импортов прайсов.
+// Фильтры import_point_id / supplier_id / status опциональны (для менеджера — полный список с LIMIT).
 func (s *Server) handleGetInvoiceImports(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
 	importPointID := r.URL.Query().Get("import_point_id")
 	supplierID := r.URL.Query().Get("supplier_id")
-
-	var query string
-	var args []interface{}
-
-	if importPointID != "" {
-		query = `
-			SELECT CAST(InvoiceImportID AS TEXT) AS InvoiceImportID,
-				CAST(ImportPointID AS TEXT) AS ImportPointID,
-				FileName,
-				FilePath,
-				FileSize,
-				RecordsTotal,
-				RecordsProcessed,
-				RecordsSkipped,
-				RecordsError,
-				ImportStatus,
-				ErrorMessage,
-				StartedAt,
-				CompletedAt,
-				CreatedAt
-			FROM InvoiceImport
-			WHERE ImportPointID = CAST(@importPointID AS UUID)
-			ORDER BY CreatedAt DESC
-LIMIT 200
-`
-		args = []interface{}{sql.Named("importPointID", importPointID)}
-	} else if supplierID != "" {
-		query = `
-			SELECT CAST(ii.InvoiceImportID AS TEXT) AS InvoiceImportID,
-				CAST(ii.ImportPointID AS TEXT) AS ImportPointID,
-				ii.FileName,
-				ii.FilePath,
-				ii.FileSize,
-				ii.RecordsTotal,
-				ii.RecordsProcessed,
-				ii.RecordsSkipped,
-				ii.RecordsError,
-				ii.ImportStatus,
-				ii.ErrorMessage,
-				ii.StartedAt,
-				ii.CompletedAt,
-				ii.CreatedAt
-			FROM InvoiceImport ii
-			INNER JOIN ImportPoint ip ON ii.ImportPointID = ip.ImportPointID
-			WHERE ip.SupplierID = CAST(@supplierID AS UUID)
-			ORDER BY ii.CreatedAt DESC
-LIMIT 200
-`
-		args = []interface{}{sql.Named("supplierID", supplierID)}
-	} else {
-		s.writeError(w, http.StatusBadRequest, "Не указан import_point_id или supplier_id")
-		return
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	limit := 100
+	offset := 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+		if limit > 500 {
+			limit = 500
+		}
 	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	query := `
+		SELECT CAST(ii.InvoiceImportID AS TEXT) AS InvoiceImportID,
+			CAST(ii.ImportPointID AS TEXT) AS ImportPointID,
+			ip.Name AS ImportPointName,
+			CAST(ip.SupplierID AS TEXT) AS SupplierID,
+			s.Name AS SupplierName,
+			ii.FileName,
+			ii.FilePath,
+			ii.FileSize,
+			ii.RecordsTotal,
+			ii.RecordsProcessed,
+			ii.RecordsSkipped,
+			ii.RecordsError,
+			ii.ImportStatus,
+			ii.ErrorMessage,
+			ii.StartedAt,
+			ii.CompletedAt,
+			ii.CreatedAt
+		FROM InvoiceImport ii
+		LEFT JOIN ImportPoint ip ON ii.ImportPointID = ip.ImportPointID
+		LEFT JOIN Supplier s ON ip.SupplierID = s.SupplierID
+		WHERE 1=1
+`
+	var args []interface{}
+	if importPointID != "" {
+		query += ` AND ii.ImportPointID = CAST(@importPointID AS UUID)`
+		args = append(args, sql.Named("importPointID", importPointID))
+	}
+	if supplierID != "" {
+		query += ` AND ip.SupplierID = CAST(@supplierID AS UUID)`
+		args = append(args, sql.Named("supplierID", supplierID))
+	}
+	if status != "" {
+		query += ` AND ii.ImportStatus = @status`
+		args = append(args, sql.Named("status", strings.ToUpper(status)))
+	}
+	query += fmt.Sprintf(` ORDER BY ii.CreatedAt DESC OFFSET %d LIMIT %d`, offset, limit)
 
 	rows, err := s.database.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -1122,33 +1196,19 @@ LIMIT 200
 	}
 	defer rows.Close()
 
-	type InvoiceImportView struct {
-		InvoiceImportID  string  `json:"invoice_import_id"`
-		ImportPointID    string  `json:"import_point_id"`
-		FileName         string  `json:"file_name"`
-		FilePath         string  `json:"file_path"`
-		FileSize         *int64  `json:"file_size,omitempty"`
-		RecordsTotal     int     `json:"records_total"`
-		RecordsProcessed int     `json:"records_processed"`
-		RecordsSkipped   int     `json:"records_skipped"`
-		RecordsError     int     `json:"records_error"`
-		ImportStatus     string  `json:"import_status"`
-		ErrorMessage     *string `json:"error_message,omitempty"`
-		StartedAt        *string `json:"started_at,omitempty"`
-		CompletedAt      *string `json:"completed_at,omitempty"`
-		CreatedAt        string  `json:"created_at"`
-	}
-
-	var imports []InvoiceImportView
+	var imports []invoiceImportView
 	for rows.Next() {
-		var imp InvoiceImportView
+		var imp invoiceImportView
 		var fileSize sql.NullInt64
-		var errorMessage sql.NullString
+		var errorMessage, ipName, supplierIDNull, supplierName sql.NullString
 		var startedAt, completedAt, createdAt sql.NullTime
 
 		err := rows.Scan(
 			&imp.InvoiceImportID,
 			&imp.ImportPointID,
+			&ipName,
+			&supplierIDNull,
+			&supplierName,
 			&imp.FileName,
 			&imp.FilePath,
 			&fileSize,
@@ -1169,6 +1229,15 @@ LIMIT 200
 			continue
 		}
 
+		if ipName.Valid {
+			imp.ImportPointName = &ipName.String
+		}
+		if supplierIDNull.Valid {
+			imp.SupplierID = &supplierIDNull.String
+		}
+		if supplierName.Valid {
+			imp.SupplierName = &supplierName.String
+		}
 		if fileSize.Valid {
 			imp.FileSize = &fileSize.Int64
 		}
@@ -1189,12 +1258,160 @@ LIMIT 200
 	}
 
 	if imports == nil {
-		imports = []InvoiceImportView{}
+		imports = []invoiceImportView{}
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"imports": imports,
 		"total":   len(imports),
+		"limit":   limit,
+		"offset":  offset,
+	})
+}
+
+func (s *Server) handleDownloadInvoiceImport(w http.ResponseWriter, r *http.Request, importID string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	var fileName, filePath sql.NullString
+	err := s.database.QueryRowContext(ctx, `
+		SELECT FileName, FilePath FROM InvoiceImport
+		WHERE InvoiceImportID = CAST(@id AS UUID)
+	`, sql.Named("id", importID)).Scan(&fileName, &filePath)
+	if err == sql.ErrNoRows {
+		s.writeError(w, http.StatusNotFound, "Импорт не найден")
+		return
+	}
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Ошибка чтения импорта")
+		return
+	}
+	if !filePath.Valid || strings.TrimSpace(filePath.String) == "" {
+		s.writeError(w, http.StatusNotFound, "Файл импорта не указан")
+		return
+	}
+	path := filepath.Clean(filePath.String)
+	f, err := os.Open(path)
+	if err != nil {
+		s.writeError(w, http.StatusNotFound, "Файл на диске не найден")
+		return
+	}
+	defer f.Close()
+
+	name := "import.bin"
+	if fileName.Valid && fileName.String != "" {
+		name = filepath.Base(fileName.String)
+	} else {
+		name = filepath.Base(path)
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
+	http.ServeContent(w, r, name, time.Time{}, f)
+}
+
+func (s *Server) handleDeleteInvoiceImport(w http.ResponseWriter, r *http.Request, importID string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	var filePath sql.NullString
+	err := s.database.QueryRowContext(ctx, `
+		SELECT FilePath FROM InvoiceImport WHERE InvoiceImportID = CAST(@id AS UUID)
+	`, sql.Named("id", importID)).Scan(&filePath)
+	if err == sql.ErrNoRows {
+		s.writeError(w, http.StatusNotFound, "Импорт не найден")
+		return
+	}
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Ошибка чтения импорта")
+		return
+	}
+
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Ошибка транзакции")
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM SupplierPrice WHERE InvoiceImportID = CAST(@id AS UUID)`, sql.Named("id", importID)); err != nil {
+		s.logger.Error("Ошибка удаления SupplierPrice для импорта %s: %v", importID, err)
+		s.writeError(w, http.StatusInternalServerError, "Ошибка удаления связанных цен")
+		return
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM InvoiceData WHERE InvoiceImportID = CAST(@id AS UUID)`, sql.Named("id", importID)); err != nil {
+		s.logger.Error("Ошибка удаления InvoiceData для импорта %s: %v", importID, err)
+		s.writeError(w, http.StatusInternalServerError, "Ошибка удаления данных импорта")
+		return
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM InvoiceImport WHERE InvoiceImportID = CAST(@id AS UUID)`, sql.Named("id", importID))
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Ошибка удаления импорта")
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		s.writeError(w, http.StatusNotFound, "Импорт не найден")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Ошибка фиксации удаления")
+		return
+	}
+
+	if filePath.Valid && strings.TrimSpace(filePath.String) != "" {
+		_ = os.Remove(filepath.Clean(filePath.String))
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":            "Импорт удалён",
+		"invoice_import_id":  importID,
+	})
+}
+
+func (s *Server) handleReassignInvoiceImport(w http.ResponseWriter, r *http.Request, importID string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	var req struct {
+		ImportPointID string `json:"import_point_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.ImportPointID) == "" {
+		s.writeError(w, http.StatusBadRequest, "Укажите import_point_id")
+		return
+	}
+	if _, err := uuid.Parse(req.ImportPointID); err != nil {
+		s.writeError(w, http.StatusBadRequest, "Недопустимый import_point_id")
+		return
+	}
+
+	var exists int
+	err := s.database.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM ImportPoint WHERE ImportPointID = CAST(@id AS UUID) AND IsActive = 1
+	`, sql.Named("id", req.ImportPointID)).Scan(&exists)
+	if err != nil || exists == 0 {
+		s.writeError(w, http.StatusBadRequest, "Точка импорта не найдена")
+		return
+	}
+
+	res, err := s.database.ExecContext(ctx, `
+		UPDATE InvoiceImport
+		SET ImportPointID = CAST(@pointID AS UUID)
+		WHERE InvoiceImportID = CAST(@id AS UUID)
+	`, sql.Named("pointID", req.ImportPointID), sql.Named("id", importID))
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Ошибка переназначения импорта")
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		s.writeError(w, http.StatusNotFound, "Импорт не найден")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":            "Импорт переназначен",
+		"invoice_import_id":  importID,
+		"import_point_id":    req.ImportPointID,
 	})
 }
 

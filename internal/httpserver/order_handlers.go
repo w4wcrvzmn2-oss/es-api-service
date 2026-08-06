@@ -49,6 +49,28 @@ func (s *Server) handleOrdersRouter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.HasSuffix(path, "/export") {
+		orderID := strings.TrimSuffix(path, "/export")
+		orderID = strings.TrimSuffix(orderID, "/")
+		if r.Method == http.MethodGet {
+			s.handleExportOrder(w, r, orderID)
+		} else {
+			s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
+		}
+		return
+	}
+
+	if strings.HasSuffix(path, "/status") {
+		orderID := strings.TrimSuffix(path, "/status")
+		orderID = strings.TrimSuffix(orderID, "/")
+		if r.Method == http.MethodPatch || r.Method == http.MethodPost || r.Method == http.MethodPut {
+			s.handlePatchOrderStatus(w, r, orderID)
+		} else {
+			s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
+		}
+		return
+	}
+
 	if strings.Contains(path, "/items") {
 		parts := strings.Split(path, "/items")
 		orderID := parts[0]
@@ -122,6 +144,7 @@ func (s *Server) handleGetOrders(w http.ResponseWriter, r *http.Request) {
 	buyerID := r.URL.Query().Get("buyer_id")
 	buyerUserID := r.URL.Query().Get("buyer_user_id")
 	statusID := r.URL.Query().Get("status_id")
+	statusName := strings.TrimSpace(r.URL.Query().Get("status"))
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 
@@ -171,6 +194,10 @@ func (s *Server) handleGetOrders(w http.ResponseWriter, r *http.Request) {
 	if statusID != "" {
 		query += " AND o.OrderStatusID = CAST(@statusID AS UUID)"
 		args = append(args, sql.Named("statusID", statusID))
+	}
+	if statusName != "" {
+		query += " AND os.Name = @statusName"
+		args = append(args, sql.Named("statusName", statusName))
 	}
 	query += " ORDER BY o.CreatedAt DESC OFFSET @offset LIMIT @limit"
 	args = append(args, sql.Named("offset", offset), sql.Named("limit", limit))
@@ -695,4 +722,164 @@ LIMIT 100
 		statuses = []models.OrderStatus{}
 	}
 	s.writeJSON(w, http.StatusOK, statuses)
+}
+
+// handlePatchOrderStatus — безопасная смена статуса (Draft / Placed / Cancelled).
+func (s *Server) handlePatchOrderStatus(w http.ResponseWriter, r *http.Request, orderID string) {
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "Неверный формат JSON")
+		return
+	}
+	statusName := strings.TrimSpace(req.Status)
+	var description string
+	var setPlacedAt bool
+	switch strings.ToLower(statusName) {
+	case "draft":
+		statusName = "Draft"
+		description = "Черновик заказа"
+	case "placed":
+		statusName = "Placed"
+		description = "Заказ размещён"
+		setPlacedAt = true
+	case "cancelled", "canceled":
+		statusName = "Cancelled"
+		description = "Заказ отменён"
+	default:
+		s.writeError(w, http.StatusBadRequest, "Допустимые статусы: Draft, Placed, Cancelled")
+		return
+	}
+	s.transitionOrderStatus(w, r, orderID, statusName, description, setPlacedAt, "Статус заказа обновлён")
+}
+
+// handleExportOrder отдаёт заказ с позициями как CSV.
+func (s *Server) handleExportOrder(w http.ResponseWriter, r *http.Request, orderID string) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			s.logger.Error("Паника в handleExportOrder: %v", rec)
+			s.writeError(w, http.StatusInternalServerError, "Внутренняя ошибка сервера")
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	var row orderListRow
+	err := s.database.GORMWith(ctx).Raw(
+		`SELECT
+			CAST(o.OrderID AS TEXT) AS OrderID,
+			CAST(o.BuyerUserID AS TEXT) AS BuyerUserID,
+			CAST(o.BuyerApplicationID AS TEXT) AS BuyerApplicationID,
+			CAST(o.BuyerLocationID AS TEXT) AS BuyerLocationID,
+			CAST(o.OrderStatusID AS TEXT) AS OrderStatusID,
+			o.CreatedAt, o.PlacedAt, o.TotalAmount, o.Comment,
+			bu.FullName AS BuyerUserName,
+			b.Name AS BuyerName,
+			os.Name AS OrderStatusName,
+			bl.Address AS LocationAddress
+		FROM "Order" o
+		INNER JOIN BuyerUser bu ON o.BuyerUserID = bu.BuyerUserID
+		INNER JOIN Buyer b ON bu.BuyerID = b.BuyerID
+		INNER JOIN OrderStatus os ON o.OrderStatusID = os.OrderStatusID
+		LEFT JOIN BuyerLocation bl ON o.BuyerLocationID = bl.BuyerLocationID
+		WHERE o.OrderID = ?`,
+		db.UUIDParam(orderID),
+	).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		s.writeError(w, http.StatusNotFound, "Заказ не найден")
+		return
+	}
+	if err != nil {
+		s.logger.Error("Ошибка экспорта заказа: %v", err)
+		s.writeError(w, http.StatusInternalServerError, "Ошибка экспорта заказа")
+		return
+	}
+
+	type itemRow struct {
+		SupplierName *string
+		ProductName  *string
+		Qty          float64
+		UnitPrice    float64
+		ItemName     *string
+		ItemCode     *string
+	}
+	var items []itemRow
+	_ = s.database.GORMWith(ctx).Raw(
+		`SELECT s.Name AS SupplierName,
+			p.Name AS ProductName,
+			oi.Qty, oi.UnitPrice,
+			oi.ItemName, oi.ItemCode
+		FROM OrderItem oi
+		INNER JOIN Supplier s ON oi.SupplierID = s.SupplierID
+		LEFT JOIN Product p ON oi.ProductID = p.ProductID
+		WHERE oi.OrderID = ?
+		ORDER BY oi.CreatedAt
+LIMIT 2000
+`,
+		db.UUIDParam(orderID),
+	).Scan(&items).Error
+
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if format == "json" {
+		o := row.toModel()
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"order": o,
+			"items": items,
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="order-%s.csv"`, orderID))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("\xEF\xBB\xBF")) // BOM for Excel
+
+	buyer := ""
+	if row.BuyerName != nil {
+		buyer = *row.BuyerName
+	}
+	status := ""
+	if row.OrderStatusName != nil {
+		status = *row.OrderStatusName
+	}
+	addr := ""
+	if row.LocationAddress != nil {
+		addr = *row.LocationAddress
+	}
+	comment := ""
+	if row.Comment != nil {
+		comment = *row.Comment
+	}
+	total := 0.0
+	if row.TotalAmount != nil {
+		total = *row.TotalAmount
+	}
+
+	esc := func(v string) string {
+		v = strings.ReplaceAll(v, `"`, `""`)
+		return `"` + v + `"`
+	}
+	_, _ = fmt.Fprintf(w, "order_id,buyer,status,address,total,comment,created_at\n")
+	_, _ = fmt.Fprintf(w, "%s,%s,%s,%s,%.2f,%s,%s\n",
+		esc(row.OrderID), esc(buyer), esc(status), esc(addr), total, esc(comment), esc(row.CreatedAt.Format(time.RFC3339)))
+	_, _ = fmt.Fprintf(w, "\nsupplier,product,item_code,item_name,qty,unit_price,line_total\n")
+	for _, it := range items {
+		sup, prod, code, name := "", "", "", ""
+		if it.SupplierName != nil {
+			sup = *it.SupplierName
+		}
+		if it.ProductName != nil {
+			prod = *it.ProductName
+		}
+		if it.ItemCode != nil {
+			code = *it.ItemCode
+		}
+		if it.ItemName != nil {
+			name = *it.ItemName
+		}
+		_, _ = fmt.Fprintf(w, "%s,%s,%s,%s,%.3f,%.2f,%.2f\n",
+			esc(sup), esc(prod), esc(code), esc(name), it.Qty, it.UnitPrice, it.Qty*it.UnitPrice)
+	}
 }

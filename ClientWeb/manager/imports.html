@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Импорты — Менеджер | PharmData</title>
+    <meta name="theme-color" content="#2b6cab">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%232b6cab'/><rect x='42' y='22' width='16' height='56' rx='5' fill='%23fff'/><rect x='22' y='42' width='56' height='16' rx='5' fill='%23fff'/></svg>">
+    <link href="vendor/bootstrap.min.css" rel="stylesheet">
+    <link href="vendor/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/custom.css">
+</head>
+<body class="bg-light">
+    <script src="../auth.js"></script>
+    <script>if (!AuthManager.requireRole('admin', 'manager')) {}</script>
+    <script src="js/nav-manager.js"></script>
+
+    <div class="container-fluid py-4 px-3 px-lg-5">
+        <h1 class="mb-4">Импорты прайсов</h1>
+
+        <div class="card shadow-sm mb-3">
+            <div class="card-body">
+                <div class="row g-2 align-items-end">
+                    <div class="col-auto">
+                        <label class="form-label mb-1">Статус</label>
+                        <select id="fltStatus" class="form-select form-select-sm" style="min-width:150px">
+                            <option value="">Все</option>
+                            <option value="FAILED">FAILED</option>
+                            <option value="COMPLETED">COMPLETED</option>
+                            <option value="PROCESSING">PROCESSING</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label mb-1">Точка импорта</label>
+                        <select id="fltPoint" class="form-select form-select-sm"><option value="">Все</option></select>
+                    </div>
+                    <div class="col-auto">
+                        <button class="btn btn-primary btn-sm" onclick="loadImports()"><i class="bi bi-funnel"></i> Показать</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover table-striped align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Дата</th><th>Файл</th><th>Поставщик / точка</th><th>Статус</th><th>Записей</th><th>Ошибка</th><th style="width:180px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="list"><tr><td colspan="7" class="loading">Загрузка…</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="vendor/bootstrap.bundle.min.js"></script>
+    <script src="js/toast.js"></script>
+    <script src="js/manager-common.js"></script>
+    <script>
+        let importPointsCache = [];
+        const params = new URLSearchParams(location.search);
+        if (params.get('status')) document.getElementById('fltStatus').value = params.get('status');
+
+        async function loadPoints() {
+            try {
+                const data = await mgrApi('/api/import-points');
+                const points = Array.isArray(data) ? data : [];
+                importPointsCache = points;
+                const sel = document.getElementById('fltPoint');
+                points.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.import_point_id;
+                    opt.textContent = (p.supplier_name ? p.supplier_name + ' — ' : '') + (p.name || p.import_point_id);
+                    sel.appendChild(opt);
+                });
+            } catch (_) {}
+        }
+
+        async function loadImports() {
+            try {
+                let url = '/api/invoice-imports?limit=150';
+                const st = document.getElementById('fltStatus').value;
+                const pt = document.getElementById('fltPoint').value;
+                if (st) url += '&status=' + encodeURIComponent(st);
+                if (pt) url += '&import_point_id=' + encodeURIComponent(pt);
+                const data = await mgrApi(url);
+                const imports = data.imports || [];
+                document.getElementById('list').innerHTML = imports.length
+                    ? imports.map(imp => {
+                        const badge = imp.import_status === 'FAILED' ? 'bg-danger'
+                            : imp.import_status === 'COMPLETED' ? 'bg-success' : 'bg-warning text-dark';
+                        return `<tr>
+                            <td>${mgrEsc(imp.created_at||'—')}</td>
+                            <td>${mgrEsc(imp.file_name||'—')}</td>
+                            <td>${mgrEsc(imp.supplier_name||'—')}<div class="small text-muted">${mgrEsc(imp.import_point_name||mgrShortId(imp.import_point_id))}</div></td>
+                            <td><span class="badge ${badge}">${mgrEsc(imp.import_status)}</span></td>
+                            <td>${mgrNum(imp.records_processed)} / ${mgrNum(imp.records_total)}</td>
+                            <td class="small text-danger" title="${mgrEsc(imp.error_message||'')}">${mgrEsc((imp.error_message||'—').slice(0,80))}</td>
+                            <td class="text-nowrap">
+                                <button class="btn-icon" title="Скачать" onclick="downloadImp('${imp.invoice_import_id}')"><i class="bi bi-download"></i></button>
+                                <button class="btn-icon" title="Переместить" onclick="reassignImp('${imp.invoice_import_id}')"><i class="bi bi-arrow-left-right"></i></button>
+                                <button class="btn-icon btn-danger-icon" title="Удалить" onclick="deleteImp('${imp.invoice_import_id}')"><i class="bi bi-trash"></i></button>
+                            </td>
+                        </tr>`;
+                    }).join('')
+                    : '<tr><td colspan="7" class="empty-row">Нет импортов</td></tr>';
+            } catch (e) { mgrToast(e.message, 'error'); }
+        }
+
+        async function downloadImp(id) {
+            try {
+                const res = await AuthManager.authenticatedFetch('/api/invoice-imports/' + encodeURIComponent(id) + '/download');
+                if (!res.ok) {
+                    let msg = 'Файл недоступен';
+                    try { msg = (await res.json()).error || msg; } catch(_){}
+                    throw new Error(msg);
+                }
+                const blob = await res.blob();
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'import-' + id.slice(0, 8);
+                a.click();
+                URL.revokeObjectURL(a.href);
+            } catch (e) { mgrToast(e.message, 'error'); }
+        }
+
+        async function deleteImp(id) {
+            const ok = (typeof Toast !== 'undefined' && Toast.confirm)
+                ? await Toast.confirm('Удаление', 'Удалить импорт и связанные цены?')
+                : confirm('Удалить импорт и связанные цены?');
+            if (!ok) return;
+            try {
+                await mgrApi('/api/invoice-imports/' + encodeURIComponent(id), { method: 'DELETE' });
+                mgrToast('Импорт удалён', 'success');
+                loadImports();
+            } catch (e) { mgrToast(e.message, 'error'); }
+        }
+
+        async function reassignImp(id) {
+            if (!importPointsCache.length) { mgrToast('Список точек пуст', 'warning'); return; }
+            const choices = importPointsCache.map((p, i) =>
+                `${i + 1}. ${(p.supplier_name || '')} ${p.name || p.import_point_id}`
+            ).join('\n');
+            const pick = prompt('Номер точки импорта:\n' + choices.slice(0, 1500));
+            if (!pick) return;
+            const idx = parseInt(pick, 10) - 1;
+            if (isNaN(idx) || idx < 0 || idx >= importPointsCache.length) {
+                mgrToast('Неверный номер', 'error'); return;
+            }
+            try {
+                await mgrApi('/api/invoice-imports/' + encodeURIComponent(id) + '/reassign', {
+                    method: 'POST',
+                    body: JSON.stringify({ import_point_id: importPointsCache[idx].import_point_id })
+                });
+                mgrToast('Импорт переназначен', 'success');
+                loadImports();
+            } catch (e) { mgrToast(e.message, 'error'); }
+        }
+
+        loadPoints().then(loadImports);
+    </script>
+</body>
+</html>
