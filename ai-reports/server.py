@@ -1,0 +1,352 @@
+# -*- coding: utf-8 -*-
+"""
+AI-сервис отчётов для покупателей (Электронная Фармация).
+
+Поток:
+  десктоп -> POST /generate {prompt, token, format?}
+    -> Ollama (локально) превращает промт в JSON-интент (тип отчёта, даты, фильтры)
+    -> платформа /api/buyer/report (данные СТРОГО этого покупателя по его JWT)
+    -> детерминированная агрегация + сборка Word/Excel
+  -> файл возвращается клиенту
+
+LLM только понимает формулировку. Цифры считает код -> отчёт всегда точный,
+данные — только клиента (скоуп на сервере по токену).
+"""
+import os
+import io
+import json
+import re
+import datetime as dt
+from typing import Optional, List, Dict, Any
+
+import requests
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse, JSONResponse
+from pydantic import BaseModel
+
+from docx import Document
+from docx.shared import Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+# ---- конфигурация (можно переопределить через окружение) ----
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+API_BASE = os.environ.get("ELF_API_BASE", "https://24pharmdata.ru").rstrip("/")
+HTTP_TIMEOUT = int(os.environ.get("ELF_HTTP_TIMEOUT", "60"))
+
+app = FastAPI(title="Elfisa AI Reports", version="1.0")
+
+REPORT_TYPES = {"orders", "by_supplier", "by_item", "by_pharmacy"}
+
+RU_TITLES = {
+    "orders": "Мои заказы за период",
+    "by_supplier": "Закупки по поставщикам",
+    "by_item": "Закупки по товарам",
+    "by_pharmacy": "Закупки по аптекам",
+}
+
+
+class GenReq(BaseModel):
+    prompt: str
+    token: str
+    format: Optional[str] = None  # docx | xlsx (по умолчанию из интента/docx)
+
+
+def _today() -> dt.date:
+    return dt.date.today()
+
+
+def _default_range():
+    to = _today()
+    frm = (to.replace(day=1) - dt.timedelta(days=1)).replace(day=1)  # начало прошлого месяца
+    return frm, to
+
+
+def _parse_date(s: Any, fallback: dt.date) -> dt.date:
+    if not s:
+        return fallback
+    try:
+        return dt.datetime.strptime(str(s)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return fallback
+
+
+def extract_intent(prompt: str) -> Dict[str, Any]:
+    """Промт -> JSON-интент через локальную Ollama (format=json)."""
+    today = _today().isoformat()
+    system = (
+        "Ты помощник, который переводит запрос фармацевта в параметры отчёта. "
+        "Верни СТРОГО один JSON-объект без пояснений со схемой: "
+        "{\"report_type\": один из [orders, by_supplier, by_item, by_pharmacy], "
+        "\"date_from\": \"YYYY-MM-DD\", \"date_to\": \"YYYY-MM-DD\", "
+        "\"supplier_filter\": строка или null, \"item_filter\": строка или null, "
+        "\"format\": \"docx\" или \"xlsx\", \"title\": краткий заголовок на русском}. "
+        "Значения report_type: orders=мои заказы по каждому заказу; "
+        "by_supplier=сводка по поставщикам; by_item=по товарам/препаратам; "
+        "by_pharmacy=по аптекам-грузополучателям. "
+        f"Сегодня {today}. Если период не указан — последний месяц. "
+        "Если тип не ясен — orders. Если формат не указан — docx."
+    )
+    payload = {
+        "model": OLLAMA_MODEL,
+        "format": "json",
+        "stream": False,
+        "options": {"temperature": 0.1},
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+    }
+    r = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=HTTP_TIMEOUT)
+    r.raise_for_status()
+    content = r.json().get("message", {}).get("content", "{}")
+    try:
+        intent = json.loads(content)
+    except Exception:
+        m = re.search(r"\{.*\}", content, re.S)
+        intent = json.loads(m.group(0)) if m else {}
+    return intent
+
+
+def normalize_intent(intent: Dict[str, Any], req_format: Optional[str]) -> Dict[str, Any]:
+    frm_def, to_def = _default_range()
+    rtype = str(intent.get("report_type", "orders")).strip()
+    if rtype not in REPORT_TYPES:
+        rtype = "orders"
+    fmt = (req_format or intent.get("format") or "docx").strip().lower()
+    if fmt not in ("docx", "xlsx"):
+        fmt = "docx"
+    return {
+        "report_type": rtype,
+        "date_from": _parse_date(intent.get("date_from"), frm_def),
+        "date_to": _parse_date(intent.get("date_to"), to_def),
+        "supplier_filter": (intent.get("supplier_filter") or None),
+        "item_filter": (intent.get("item_filter") or None),
+        "format": fmt,
+        "title": (intent.get("title") or RU_TITLES.get(rtype)) or "Отчёт",
+    }
+
+
+def fetch_lines(token: str, frm: dt.date, to: dt.date) -> List[Dict[str, Any]]:
+    """Данные строго покупателя — платформа скоупит по его JWT."""
+    url = f"{API_BASE}/api/buyer/report"
+    params = {"date_from": frm.isoformat(), "date_to": to.isoformat()}
+    headers = {"Authorization": f"Bearer {token}"}
+    r = requests.get(url, params=params, headers=headers, timeout=HTTP_TIMEOUT)
+    if r.status_code == 401:
+        raise HTTPException(status_code=401, detail="Токен недействителен или истёк")
+    r.raise_for_status()
+    return r.json().get("lines", []) or []
+
+
+def _num(x):
+    try:
+        return float(x or 0)
+    except Exception:
+        return 0.0
+
+
+def apply_filters(lines, sup_filter, item_filter):
+    out = lines
+    if sup_filter:
+        s = str(sup_filter).lower()
+        out = [l for l in out if s in str(l.get("supplier", "")).lower()]
+    if item_filter:
+        s = str(item_filter).lower()
+        out = [l for l in out if s in str(l.get("item_name", "")).lower()]
+    return out
+
+
+def aggregate(lines, rtype):
+    """Возвращает (columns, rows). Логика зеркалит десктопный UCReports."""
+    if rtype == "orders":
+        cols = ["Дата", "Номер", "Поставщик", "Аптека", "Позиций", "Сумма", "Статус"]
+        groups: Dict[str, list] = {}
+        for l in lines:
+            groups.setdefault(l.get("order_id", ""), []).append(l)
+        rows = []
+        for _, g in groups.items():
+            f = g[0]
+            date = (f.get("order_date") or "")[:10]
+            suppliers = ", ".join(sorted({l.get("supplier", "") for l in g if l.get("supplier")}))
+            rows.append([
+                date, f.get("global_sign", ""), suppliers, f.get("location", ""),
+                len(g), sum(_num(l.get("sum")) for l in g), f.get("status", ""),
+            ])
+        rows.sort(key=lambda r: r[0], reverse=True)
+        return cols, rows
+
+    if rtype == "by_supplier":
+        cols = ["Поставщик", "Заказов", "Позиций", "Сумма"]
+        groups = {}
+        for l in lines:
+            groups.setdefault(l.get("supplier") or "(не указан)", []).append(l)
+        rows = [[k, len({l.get("order_id") for l in g}), len(g), sum(_num(l.get("sum")) for l in g)]
+                for k, g in groups.items()]
+        rows.sort(key=lambda r: r[3], reverse=True)
+        return cols, rows
+
+    if rtype == "by_item":
+        cols = ["Товар", "Код", "Кол-во", "Сумма"]
+        groups = {}
+        for l in lines:
+            key = (str(l.get("item_name", "")).strip(), str(l.get("item_code", "")))
+            groups.setdefault(key, []).append(l)
+        rows = [[k[0], k[1], sum(_num(l.get("qty")) for l in g), sum(_num(l.get("sum")) for l in g)]
+                for k, g in groups.items()]
+        rows.sort(key=lambda r: r[3], reverse=True)
+        return cols, rows
+
+    # by_pharmacy
+    cols = ["Аптека", "Заказов", "Позиций", "Сумма"]
+    groups = {}
+    for l in lines:
+        groups.setdefault(l.get("location") or "(не указана)", []).append(l)
+    rows = [[k, len({l.get("order_id") for l in g}), len(g), sum(_num(l.get("sum")) for l in g)]
+            for k, g in groups.items()]
+    rows.sort(key=lambda r: r[3], reverse=True)
+    return cols, rows
+
+
+def ai_summary(title, period, cols, rows, total_sum) -> str:
+    """Короткое резюме 2-3 предложения (best-effort, не критично)."""
+    try:
+        preview = [dict(zip(cols, r)) for r in rows[:15]]
+        system = ("Ты аналитик. По данным отчёта напиши 2-3 коротких предложения-резюме "
+                  "на русском: ключевые цифры, лидеры, заметные моменты. Без вступлений.")
+        user = (f"Отчёт: {title}. Период: {period}. Итоговая сумма: {total_sum:.2f}. "
+                f"Строки (до 15): {json.dumps(preview, ensure_ascii=False, default=str)}")
+        payload = {"model": OLLAMA_MODEL, "stream": False, "options": {"temperature": 0.3},
+                   "messages": [{"role": "system", "content": system},
+                                {"role": "user", "content": user}]}
+        r = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=HTTP_TIMEOUT)
+        r.raise_for_status()
+        return r.json().get("message", {}).get("content", "").strip()
+    except Exception:
+        return ""
+
+
+def _fmt_cell(col, val):
+    if col == "Сумма":
+        return f"{_num(val):,.2f}".replace(",", " ")
+    if col == "Кол-во":
+        return f"{_num(val):,.3f}".replace(",", " ")
+    return "" if val is None else str(val)
+
+
+def build_docx(meta, cols, rows, summary) -> bytes:
+    doc = Document()
+    h = doc.add_heading(meta["title"], level=1)
+    h.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    period = f'Период: {meta["date_from"].strftime("%d.%m.%Y")} — {meta["date_to"].strftime("%d.%m.%Y")}'
+    p = doc.add_paragraph(period)
+    p.runs[0].italic = True
+    if meta.get("supplier_filter"):
+        doc.add_paragraph(f'Фильтр по поставщику: {meta["supplier_filter"]}')
+    if meta.get("item_filter"):
+        doc.add_paragraph(f'Фильтр по товару: {meta["item_filter"]}')
+    if summary:
+        sp = doc.add_paragraph()
+        run = sp.add_run(summary)
+        run.font.size = Pt(11)
+
+    table = doc.add_table(rows=1, cols=len(cols))
+    table.style = "Light Grid Accent 1"
+    hdr = table.rows[0].cells
+    for i, c in enumerate(cols):
+        hdr[i].text = c
+        for par in hdr[i].paragraphs:
+            for run in par.runs:
+                run.bold = True
+
+    total_sum = 0.0
+    sum_idx = cols.index("Сумма") if "Сумма" in cols else None
+    for r in rows:
+        cells = table.add_row().cells
+        for i, c in enumerate(cols):
+            cells[i].text = _fmt_cell(c, r[i])
+        if sum_idx is not None:
+            total_sum += _num(r[sum_idx])
+
+    doc.add_paragraph()
+    tp = doc.add_paragraph()
+    tr = tp.add_run(f"ИТОГО сумма: {total_sum:,.2f}".replace(",", " "))
+    tr.bold = True
+    tr.font.size = Pt(12)
+
+    foot = doc.add_paragraph(
+        f'Сформировано ИИ {dt.datetime.now().strftime("%d.%m.%Y %H:%M")} · Электронная Фармация')
+    foot.runs[0].italic = True
+    foot.runs[0].font.size = Pt(8)
+    foot.runs[0].font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def build_xlsx(meta, cols, rows) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Отчёт"
+    ws.append([meta["title"]])
+    ws["A1"].font = Font(bold=True, size=14)
+    ws.append([f'Период: {meta["date_from"]:%d.%m.%Y} — {meta["date_to"]:%d.%m.%Y}'])
+    ws.append([])
+    ws.append(cols)
+    for c in ws[ws.max_row]:
+        c.font = Font(bold=True)
+    for r in rows:
+        ws.append([(_num(v) if cols[i] in ("Сумма", "Кол-во") else v) for i, v in enumerate(r)])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+@app.get("/health")
+def health():
+    ok_ollama = False
+    try:
+        ok_ollama = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5).ok
+    except Exception:
+        pass
+    return {"status": "ok", "ollama": ok_ollama, "model": OLLAMA_MODEL, "api_base": API_BASE}
+
+
+@app.post("/generate")
+def generate(req: GenReq):
+    if not req.token:
+        raise HTTPException(status_code=400, detail="Нет токена")
+    if not req.prompt or not req.prompt.strip():
+        raise HTTPException(status_code=400, detail="Пустой запрос")
+
+    raw = extract_intent(req.prompt)
+    meta = normalize_intent(raw, req.format)
+
+    lines = fetch_lines(req.token, meta["date_from"], meta["date_to"])
+    lines = apply_filters(lines, meta["supplier_filter"], meta["item_filter"])
+    cols, rows = aggregate(lines, meta["report_type"])
+
+    total_sum = sum(_num(l.get("sum")) for l in lines)
+    period = f'{meta["date_from"]:%d.%m.%Y} — {meta["date_to"]:%d.%m.%Y}'
+    summary = ai_summary(meta["title"], period, cols, rows, total_sum) if rows else ""
+
+    safe = re.sub(r"[^\w\-. ]", "_", meta["title"])[:60].strip() or "report"
+    if meta["format"] == "xlsx":
+        data = build_xlsx(meta, cols, rows)
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        fname = f"{safe}.xlsx"
+    else:
+        data = build_docx(meta, cols, rows, summary)
+        media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        fname = f"{safe}.docx"
+
+    from urllib.parse import quote
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(fname)}",
+        "X-Report-Type": meta["report_type"],
+        "X-Report-Rows": str(len(rows)),
+    }
+    return StreamingResponse(io.BytesIO(data), media_type=media, headers=headers)

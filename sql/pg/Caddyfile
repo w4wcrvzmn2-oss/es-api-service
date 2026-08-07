@@ -12,10 +12,16 @@
 }
 
 24pharmdata.ru {
-	reverse_proxy 127.0.0.1:8080 {
-		header_up X-Real-IP {remote_host}
-		header_up X-Forwarded-For {remote_host}
-		header_up X-Forwarded-Proto {scheme}
+	# ИИ-отчёты: /ai/* -> Mac mini (Ollama + FastAPI), префикс срезается.
+	handle_path /ai/* {
+		reverse_proxy 192.168.95.116:8808
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8080 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
 	}
 }
 

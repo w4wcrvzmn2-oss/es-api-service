@@ -115,6 +115,15 @@ func (s *Server) handleBuyerOrdersRouter(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if strings.HasPrefix(path, "report") {
+		if r.Method == http.MethodGet {
+			s.handleBuyerReport(w, r)
+		} else {
+			s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
+		}
+		return
+	}
+
 	if !strings.HasPrefix(path, "orders") {
 		s.writeError(w, http.StatusNotFound, "Маршрут не найден")
 		return

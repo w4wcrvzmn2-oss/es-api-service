@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.elfisa.aireports</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/exesttryicloud.com/Desktop/ElfisaAI/venv/bin/python</string>
+        <string>-m</string>
+        <string>uvicorn</string>
+        <string>server:app</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>8808</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/exesttryicloud.com/Desktop/ElfisaAI</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>OLLAMA_URL</key>
+        <string>http://127.0.0.1:11434</string>
+        <key>OLLAMA_MODEL</key>
+        <string>qwen2.5:7b-instruct</string>
+        <key>ELF_API_BASE</key>
+        <string>https://24pharmdata.ru</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/exesttryicloud.com/Desktop/ElfisaAI/logs/service.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/exesttryicloud.com/Desktop/ElfisaAI/logs/service.log</string>
+</dict>
+</plist>
