@@ -36,10 +36,11 @@ HTTP_TIMEOUT = int(os.environ.get("ELF_HTTP_TIMEOUT", "60"))
 
 app = FastAPI(title="Elfisa AI Reports", version="1.0")
 
-REPORT_TYPES = {"orders", "by_supplier", "by_item", "by_pharmacy"}
+REPORT_TYPES = {"orders", "orders_items", "by_supplier", "by_item", "by_pharmacy"}
 
 RU_TITLES = {
     "orders": "Мои заказы за период",
+    "orders_items": "Мои заказы с товарами",
     "by_supplier": "Закупки по поставщикам",
     "by_item": "Закупки по товарам",
     "by_pharmacy": "Закупки по аптекам",
@@ -77,13 +78,16 @@ def extract_intent(prompt: str) -> Dict[str, Any]:
     system = (
         "Ты помощник, который переводит запрос фармацевта в параметры отчёта. "
         "Верни СТРОГО один JSON-объект без пояснений со схемой: "
-        "{\"report_type\": один из [orders, by_supplier, by_item, by_pharmacy], "
+        "{\"report_type\": один из [orders, orders_items, by_supplier, by_item, by_pharmacy], "
         "\"date_from\": \"YYYY-MM-DD\", \"date_to\": \"YYYY-MM-DD\", "
         "\"supplier_filter\": строка или null, \"item_filter\": строка или null, "
         "\"format\": \"docx\" или \"xlsx\", \"title\": краткий заголовок на русском}. "
-        "Значения report_type: orders=мои заказы по каждому заказу; "
+        "Значения report_type: orders=список заказов, по одной строке на заказ, БЕЗ товаров внутри; "
+        "orders_items=заказы С ИХ СОДЕРЖИМЫМ — каждая позиция (товар) внутри заказа отдельной строкой; "
+        "выбирай orders_items когда просят «с содержимым», «с товарами», «что внутри», «детально», «позиции заказов», «расшифровка»; "
         "by_supplier=сводка по поставщикам; by_item=по товарам/препаратам; "
         "by_pharmacy=по аптекам-грузополучателям. "
+        "«за всё время» — период с 2023-01-01 по сегодня. "
         f"Сегодня {today}. Если период не указан — последний месяц. "
         "Если тип не ясен — orders. Если формат не указан — docx."
     )
@@ -176,6 +180,18 @@ def aggregate(lines, rtype):
         rows.sort(key=lambda r: r[0], reverse=True)
         return cols, rows
 
+    if rtype == "orders_items":
+        # Заказы с содержимым: каждая позиция (товар) отдельной строкой.
+        cols = ["Дата", "Номер", "Поставщик", "Товар", "Код", "Кол-во", "Цена", "Сумма", "Статус"]
+        rows = []
+        for l in sorted(lines, key=lambda x: ((x.get("order_date") or ""), x.get("global_sign") or ""), reverse=True):
+            rows.append([
+                (l.get("order_date") or "")[:10], l.get("global_sign", ""), l.get("supplier", ""),
+                l.get("item_name", ""), l.get("item_code", ""),
+                _num(l.get("qty")), _num(l.get("unit_price")), _num(l.get("sum")), l.get("status", ""),
+            ])
+        return cols, rows
+
     if rtype == "by_supplier":
         cols = ["Поставщик", "Заказов", "Позиций", "Сумма"]
         groups = {}
@@ -227,7 +243,7 @@ def ai_summary(title, period, cols, rows, total_sum) -> str:
 
 
 def _fmt_cell(col, val):
-    if col == "Сумма":
+    if col in ("Сумма", "Цена"):
         return f"{_num(val):,.2f}".replace(",", " ")
     if col == "Кол-во":
         return f"{_num(val):,.3f}".replace(",", " ")
@@ -299,7 +315,7 @@ def build_xlsx(meta, cols, rows) -> bytes:
     for c in ws[ws.max_row]:
         c.font = Font(bold=True)
     for r in rows:
-        ws.append([(_num(v) if cols[i] in ("Сумма", "Кол-во") else v) for i, v in enumerate(r)])
+        ws.append([(_num(v) if cols[i] in ("Сумма", "Цена", "Кол-во") else v) for i, v in enumerate(r)])
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
