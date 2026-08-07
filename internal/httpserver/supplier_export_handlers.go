@@ -287,6 +287,7 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 		Code         sql.NullString `gorm:"column:code"`
 		Name         sql.NullString `gorm:"column:name"`
 		SuppName     sql.NullString `gorm:"column:supp_name"`
+		SupCode      sql.NullString `gorm:"column:sup_code"`
 		Barcode      sql.NullString `gorm:"column:barcode"`
 		Manufacturer sql.NullString `gorm:"column:manufacturer"`
 		Country      sql.NullString `gorm:"column:country"`
@@ -315,6 +316,7 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 				''
 			) AS name,
 			COALESCE(sp."SupplierItemName", spfb."SupplierItemName") AS supp_name,
+			sup."Code" AS sup_code,
 			COALESCE(NULLIF(TRIM(oi."Barcode"), ''), sp."Barcode", spfb."Barcode") AS barcode,
 			COALESCE(sp."Manufacturer", spfb."Manufacturer") AS manufacturer,
 			COALESCE(sp."Country", spfb."Country") AS country,
@@ -327,6 +329,7 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 		INNER JOIN "Order" o ON o."OrderID" = oi."OrderID"
 		INNER JOIN "BuyerUser" bu ON bu."BuyerUserID" = o."BuyerUserID"
 		INNER JOIN "Buyer" b ON b."BuyerID" = bu."BuyerID"
+		LEFT JOIN "Supplier" sup ON sup."SupplierID" = oi."SupplierID"
 		LEFT JOIN "BuyerLocation" bl ON bl."BuyerLocationID" = o."BuyerLocationID"
 		LEFT JOIN "Product" p ON p."ProductID" = oi."ProductID"
 		LEFT JOIN "SupplierPrice" sp ON sp."SupplierPriceID" = oi."SupplierPriceID"
@@ -380,6 +383,7 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 			Code:         nullStr(rw.Code),
 			Name:         nullStr(rw.Name),
 			SuppName:     nullStr(rw.SuppName),
+			SupCode:      nullStr(rw.SupCode),
 			Barcode:      nullStr(rw.Barcode),
 			Manufacturer: nullStr(rw.Manufacturer),
 			Country:      nullStr(rw.Country),

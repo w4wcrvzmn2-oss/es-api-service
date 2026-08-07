@@ -46,6 +46,7 @@ func NewServer(cfg *config.Config, database *db.Database, fileLogger *logger.Log
 		LoginRatePerMin:   cfg.Security.LoginRatePerMin,
 		APIRatePerMin:     cfg.Security.APIRatePerMin,
 		StaticRatePerMin:  cfg.Security.StaticRatePerMin,
+		TrustedIPs:        cfg.Security.TrustedIPs,
 	})
 	authService := NewAuthService(cfg, database, fileLogger, limiter)
 
@@ -59,6 +60,12 @@ func NewServer(cfg *config.Config, database *db.Database, fileLogger *logger.Log
 		logger:      fileLogger,
 		fileLogger:  fileLogger,
 		dbLogger:    dbLogger,
+	}
+
+	// Гарантируем схему GlobalSign один раз при старте (через сырое соединение,
+	// минуя GORM-переписыватель, который ломает DDL). На горячем пути DDL не гоняем.
+	if err := server.ensureGlobalSignSchema(); err != nil && fileLogger != nil {
+		fileLogger.Warn("ensureGlobalSignSchema при старте: %v", err)
 	}
 
 	mux := http.NewServeMux()

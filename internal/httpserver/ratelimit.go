@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +19,31 @@ type SecurityLimits struct {
 	LoginRatePerMin   int
 	APIRatePerMin     int
 	StaticRatePerMin  int
+	// TrustedIPs — IP/CIDR, освобождённые от rate-limit и login-lockout.
+	TrustedIPs []string
+}
+
+// parseTrustedNets превращает список IP/CIDR в сети. Одиночный IP трактуется как /32 (или /128).
+func parseTrustedNets(entries []string) []*net.IPNet {
+	nets := make([]*net.IPNet, 0, len(entries))
+	for _, raw := range entries {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if _, n, err := net.ParseCIDR(raw); err == nil {
+			nets = append(nets, n)
+			continue
+		}
+		if ip := net.ParseIP(raw); ip != nil {
+			bits := 32
+			if ip.To4() == nil {
+				bits = 128
+			}
+			nets = append(nets, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+		}
+	}
+	return nets
 }
 
 func defaultSecurityLimits() SecurityLimits {
@@ -43,11 +69,29 @@ type lockState struct {
 
 // SecurityLimiter in-memory rate limits + login lockout (per process).
 type SecurityLimiter struct {
-	lim SecurityLimits
+	lim         SecurityLimits
+	trustedNets []*net.IPNet
 
 	mu      sync.Mutex
 	windows map[string]*windowCounter
 	locks   map[string]*lockState
+}
+
+// isTrusted returns true when the client IP is exempt from rate limiting / lockout.
+func (s *SecurityLimiter) isTrusted(ip string) bool {
+	if ip == "" {
+		return false
+	}
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	for _, n := range s.trustedNets {
+		if n.Contains(parsed) {
+			return true
+		}
+	}
+	return false
 }
 
 func newSecurityLimiter(lim SecurityLimits) *SecurityLimiter {
@@ -73,9 +117,10 @@ func newSecurityLimiter(lim SecurityLimits) *SecurityLimiter {
 	d.TrustProxyHeaders = lim.TrustProxyHeaders
 
 	sl := &SecurityLimiter{
-		lim:     d,
-		windows: make(map[string]*windowCounter),
-		locks:   make(map[string]*lockState),
+		lim:         d,
+		trustedNets: parseTrustedNets(lim.TrustedIPs),
+		windows:     make(map[string]*windowCounter),
+		locks:       make(map[string]*lockState),
 	}
 	go sl.cleanupLoop()
 	return sl
@@ -215,6 +260,13 @@ func (s *Server) securityMiddleware(next http.Handler) http.Handler {
 		}
 		ip := clientIP(r, s.limiter.lim.TrustProxyHeaders)
 		path := r.URL.Path
+
+		// За NAT/reverse-proxy реальные клиенты приходят под одним адресом (шлюз),
+		// поэтому доверенные IP освобождаем от общего per-IP лимита.
+		if s.limiter.isTrusted(ip) {
+			next.ServeHTTP(w, r)
+			return
+		}
 
 		var max int
 		var bucket string

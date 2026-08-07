@@ -112,9 +112,9 @@
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">Маппинг полей</h5>
                 <div class="d-flex gap-2">
-                    <input type="file" id="dbfFileInput" accept=".dbf,.DBF,.xlsx,.XLSX,.xlsm,.XLSM,.zip,.ZIP" style="display:none" onchange="uploadAndAnalyze(this)">
+                    <input type="file" id="dbfFileInput" accept=".dbf,.DBF,.xlsx,.XLSX,.xlsm,.XLSM,.xls,.XLS,.xml,.XML,.sst,.SST,.zip,.ZIP" style="display:none" onchange="uploadAndAnalyze(this)">
                     <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('dbfFileInput').click()" id="btnUpload"><i class="bi bi-upload"></i> Загрузить образец</button>
-                    <input type="file" id="importFileInput" accept=".dbf,.DBF,.xlsx,.XLSX,.xlsm,.XLSM,.zip,.ZIP" style="display:none" onchange="uploadAndImport(this)">
+                    <input type="file" id="importFileInput" accept=".dbf,.DBF,.xlsx,.XLSX,.xlsm,.XLSM,.xls,.XLS,.xml,.XML,.sst,.SST,.zip,.ZIP" style="display:none" onchange="uploadAndImport(this)">
                     <button class="btn btn-success btn-sm" onclick="runImportNow()" id="btnImportNow"><i class="bi bi-play-fill"></i> Импортировать сейчас</button>
                     <button class="btn btn-primary btn-sm" onclick="saveAllMappings()"><i class="bi bi-save"></i> Сохранить маппинг</button>
                 </div>

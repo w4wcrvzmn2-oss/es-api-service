@@ -467,10 +467,14 @@ func (ips *ImportPointScheduler) getFieldMappings(ctx context.Context, importPoi
 	return mappings, nil
 }
 
+// isDBFOrArchive сообщает, стоит ли планировщику забирать файл: поддерживаемый
+// прайс (.dbf/.xlsx/.xlsm/.xml) или архив, который распакуется в такой файл.
 func isDBFOrArchive(name string) bool {
-	ext := strings.ToLower(filepath.Ext(name))
-	switch ext {
-	case ".dbf", ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2":
+	if dbfimport.IsSupportedDataFile(name) {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2":
 		return true
 	}
 	return false

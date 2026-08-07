@@ -11,7 +11,7 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-var supportedDataFileExts = []string{".dbf", ".xlsx", ".xlsm"}
+var supportedDataFileExts = []string{".dbf", ".xlsx", ".xlsm", ".xls", ".xml", ".sst"}
 
 // DetectDataFileFormat возвращает поддерживаемый формат файла данных.
 func DetectDataFileFormat(filePath string) string {
@@ -20,6 +20,12 @@ func DetectDataFileFormat(filePath string) string {
 		return "dbf"
 	case ".xlsx", ".xlsm":
 		return "excel"
+	case ".xls":
+		return "xls"
+	case ".xml":
+		return "xml"
+	case ".sst":
+		return "sst"
 	default:
 		return ""
 	}
@@ -44,6 +50,12 @@ func ReadTabularFile(filePath string) ([]string, []map[string]interface{}, error
 		return readDBFRecords(filePath)
 	case "excel":
 		return readExcelRecords(filePath)
+	case "xls":
+		return readXLSRecords(filePath)
+	case "xml":
+		return readXMLRecords(filePath)
+	case "sst":
+		return readSSTRecords(filePath)
 	default:
 		return nil, nil, fmt.Errorf("неподдерживаемый формат файла: %s", filepath.Ext(filePath))
 	}
@@ -134,28 +146,33 @@ func readExcelRecords(filePath string) ([]string, []map[string]interface{}, erro
 		return nil, nil, fmt.Errorf("в Excel файле нет листов")
 	}
 
-	sheetName := sheets[0]
-	rows, err := f.GetRows(sheetName)
-	if err != nil {
-		return nil, nil, fmt.Errorf("не удалось прочитать лист %s: %w", sheetName, err)
-	}
-	if len(rows) == 0 {
-		return nil, nil, fmt.Errorf("Excel файл не содержит строк")
-	}
-
-	headerRowIdx := -1
-	var headers []string
-	for i, row := range rows {
-		candidate := normalizeExcelHeaders(row)
-		if len(candidate) == 0 {
+	// Берём первый лист, где есть данные (частая беда — пустой первый лист).
+	var sheetName string
+	var rows [][]string
+	for _, name := range sheets {
+		r, e := f.GetRows(name)
+		if e != nil {
 			continue
 		}
-		headers = candidate
-		headerRowIdx = i
-		break
+		if countNonEmptyRows(r) > 0 {
+			sheetName = name
+			rows = r
+			break
+		}
 	}
+	if sheetName == "" {
+		return nil, nil, fmt.Errorf("Excel файл не содержит данных ни на одном листе")
+	}
+
+	return buildRecordsFromRows(rows)
+}
+
+// buildRecordsFromRows превращает матрицу строк (xlsx/xls) в заголовки и записи:
+// определяет строку заголовков и собирает значения под ними.
+func buildRecordsFromRows(rows [][]string) ([]string, []map[string]interface{}, error) {
+	headerRowIdx, headers := detectExcelHeaderRow(rows)
 	if headerRowIdx == -1 || len(headers) == 0 {
-		return nil, nil, fmt.Errorf("не удалось определить строку заголовков в Excel")
+		return nil, nil, fmt.Errorf("не удалось определить строку заголовков")
 	}
 
 	records := make([]map[string]interface{}, 0, len(rows)-headerRowIdx-1)
@@ -179,6 +196,65 @@ func readExcelRecords(filePath string) ([]string, []map[string]interface{}, erro
 	}
 
 	return headers, records, nil
+}
+
+func countNonEmptyCells(row []string) int {
+	n := 0
+	for _, c := range row {
+		if strings.TrimSpace(c) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+func countNonEmptyRows(rows [][]string) int {
+	n := 0
+	for _, r := range rows {
+		if countNonEmptyCells(r) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// detectExcelHeaderRow выбирает строку заголовков как первую строку с наибольшим
+// числом заполненных ячеек среди первых строк листа. Это отсекает «шапки»-титулы
+// вроде «Прайс-лист ООО …» в одной ячейке над реальной таблицей.
+func detectExcelHeaderRow(rows [][]string) (int, []string) {
+	const scanLimit = 25
+	limit := len(rows)
+	if limit > scanLimit {
+		limit = scanLimit
+	}
+
+	bestIdx := -1
+	bestCount := 0
+	for i := 0; i < limit; i++ {
+		c := countNonEmptyCells(rows[i])
+		// Заголовок обычно шире одной ячейки; строго больший счёт выигрывает,
+		// при равенстве остаётся более ранняя строка.
+		if c >= 2 && c > bestCount {
+			bestCount = c
+			bestIdx = i
+		}
+	}
+
+	// Фолбэк: если «широкой» строки нет — первая непустая строка.
+	if bestIdx == -1 {
+		for i, row := range rows {
+			if countNonEmptyCells(row) > 0 {
+				bestIdx = i
+				break
+			}
+		}
+	}
+	if bestIdx == -1 {
+		return -1, nil
+	}
+
+	headers := normalizeExcelHeaders(rows[bestIdx])
+	return bestIdx, headers
 }
 
 func normalizeExcelHeaders(row []string) []string {

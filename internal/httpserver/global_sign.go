@@ -12,7 +12,19 @@ import (
 var globalSignRe = regexp.MustCompile(`(?i)^EX-(\d{1,7})$`)
 
 // ensureGlobalSignSchema — колонка + счётчик (идемпотентно).
-func (s *Server) ensureGlobalSignSchema(tx *gorm.DB) error {
+//
+// ВАЖНО: DDL выполняется через СЫРОЕ соединение (database/sql), а НЕ через GORM.
+// GORM-переписыватель (QuotePascalSQL) закавычивает ALL-CAPS слова и ломает DDL:
+// `ALTER TABLE ...` → `"ALTER" "TABLE" ...` → SQLSTATE 42601. Поэтому этот метод
+// нельзя звать внутри GORM-транзакции; он вызывается один раз при старте сервера.
+func (s *Server) ensureGlobalSignSchema() error {
+	if s.database == nil {
+		return nil
+	}
+	rawdb := s.database.GetDB()
+	if rawdb == nil {
+		return nil
+	}
 	stmts := []string{
 		`ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "GlobalSign" varchar(16)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS "ux_order_global_sign" ON "Order" ("GlobalSign") WHERE "GlobalSign" IS NOT NULL`,
@@ -23,7 +35,7 @@ func (s *Server) ensureGlobalSignSchema(tx *gorm.DB) error {
 		`INSERT INTO "GlobalSignCounter" ("ID", "NextValue") VALUES (1, 1) ON CONFLICT ("ID") DO NOTHING`,
 	}
 	for _, q := range stmts {
-		if err := tx.Exec(q).Error; err != nil {
+		if _, err := rawdb.Exec(q); err != nil {
 			return err
 		}
 	}
@@ -54,10 +66,8 @@ func parseGlobalSign(sign string) (int64, bool) {
 
 // allocateGlobalSign — атомарно выдаёт следующий EX-####### (глобально уникальный).
 func (s *Server) allocateGlobalSign(tx *gorm.DB) (string, error) {
-	if err := s.ensureGlobalSignSchema(tx); err != nil {
-		return "", err
-	}
-
+	// Схема гарантируется один раз при старте (ensureGlobalSignSchema).
+	// DDL здесь НЕ выполняем — GORM-переписыватель ломает DDL-ключевые слова.
 	var next int64
 	// Блокируем строку счётчика.
 	if err := tx.Raw(`
@@ -94,10 +104,6 @@ func (s *Server) allocateGlobalSign(tx *gorm.DB) (string, error) {
 // resolveGlobalSignForCreate — если клиент прислал свободный EX-N, берём его
 // и поднимаем счётчик; иначе выделяем новый.
 func (s *Server) resolveGlobalSignForCreate(tx *gorm.DB, requested *string) (string, error) {
-	if err := s.ensureGlobalSignSchema(tx); err != nil {
-		return "", err
-	}
-
 	if requested != nil {
 		sign := strings.ToUpper(strings.TrimSpace(*requested))
 		if n, ok := parseGlobalSign(sign); ok {

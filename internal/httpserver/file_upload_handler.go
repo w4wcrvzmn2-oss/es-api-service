@@ -41,8 +41,8 @@ func (s *Server) handleUploadDBF(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	ext := strings.ToLower(filepath.Ext(handler.Filename))
-	if ext != ".dbf" && ext != ".xlsx" && ext != ".xlsm" && ext != ".zip" {
-		s.writeError(w, http.StatusBadRequest, "Поддерживаются файлы .dbf, .xlsx, .xlsm и .zip")
+	if !dbfimport.IsSupportedDataFile(handler.Filename) && ext != ".zip" {
+		s.writeError(w, http.StatusBadRequest, "Поддерживаются файлы .dbf, .xlsx, .xlsm, .xls, .xml, .sst и .zip")
 		return
 	}
 

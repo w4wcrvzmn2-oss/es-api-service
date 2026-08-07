@@ -73,6 +73,11 @@ type Config struct {
 		LoginRatePerMin   int  `yaml:"login_rate_per_min"`
 		APIRatePerMin     int  `yaml:"api_rate_per_min"`
 		StaticRatePerMin  int  `yaml:"static_rate_per_min"`
+		// TrustedIPs — IP/CIDR, для которых rate-limit и login-lockout не применяются.
+		// Нужно, когда за NAT/reverse-proxy реальные клиенты приходят под одним адресом
+		// (напр. шлюз 192.168.95.1) и не должны делить общий per-IP бакет.
+		// Пусто в конфиге → берётся дефолт (loopback + приватные диапазоны RFC1918).
+		TrustedIPs []string `yaml:"trusted_ips"`
 	} `yaml:"security"`
 
 	// FieldsConfig загружается отдельно из api_fields_config.yaml
@@ -213,6 +218,18 @@ func LoadConfig() (*Config, error) {
 	}
 	if config.Security.StaticRatePerMin == 0 {
 		config.Security.StaticRatePerMin = 600
+	}
+	if len(config.Security.TrustedIPs) == 0 {
+		// За NAT/hairpin реальные клиенты часто приходят под адресом шлюза, поэтому
+		// per-IP лимит для приватных диапазонов теряет смысл (все делят один бакет).
+		// Ограничение остаётся для публичных адресов, если они доходят до приложения.
+		config.Security.TrustedIPs = []string{
+			"127.0.0.1/32",
+			"::1/128",
+			"10.0.0.0/8",
+			"172.16.0.0/12",
+			"192.168.0.0/16",
+		}
 	}
 
 	// Загружаем конфигурацию полей

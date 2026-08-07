@@ -749,6 +749,24 @@ func (s *Server) handleGlobalStats(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetSupplierPriceSummary возвращает сводную информацию о прайсах (последние цены по каждому препарату)
+// buyerAssignedSupplierIDs возвращает SupplierID активных прайс-листов, назначенных покупателю.
+func (s *Server) buyerAssignedSupplierIDs(ctx context.Context, buyerID string) ([]string, error) {
+	if s.database == nil || buyerID == "" {
+		return nil, nil
+	}
+	var ids []string
+	err := s.database.GORMWith(ctx).Raw(`
+		SELECT DISTINCT CAST(pl.SupplierID AS TEXT)
+		FROM BuyerPriceList bpl
+		JOIN PriceList pl ON pl.PriceListID = bpl.PriceListID
+		WHERE bpl.BuyerID = CAST(? AS UUID)
+		  AND bpl.IsActive = 1
+		  AND pl.IsActive = 1
+		  AND pl.SupplierID IS NOT NULL
+	`, buyerID).Scan(&ids).Error
+	return ids, err
+}
+
 func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Request) {
 	// Обработка паник
 	defer func() {
@@ -835,6 +853,30 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 		offsetVal = 0
 	}
 
+	// Скоуп по назначенным покупателю прайс-листам: покупатель видит цены ТОЛЬКО
+	// назначенных ему поставщиков (BuyerPriceList → PriceList → Supplier).
+	// Если активных назначений нет — показываем всё (обратная совместимость).
+	// UUID берутся из БД и валидируются, поэтому инлайним их безопасно.
+	supplierScope := ""
+	if pc.BuyerID != "" {
+		ids, errScope := s.buyerAssignedSupplierIDs(ctx, pc.BuyerID)
+		if errScope != nil && s.logger != nil {
+			s.logger.Warn("Сводный прайс: не удалось получить назначения покупателя %s: %v", pc.BuyerID, errScope)
+		}
+		parts := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if _, e := uuid.Parse(id); e == nil {
+				parts = append(parts, "CAST('"+id+"' AS UUID)")
+			}
+		}
+		if len(parts) > 0 {
+			supplierScope = " AND sp.SupplierID IN (" + strings.Join(parts, ", ") + ")"
+			if s.logger != nil {
+				s.logger.Info("Сводный прайс: скоуп покупателя %s → %d поставщик(ов)", pc.BuyerID, len(parts))
+			}
+		}
+	}
+
 	if supplierID != "" {
 		// Валидация UUID для защиты от SQL injection
 		if _, err := uuid.Parse(supplierID); err != nil {
@@ -878,6 +920,7 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				  AND sp.GUID_ES IS NOT NULL
 		`
 		args = []interface{}{sql.Named("supplierID", supplierID)}
+		query += supplierScope
 
 		query += `
 			)
@@ -958,6 +1001,7 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				  AND sp.GUID_ES IS NOT NULL
 		`
 		args = []interface{}{}
+		query += supplierScope
 
 		query += `
 			)

@@ -33,6 +33,7 @@ async function loadSupplier(id) {
             const supplier = data.find(s => s.supplier_id === id);
             if (supplier) {
                 document.getElementById('name').value = supplier.name || '';
+                document.getElementById('code').value = supplier.code || '';
                 document.getElementById('inn').value = supplier.inn || '';
                 document.getElementById('contacts').value = supplier.contacts || '';
                 document.getElementById('address').value = supplier.address || '';
@@ -146,8 +147,15 @@ async function handleSubmit(e) {
     const regionCheckboxes = document.querySelectorAll('#regionsCheckboxes input[type="checkbox"]:checked');
     const regionIds = Array.from(regionCheckboxes).map(cb => cb.value).filter(v => v);
 
+    const code = (document.getElementById('code').value || '').trim();
+    if (code && !/^\d+$/.test(code)) {
+        Toast.error('Ошибка', 'Код поставщика должен содержать только цифры');
+        return;
+    }
+
     const formData = {
         name: document.getElementById('name').value,
+        code: code || null,
         inn: document.getElementById('inn').value || null,
         contacts: document.getElementById('contacts').value || null,
         address: document.getElementById('address').value || null,

@@ -9,6 +9,7 @@ import (
 type Supplier struct {
 	SupplierID     string    `json:"supplier_id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	Name           string    `json:"name"`
+	Code           *string   `json:"code,omitempty"` // Код поставщика (только цифры), попадает в DBF-выгрузку заказов
 	Address        *string   `json:"address,omitempty"`
 	Contacts       *string   `json:"contacts,omitempty"`
 	INN            *string   `json:"inn,omitempty"`
@@ -100,6 +101,7 @@ type InvoiceData struct {
 // SupplierRequest представляет запрос на создание/обновление поставщика
 type SupplierRequest struct {
 	Name           string   `json:"name"`
+	Code           *string  `json:"code,omitempty"`
 	Address        *string  `json:"address,omitempty"`
 	Contacts       *string  `json:"contacts,omitempty"`
 	INN            *string  `json:"inn,omitempty"`

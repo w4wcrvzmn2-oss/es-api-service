@@ -113,7 +113,10 @@ func (a *AuthService) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.Username = strings.TrimSpace(req.Username)
-	if a.limiter != nil {
+	// За NAT реальные клиенты делят один IP (шлюз); не блокируем доверенные адреса,
+	// иначе 5 ошибок одного посетителя запирают вход всем.
+	trusted := a.limiter != nil && a.limiter.isTrusted(ip)
+	if a.limiter != nil && !trusted {
 		if locked, retry := a.limiter.isLoginLocked(ip, req.Username); locked {
 			if a.logger != nil {
 				a.logger.Warn("Login lockout username=%s ip=%s retry=%v", req.Username, ip, retry)
@@ -149,7 +152,7 @@ func (a *AuthService) Login(w http.ResponseWriter, r *http.Request) {
 		buyerUserID = buid
 		redirectURL = "/buyer/index.html"
 	} else {
-		if a.limiter != nil {
+		if a.limiter != nil && !trusted {
 			a.limiter.recordLoginFailure(ip, req.Username)
 		}
 		if a.logger != nil {

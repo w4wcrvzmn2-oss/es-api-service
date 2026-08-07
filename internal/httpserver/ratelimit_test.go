@@ -42,6 +42,27 @@ func TestLoginLockout(t *testing.T) {
 	}
 }
 
+func TestIsTrusted(t *testing.T) {
+	lim := newSecurityLimiter(SecurityLimits{
+		TrustProxyHeaders: true,
+		TrustedIPs:        []string{"127.0.0.1/32", "192.168.0.0/16", "10.0.0.5"},
+	})
+	cases := map[string]bool{
+		"192.168.95.1": true,  // шлюз за NAT — доверенный диапазон
+		"127.0.0.1":    true,  // loopback
+		"10.0.0.5":     true,  // одиночный IP → /32
+		"10.0.0.6":     false, // вне списка
+		"203.0.113.10": false, // публичный — лимит остаётся
+		"":             false,
+		"not-an-ip":    false,
+	}
+	for ip, want := range cases {
+		if got := lim.isTrusted(ip); got != want {
+			t.Fatalf("isTrusted(%q)=%v, want %v", ip, got, want)
+		}
+	}
+}
+
 func TestRateAllow(t *testing.T) {
 	lim := newSecurityLimiter(SecurityLimits{
 		TrustProxyHeaders: true,

@@ -87,7 +87,7 @@ func (s *Server) handleGetSuppliers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := `
-		SELECT CAST(s.SupplierID AS TEXT) AS SupplierID, s.Name, s.Address, s.Contacts, s.INN,
+		SELECT CAST(s.SupplierID AS TEXT) AS SupplierID, s.Name, s.Code, s.Address, s.Contacts, s.INN,
 			s.ContractNumber, s.Login,
 			s.IsActive, s.CreatedAt, s.UpdatedAt,
 			(SELECT COUNT(*) FROM SupplierRegion sr WHERE sr.SupplierID = s.SupplierID AND sr.IsActive = 1) AS RegionsCount
@@ -145,10 +145,10 @@ LIMIT 500
 			s.logger.Debug("Обработано поставщиков: %d", count)
 		}
 		var supplier SupplierWithRegions
-		var address, contacts, inn, contractNumber, login sql.NullString
+		var code, address, contacts, inn, contractNumber, login sql.NullString
 		var createdAt, updatedAt time.Time
 
-		err := rows.Scan(&supplier.SupplierID, &supplier.Name, &address, &contacts, &inn,
+		err := rows.Scan(&supplier.SupplierID, &supplier.Name, &code, &address, &contacts, &inn,
 			&contractNumber, &login,
 			&supplier.IsActive, &createdAt, &updatedAt, &supplier.RegionsCount)
 		if err != nil {
@@ -158,6 +158,9 @@ LIMIT 500
 			continue
 		}
 
+		if code.Valid {
+			supplier.Code = &code.String
+		}
 		if address.Valid {
 			supplier.Address = &address.String
 		}
@@ -231,6 +234,10 @@ func (s *Server) handleCreateSupplier(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "Название поставщика обязательно")
 		return
 	}
+	if !isValidSupplierCode(req.Code) {
+		s.writeError(w, http.StatusBadRequest, "Код поставщика должен содержать только цифры")
+		return
+	}
 
 	if s.logger != nil {
 		s.logger.Info("Создание поставщика: %s", req.Name)
@@ -247,14 +254,15 @@ func (s *Server) handleCreateSupplier(w http.ResponseWriter, r *http.Request) {
 		passwordValue = hashedPassword
 	}
 	query := `
-		INSERT INTO Supplier (SupplierID, Name, Address, Contacts, INN, ContractNumber, Login, Password, IsActive, CreatedAt, UpdatedAt)
-		VALUES (CAST(? AS UUID), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO Supplier (SupplierID, Name, Code, Address, Contacts, INN, ContractNumber, Login, Password, IsActive, CreatedAt, UpdatedAt)
+		VALUES (CAST(? AS UUID), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	now := time.Now()
 	_, err := s.database.ExecContext(ctx, query,
 		supplierID,
 		req.Name,
+		normalizeSupplierCode(req.Code),
 		req.Address,
 		req.Contacts,
 		req.INN,
@@ -285,6 +293,35 @@ func (s *Server) handleCreateSupplier(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusCreated, map[string]string{"supplier_id": supplierID})
+}
+
+// isValidSupplierCode: код поставщика — только цифры (или пусто).
+func isValidSupplierCode(code *string) bool {
+	if code == nil {
+		return true
+	}
+	c := strings.TrimSpace(*code)
+	if c == "" {
+		return true
+	}
+	for _, r := range c {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// normalizeSupplierCode приводит код к значению для БД: обрезает пробелы, пусто → NULL.
+func normalizeSupplierCode(code *string) interface{} {
+	if code == nil {
+		return nil
+	}
+	c := strings.TrimSpace(*code)
+	if c == "" {
+		return nil
+	}
+	return c
 }
 
 // handleSuppliersRouter маршрутизирует запросы /api/suppliers/{id}
@@ -337,6 +374,10 @@ func (s *Server) handleUpdateSupplier(w http.ResponseWriter, r *http.Request, su
 		s.writeError(w, http.StatusBadRequest, "Название поставщика обязательно")
 		return
 	}
+	if !isValidSupplierCode(req.Code) {
+		s.writeError(w, http.StatusBadRequest, "Код поставщика должен содержать только цифры")
+		return
+	}
 
 	var passwordValue interface{}
 	updatePassword := false
@@ -353,6 +394,7 @@ func (s *Server) handleUpdateSupplier(w http.ResponseWriter, r *http.Request, su
 	query := `
 		UPDATE Supplier SET
 			Name = ?,
+			Code = ?,
 			Address = ?,
 			Contacts = ?,
 			INN = ?,
@@ -364,6 +406,7 @@ func (s *Server) handleUpdateSupplier(w http.ResponseWriter, r *http.Request, su
 	`
 	args := []interface{}{
 		req.Name,
+		normalizeSupplierCode(req.Code),
 		req.Address,
 		req.Contacts,
 		req.INN,
@@ -377,6 +420,7 @@ func (s *Server) handleUpdateSupplier(w http.ResponseWriter, r *http.Request, su
 		query = `
 			UPDATE Supplier SET
 				Name = ?,
+				Code = ?,
 				Address = ?,
 				Contacts = ?,
 				INN = ?,
@@ -389,6 +433,7 @@ func (s *Server) handleUpdateSupplier(w http.ResponseWriter, r *http.Request, su
 		`
 		args = []interface{}{
 			req.Name,
+			normalizeSupplierCode(req.Code),
 			req.Address,
 			req.Contacts,
 			req.INN,
@@ -1668,7 +1713,7 @@ func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request) {
 		normalizedFilePath = extracted
 	}
 	if !dbfimport.IsSupportedDataFile(normalizedFilePath) {
-		s.writeError(w, http.StatusBadRequest, "Поддерживаются только файлы .dbf, .xlsx, .xlsm и .zip")
+		s.writeError(w, http.StatusBadRequest, "Поддерживаются только файлы .dbf, .xlsx, .xlsm, .xls, .xml, .sst и .zip")
 		return
 	}
 
@@ -2074,7 +2119,7 @@ func (s *Server) downloadSampleFromFTP(host string, port int, user, pass, remote
 		}
 	}
 	if targetFile == "" {
-		return "", fmt.Errorf("файлы .dbf/.xlsx/.xlsm/.zip не найдены в %s", remotePath)
+		return "", fmt.Errorf("файлы .dbf/.xlsx/.xlsm/.xls/.xml/.sst/.zip не найдены в %s", remotePath)
 	}
 
 	resp, err := conn.Retr(targetFile)

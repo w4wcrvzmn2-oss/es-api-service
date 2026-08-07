@@ -27,11 +27,16 @@
             <div class="card-body">
                 <form id="supplierForm">
                     <div class="row g-3">
-                        <div class="col-md-6">
+                        <div class="col-md-5">
                             <label for="name" class="form-label">Название *</label>
                             <input type="text" class="form-control" id="name" name="name" required>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-3">
+                            <label for="code" class="form-label">Код поставщика</label>
+                            <input type="text" class="form-control" id="code" name="code" inputmode="numeric" pattern="[0-9]*" placeholder="напр. 0001" title="Только цифры">
+                            <div class="form-text">Только цифры. Попадает в DBF-выгрузку заказов (колонка SUP_CODE).</div>
+                        </div>
+                        <div class="col-md-4">
                             <label for="inn" class="form-label">ИНН</label>
                             <input type="text" class="form-control" id="inn" name="inn">
                         </div>

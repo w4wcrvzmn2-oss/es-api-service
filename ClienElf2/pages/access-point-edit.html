@@ -50,7 +50,7 @@
                         <div class="mb-3">
                             <label for="sourceFilePath" class="form-label">Путь к папке с файлами *</label>
                             <input type="text" class="form-control" id="sourceFilePath" name="sourceFilePath" placeholder="C:\PriceFiles\Supplier1\">
-                            <div class="form-text">Локальная папка, из которой система забирает файлы прайсов.</div>
+                            <div class="form-text">Локальная папка, из которой система забирает файлы прайсов. Поддерживаются <b>.dbf, .xlsx, .xlsm, .xls, .xml, .sst</b> и архивы <b>.zip</b>.</div>
                         </div>
                     </div>
 
@@ -78,7 +78,7 @@
                         <div class="mb-3 mt-3">
                             <label for="ftpRemotePath" class="form-label">Путь на FTP</label>
                             <input type="text" class="form-control" id="ftpRemotePath" name="ftpRemotePath" placeholder="/prices/">
-                            <div class="form-text">Удалённая папка на FTP, откуда забирать файлы прайсов</div>
+                            <div class="form-text">Удалённая папка на FTP, откуда забирать файлы прайсов. Поддерживаются <b>.dbf, .xlsx, .xlsm, .xls, .xml, .sst</b> и архивы <b>.zip</b>.</div>
                         </div>
                         <div class="mb-3 d-flex flex-wrap align-items-center gap-2">
                             <button type="button" class="btn btn-outline-primary" id="btnFtpTest" onclick="testFtpConnection()">

@@ -21,6 +21,7 @@ type OrderLine struct {
 	Code         string
 	Name         string
 	SuppName     string
+	SupCode      string // код поставщика (цифры)
 	Barcode      string
 	Manufacturer string
 	Country      string
@@ -43,7 +44,7 @@ type fieldDesc struct {
 func BuildOrdersDBF(lines []OrderLine) ([]byte, error) {
 	fields := []fieldDesc{
 		{"ORDER_ID", 'C', 36, 0},
-		{"GLOBAL_SIGN", 'C', 16, 0},
+		{"GLOBALSIGN", 'C', 16, 0}, // ровно 10 символов (dBase limit); было GLOBAL_SIGN (11) — ломало таблицу полей
 		{"ORD_DATE", 'D', 8, 0},
 		{"BUYER", 'C', 80, 0},
 		{"ADDRESS", 'C', 120, 0},
@@ -59,6 +60,7 @@ func BuildOrdersDBF(lines []OrderLine) ([]byte, error) {
 		{"QTY", 'N', 12, 3},
 		{"PRICE", 'N', 12, 2},
 		{"SUMMA", 'N', 14, 2},
+		{"SUP_CODE", 'C', 10, 0}, // код поставщика — в конце, чтобы не сдвигать существующие поля
 	}
 
 	var recLen uint16 = 1 // deleted flag
@@ -87,7 +89,13 @@ func BuildOrdersDBF(lines []OrderLine) ([]byte, error) {
 	for _, f := range fields {
 		desc := make([]byte, 32)
 		name := strings.ToUpper(f.name)
-		copy(desc[0:11], []byte(name))
+		// Имя поля dBase — максимум 10 символов; байт[10] обязан быть нулевым
+		// терминатором. Длинное имя (напр. 11-символьное) затирает терминатор
+		// и ломает таблицу полей — ридеры читают колонки пусто/со сдвигом.
+		if len(name) > 10 {
+			name = name[:10]
+		}
+		copy(desc[0:10], []byte(name)) // desc[10] остаётся 0 — терминатор
 		desc[11] = f.typ
 		desc[16] = f.length
 		desc[17] = f.decimals
@@ -153,6 +161,7 @@ func BuildOrdersDBF(lines []OrderLine) ([]byte, error) {
 		writeN(line.Qty, 12, 3)
 		writeN(line.Price, 12, 2)
 		writeN(line.Sum, 14, 2)
+		writeC(line.SupCode, 10)
 
 		if _, err := buf.Write(rec); err != nil {
 			return nil, err

@@ -13,3 +13,13 @@ logs/
 
 # временное
 *.tmp
+
+# секреты и локальные артефакты — НИКОГДА не коммитить
+docs/HANDOFF_FOR_CLAUDE.md
+*.rtf
+elef2.txt
+restart.flag
+uploads/
+
+# вложенный репозиторий десктопа (отдельный git на Gitea)
+elfisa-pharmacy/
