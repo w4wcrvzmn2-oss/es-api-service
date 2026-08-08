@@ -576,10 +576,10 @@ func (s *Server) handleBuyerGetOrders(w http.ResponseWriter, r *http.Request) {
 
 	base := s.database.GORMWith(ctx).
 		Table(`"Order" AS o`).
-		Joins("INNER JOIN OrderStatus os ON o.OrderStatusID = os.OrderStatusID").
-		Where("o.BuyerUserID = ?", db.UUIDParam(buyerUserID))
+		Joins(`INNER JOIN "OrderStatus" os ON o."OrderStatusID" = os."OrderStatusID"`).
+		Where(`o."BuyerUserID" = ?`, db.UUIDParam(buyerUserID))
 	if statusFilter != "" {
-		base = base.Where("os.Name = ?", statusFilter)
+		base = base.Where(`os."Name" = ?`, statusFilter)
 	}
 
 	var total int64
@@ -591,17 +591,17 @@ func (s *Server) handleBuyerGetOrders(w http.ResponseWriter, r *http.Request) {
 
 	orders := []BuyerOrderListItem{}
 	err := base.
-		Select(`CAST(o.OrderID AS TEXT) AS OrderID,
-			os.Name AS Status,
+		Select(`CAST(o."OrderID" AS TEXT) AS OrderID,
+			os."Name" AS Status,
 			o."GlobalSign" AS GlobalSign,
-			o.TotalAmount,
-			(SELECT COUNT(*) FROM OrderItem WHERE OrderID = o.OrderID) AS ItemsCount,
-			o.CreatedAt,
-			o.PlacedAt,
-			o.Comment,
-			bl.Address AS LocationAddress`).
-		Joins("LEFT JOIN BuyerLocation bl ON o.BuyerLocationID = bl.BuyerLocationID").
-		Order("o.CreatedAt DESC").
+			o."TotalAmount",
+			(SELECT COUNT(*) FROM "OrderItem" oi WHERE oi."OrderID" = o."OrderID") AS ItemsCount,
+			o."CreatedAt",
+			o."PlacedAt",
+			o."Comment",
+			bl."Address" AS LocationAddress`).
+		Joins(`LEFT JOIN "BuyerLocation" bl ON o."BuyerLocationID" = bl."BuyerLocationID"`).
+		Order(`o."CreatedAt" DESC`).
 		Offset(offset).
 		Limit(limit).
 		Scan(&orders).Error
@@ -649,18 +649,18 @@ func (s *Server) handleBuyerGetOrderByID(w http.ResponseWriter, r *http.Request,
 	var row orderRow
 	err := s.database.GORMWith(ctx).
 		Table(`"Order" AS o`).
-		Select(`CAST(o.OrderID AS TEXT) AS OrderID,
-			CAST(o.BuyerUserID AS TEXT) AS OwnerID,
-			os.Name AS Status,
+		Select(`CAST(o."OrderID" AS TEXT) AS OrderID,
+			CAST(o."BuyerUserID" AS TEXT) AS OwnerID,
+			os."Name" AS Status,
 			o."GlobalSign" AS GlobalSign,
-			o.TotalAmount,
-			o.CreatedAt,
-			o.PlacedAt,
-			o.Comment,
-			bl.Address AS LocationAddress`).
-		Joins("INNER JOIN OrderStatus os ON o.OrderStatusID = os.OrderStatusID").
-		Joins("LEFT JOIN BuyerLocation bl ON o.BuyerLocationID = bl.BuyerLocationID").
-		Where("o.OrderID = ?", db.UUIDParam(orderID)).
+			o."TotalAmount",
+			o."CreatedAt",
+			o."PlacedAt",
+			o."Comment",
+			bl."Address" AS LocationAddress`).
+		Joins(`INNER JOIN "OrderStatus" os ON o."OrderStatusID" = os."OrderStatusID"`).
+		Joins(`LEFT JOIN "BuyerLocation" bl ON o."BuyerLocationID" = bl."BuyerLocationID"`).
+		Where(`o."OrderID" = ?`, db.UUIDParam(orderID)).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		s.writeError(w, http.StatusNotFound, "Заказ не найден")
@@ -698,15 +698,15 @@ func (s *Server) handleBuyerGetOrderByID(w http.ResponseWriter, r *http.Request,
 	}
 	var rows []itemRow
 	err = s.database.GORMWith(ctx).
-		Table("OrderItem AS oi").
-		Select(`p.Name AS Name,
-			sup.Name AS Supplier,
-			oi.Qty,
-			oi.UnitPrice`).
-		Joins("INNER JOIN Supplier sup ON oi.SupplierID = sup.SupplierID").
-		Joins("LEFT JOIN Product p ON oi.ProductID = p.ProductID").
-		Where("oi.OrderID = ?", db.UUIDParam(orderID)).
-		Order("oi.CreatedAt").
+		Table(`"OrderItem" AS oi`).
+		Select(`p."Name" AS Name,
+			sup."Name" AS Supplier,
+			oi."Qty",
+			oi."UnitPrice"`).
+		Joins(`INNER JOIN "Supplier" sup ON oi."SupplierID" = sup."SupplierID"`).
+		Joins(`LEFT JOIN "Product" p ON oi."ProductID" = p."ProductID"`).
+		Where(`oi."OrderID" = ?`, db.UUIDParam(orderID)).
+		Order(`oi."CreatedAt"`).
 		Scan(&rows).Error
 	if err != nil {
 		s.logger.Error("Ошибка получения позиций заказа покупателя: %v", err)
