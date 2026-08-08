@@ -1048,6 +1048,8 @@ func (s *Server) setupSupplierRoutes(mux *http.ServeMux) {
 	scRoute("/api/sc/orders", s.handleSCOrders)
 	scRoute("/api/sc/orders/export", s.handleSCOrdersExport)
 	scRoute("/api/sc/export-config", s.handleSCExportConfig)
+	scRoute("/api/sc/export/template", s.handleSCExportTemplate)
+	scRoute("/api/sc/export/mapping", s.handleSCExportMapping)
 	scRoute("/api/sc/order-delivery", s.handleSCOrderDelivery)
 	scRoute("/api/sc/ftp-test", s.handleFTPTest)
 	scRoute("/api/sc/change-password", s.handleSCChangePassword)

@@ -53,6 +53,13 @@ class GenReq(BaseModel):
     format: Optional[str] = None  # docx | xlsx (по умолчанию из интента/docx)
 
 
+class MapReq(BaseModel):
+    # columns: [{"name": str, "samples": [str, ...]}]
+    # fields:  [{"key": str, "description": str}]
+    columns: List[Dict[str, Any]]
+    fields: List[Dict[str, Any]]
+
+
 def _today() -> dt.date:
     return dt.date.today()
 
@@ -366,3 +373,46 @@ def generate(req: GenReq):
         "X-Report-Rows": str(len(rows)),
     }
     return StreamingResponse(io.BytesIO(data), media_type=media, headers=headers)
+
+
+@app.post("/map-template")
+def map_template(req: MapReq):
+    """
+    Сопоставляет колонки шаблона накладной с полями системы.
+    ИИ работает ОДИН РАЗ при загрузке шаблона; дальше выгрузка детерминированная.
+    Вход: columns (колонки шаблона + примеры), fields (наши поля + описания).
+    Выход: {"mappings": [{"column": <имя>, "field": <key|none>}]}.
+    """
+    field_lines = "\n".join(
+        f'- {f.get("key")}: {f.get("description", "")}' for f in req.fields)
+    col_lines = "\n".join(
+        f'{i+1}. "{c.get("name")}" (примеры: {", ".join(str(s) for s in (c.get("samples") or [])[:3])})'
+        for i, c in enumerate(req.columns))
+
+    system = (
+        "Ты сопоставляешь колонки шаблона накладной с полями системы. "
+        "Для КАЖДОЙ колонки шаблона выбери ровно один field.key из списка полей, "
+        "который она означает по смыслу заголовка и примеров значений, либо \"none\", если ничего не подходит. "
+        "Верни СТРОГО JSON без пояснений: "
+        "{\"mappings\": [{\"column\": \"<имя колонки>\", \"field\": \"<key или none>\"}]}."
+    )
+    user = f"ПОЛЯ СИСТЕМЫ:\n{field_lines}\n\nКОЛОНКИ ШАБЛОНА:\n{col_lines}"
+
+    payload = {
+        "model": OLLAMA_MODEL,
+        "format": "json",
+        "stream": False,
+        "options": {"temperature": 0.1},
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    }
+    r = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=HTTP_TIMEOUT)
+    r.raise_for_status()
+    content = r.json().get("message", {}).get("content", "{}")
+    try:
+        return json.loads(content)
+    except Exception:
+        m = re.search(r"\{.*\}", content, re.S)
+        return json.loads(m.group(0)) if m else {"mappings": []}

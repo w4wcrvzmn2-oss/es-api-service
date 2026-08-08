@@ -169,7 +169,10 @@ type SupplierExportConfig struct {
 	SupplierExportConfigID string    `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	SupplierID             string    `json:"supplier_id" gorm:"type:uuid"`
 	Method                 string    `json:"method"` // none|ftp|email|both
-	Format                 string    `json:"format"` // DBF
+	Format                 string    `json:"format"` // xml|xlsx|dbf|csv|1c
+	OneCSubFormat          *string   `json:"onec_subformat,omitempty"`       // под-формат 1С (commerceml|txt|dbf|xlsx...)
+	TemplateFileName       *string   `json:"template_file_name,omitempty"`   // имя загруженного шаблона накладной
+	ColumnMapping          *string   `json:"column_mapping,omitempty"`       // JSON: [{"column","field","description"}]
 	FtpHost                *string   `json:"ftp_host,omitempty"`
 	FtpPort                int       `json:"ftp_port"`
 	FtpUser                *string   `json:"ftp_user,omitempty"`
