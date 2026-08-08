@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Настройки выгрузки накладных - Кабинет поставщика</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%232e8a57'/><rect x='42' y='22' width='16' height='56' rx='5' fill='%23fff'/><rect x='22' y='42' width='56' height='16' rx='5' fill='%23fff'/></svg>">
+    <link href="../vendor/bootstrap.min.css" rel="stylesheet">
+    <link href="../vendor/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/supplier.css">
+</head>
+<body class="bg-light">
+    <script src="../js/auth.js"></script>
+    <script>if (!AuthManager.isAuthenticated()) window.location.href = AuthManager.getLoginPath();</script>
+    <script src="../js/nav-supplier.js"></script>
+    <script src="../js/api.js"></script>
+
+    <div class="container-fluid py-4 px-3 px-lg-5" style="max-width:920px">
+        <h1 class="mb-1"><i class="bi bi-file-earmark-arrow-down"></i> Настройки выгрузки накладных</h1>
+        <p class="text-muted mb-4">Загрузите шаблон вашей накладной — ИИ распознает колонки. Выберите формат. Дальше накладные выгружаются в этом формате с вашими колонками.</p>
+
+        <!-- Формат -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h5 class="mb-3">Формат выгрузки</h5>
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-4">
+                        <label class="form-label">Формат</label>
+                        <select class="form-select" id="format">
+                            <option value="xml">XML</option>
+                            <option value="xlsx">Excel</option>
+                            <option value="dbf">DBF</option>
+                            <option value="csv">CSV</option>
+                            <option value="1c">1С</option>
+                        </select>
+                    </div>
+                    <div class="col-md-5" id="onecWrap" style="display:none">
+                        <label class="form-label">Формат 1С</label>
+                        <select class="form-select" id="onec">
+                            <option value="commerceml">CommerceML (XML)</option>
+                            <option value="txt">Текстовый обмен</option>
+                            <option value="dbf">DBF под 1С</option>
+                            <option value="xlsx">Excel-шаблон 1С</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-success w-100" id="btnSaveFormat"><i class="bi bi-check-lg"></i> Сохранить</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Шаблон -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h5 class="mb-3">Шаблон накладной</h5>
+                <p class="text-muted small">Пример накладной (с любой платформы) — DBF, Excel, XML. ИИ разберёт колонки и сам сопоставит их с полями системы. Колонка с номером <b>EX-…</b> добавляется всегда.</p>
+                <div id="tplCurrent" class="mb-2 small"></div>
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <input type="file" class="form-control" id="tplFile" style="max-width:420px" accept=".dbf,.xlsx,.xls,.xml,.sst">
+                    <button class="btn btn-primary" id="btnUpload"><i class="bi bi-magic"></i> Загрузить и распознать</button>
+                    <span id="uploadStatus" class="small"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Маппинг -->
+        <div class="card shadow-sm mb-4" id="mapCard" style="display:none">
+            <div class="card-body">
+                <h5 class="mb-1">Сопоставление колонок</h5>
+                <p class="text-muted small">Проверьте, что ИИ распознал верно. Можно поправить вручную.</p>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead><tr><th>Колонка шаблона</th><th style="width:45%">Наше поле</th></tr></thead>
+                        <tbody id="mapBody"></tbody>
+                    </table>
+                </div>
+                <button class="btn btn-success" id="btnSaveMap"><i class="bi bi-check-lg"></i> Сохранить сопоставление</button>
+                <span id="mapStatus" class="small ms-2"></span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // Каталог наших полей (совпадает с сервером)
+    const FIELDS = [
+        ['none', '— (не выгружать)'],
+        ['global_sign', 'Номер (EX)'],
+        ['order_date', 'Дата'],
+        ['supplier_code', 'Код поставщика'],
+        ['supplier_name', 'Поставщик'],
+        ['buyer_name', 'Покупатель'],
+        ['location_address', 'Аптека (адрес)'],
+        ['item_name', 'Наименование'],
+        ['item_code', 'Код товара'],
+        ['barcode', 'Штрихкод'],
+        ['qty', 'Количество'],
+        ['unit_price', 'Цена'],
+        ['sum', 'Сумма'],
+        ['manufacturer', 'Производитель'],
+        ['series', 'Серия'],
+        ['expiry', 'Срок годности'],
+    ];
+    let cfg = null;
+
+    function fieldOptions(sel) {
+        return FIELDS.map(([k, t]) =>
+            `<option value="${k}" ${k === sel ? 'selected' : ''}>${t}</option>`).join('');
+    }
+
+    function renderMapping(mapping) {
+        const body = document.getElementById('mapBody');
+        body.innerHTML = mapping.map(m =>
+            `<tr><td class="text-break">${escapeHtml(m.column)}</td>
+                 <td><select class="form-select form-select-sm map-field" data-col="${escapeHtml(m.column)}">${fieldOptions(m.field)}</select></td></tr>`).join('');
+        document.getElementById('mapCard').style.display = mapping.length ? 'block' : 'none';
+    }
+
+    function toggleOnec() {
+        document.getElementById('onecWrap').style.display =
+            document.getElementById('format').value === '1c' ? 'block' : 'none';
+    }
+
+    async function load() {
+        cfg = await API.get('/api/sc/export-config') || {};
+        if (cfg.format) document.getElementById('format').value = cfg.format;
+        if (cfg.onec_subformat) document.getElementById('onec').value = cfg.onec_subformat;
+        toggleOnec();
+        if (cfg.template_file_name) {
+            document.getElementById('tplCurrent').innerHTML =
+                `<i class="bi bi-file-earmark-check text-success"></i> Загружен шаблон: <b>${escapeHtml(cfg.template_file_name)}</b>`;
+        }
+        if (cfg.column_mapping) {
+            try { renderMapping(JSON.parse(cfg.column_mapping)); } catch (_) {}
+        }
+    }
+
+    document.getElementById('format').addEventListener('change', toggleOnec);
+
+    document.getElementById('btnSaveFormat').addEventListener('click', async () => {
+        cfg = cfg || {};
+        cfg.format = document.getElementById('format').value;
+        cfg.onec_subformat = cfg.format === '1c' ? document.getElementById('onec').value : null;
+        if (!cfg.method) cfg.method = 'none';
+        try {
+            await API.put('/api/sc/export-config', cfg);
+            toast('Формат сохранён', 'success');
+        } catch (e) { toast('Ошибка: ' + e.message, 'danger'); }
+    });
+
+    document.getElementById('btnUpload').addEventListener('click', async () => {
+        const f = document.getElementById('tplFile').files[0];
+        if (!f) { toast('Выберите файл шаблона', 'warning'); return; }
+        const status = document.getElementById('uploadStatus');
+        status.textContent = 'Загрузка и разбор ИИ…';
+        const fd = new FormData();
+        fd.append('file', f);
+        try {
+            const token = localStorage.getItem('authToken');
+            const resp = await fetch(API_BASE + '/api/sc/export/template', {
+                method: 'POST', body: fd,
+                headers: token ? { 'Authorization': 'Bearer ' + token } : {}
+            });
+            if (!resp.ok) throw new Error((await resp.text()) || ('HTTP ' + resp.status));
+            const data = await resp.json();
+            status.innerHTML = data.ai_ok
+                ? '<span class="text-success">Готово — ИИ распознал колонки</span>'
+                : '<span class="text-warning">Загружено, но ИИ недоступен — сопоставьте вручную</span>';
+            document.getElementById('tplCurrent').innerHTML =
+                `<i class="bi bi-file-earmark-check text-success"></i> Загружен шаблон: <b>${escapeHtml(data.template_file_name)}</b>`;
+            renderMapping(data.mapping || []);
+        } catch (e) {
+            status.innerHTML = '<span class="text-danger">Ошибка: ' + escapeHtml(e.message) + '</span>';
+        }
+    });
+
+    document.getElementById('btnSaveMap').addEventListener('click', async () => {
+        const mapping = Array.from(document.querySelectorAll('.map-field')).map(sel =>
+            ({ column: sel.dataset.col, field: sel.value }));
+        try {
+            await API.put('/api/sc/export/mapping', { mapping });
+            document.getElementById('mapStatus').innerHTML = '<span class="text-success">Сохранено</span>';
+        } catch (e) {
+            document.getElementById('mapStatus').innerHTML = '<span class="text-danger">Ошибка: ' + escapeHtml(e.message) + '</span>';
+        }
+    });
+
+    function toast(msg, kind) {
+        const s = document.getElementById('uploadStatus');
+        // простой инлайн-статус рядом с форматом
+        const el = document.getElementById('btnSaveFormat');
+        el.insertAdjacentHTML('afterend', `<span class="ms-2 small text-${kind}">${escapeHtml(msg)}</span>`);
+        setTimeout(() => { const n = el.nextElementSibling; if (n) n.remove(); }, 2500);
+    }
+
+    load();
+    </script>
+</body>
+</html>

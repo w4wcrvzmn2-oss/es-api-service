@@ -16,7 +16,8 @@
             { href: p + 'orders.html',          icon: 'bi-cart3',        text: 'Статистика заказов', file: 'orders.html' },
             { href: p + 'order-delivery.html',   icon: 'bi-truck',       text: 'Доставка заказов',  file: 'order-delivery.html' },
             { href: p + 'order-service.html',    icon: 'bi-gear',        text: 'Обслуживание',      file: 'order-service.html' },
-            { href: p + 'order-export.html',     icon: 'bi-upload',      text: 'Выгрузка заказов',  file: 'order-export.html' }
+            { href: p + 'order-export.html',     icon: 'bi-upload',      text: 'Выгрузка заказов',  file: 'order-export.html' },
+            { href: p + 'export-template.html',  icon: 'bi-file-earmark-arrow-down', text: 'Настройки выгрузки', file: 'export-template.html' }
         ]},
         { href: p + 'profile.html',            icon: 'bi-person',       text: 'Профиль',            file: 'profile.html' },
         { href: p + 'change-password.html',     icon: 'bi-key',          text: 'Сменить пароль',     file: 'change-password.html' }

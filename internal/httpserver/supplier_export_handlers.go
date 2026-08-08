@@ -12,6 +12,7 @@ import (
 	"net/smtp"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,7 +71,12 @@ func (s *Server) handleSCExportConfig(w http.ResponseWriter, r *http.Request) {
 		default:
 			req.Method = "none"
 		}
-		req.Format = "DBF"
+		switch strings.ToLower(req.Format) {
+		case "xml", "xlsx", "dbf", "csv", "1c":
+			req.Format = strings.ToLower(req.Format)
+		default:
+			req.Format = "dbf"
+		}
 		if req.FtpPort <= 0 {
 			req.FtpPort = 21
 		}
@@ -80,6 +86,18 @@ func (s *Server) handleSCExportConfig(w http.ResponseWriter, r *http.Request) {
 		req.SupplierID = sid
 		req.UpdatedAt = time.Now().UTC()
 
+		// Сохраняем ранее загруженный шаблон и маппинг, если этот PUT их не прислал.
+		var prev models.SupplierExportConfig
+		_ = s.database.GORMWith(ctx).
+			Raw(`SELECT * FROM "SupplierExportConfig" WHERE "SupplierID" = CAST(? AS UUID) LIMIT 1`, sid).
+			Scan(&prev).Error
+		if req.TemplateFileName == nil {
+			req.TemplateFileName = prev.TemplateFileName
+		}
+		if req.ColumnMapping == nil {
+			req.ColumnMapping = prev.ColumnMapping
+		}
+
 		err := s.database.GORMWith(ctx).Transaction(func(tx *gorm.DB) error {
 			if e := tx.Exec(`DELETE FROM "SupplierExportConfig" WHERE "SupplierID" = CAST(? AS UUID)`, sid).Error; e != nil {
 				return e
@@ -87,20 +105,20 @@ func (s *Server) handleSCExportConfig(w http.ResponseWriter, r *http.Request) {
 			req.SupplierExportConfigID = uuid.New().String()
 			return tx.Exec(`
 				INSERT INTO "SupplierExportConfig" (
-					"SupplierExportConfigID","SupplierID","Method","Format",
+					"SupplierExportConfigID","SupplierID","Method","Format","OneCSubFormat",
 					"FtpHost","FtpPort","FtpUser","FtpPassword","FtpDir",
 					"EmailTo","SmtpHost","SmtpPort","SmtpUser","SmtpPassword","SmtpFrom",
-					"IsActive","UpdatedAt"
+					"IsActive","UpdatedAt","TemplateFileName","ColumnMapping"
 				) VALUES (
-					CAST(? AS UUID), CAST(? AS UUID), ?, ?,
+					CAST(? AS UUID), CAST(? AS UUID), ?, ?, ?,
 					?, ?, ?, ?, ?,
 					?, ?, ?, ?, ?, ?,
-					?, ?
+					?, ?, ?, ?
 				)`,
-				req.SupplierExportConfigID, req.SupplierID, req.Method, req.Format,
+				req.SupplierExportConfigID, req.SupplierID, req.Method, req.Format, req.OneCSubFormat,
 				req.FtpHost, req.FtpPort, req.FtpUser, req.FtpPassword, req.FtpDir,
 				req.EmailTo, req.SmtpHost, req.SmtpPort, req.SmtpUser, req.SmtpPassword, req.SmtpFrom,
-				req.IsActive, req.UpdatedAt,
+				req.IsActive, req.UpdatedAt, req.TemplateFileName, req.ColumnMapping,
 			).Error
 		})
 		if err != nil {
@@ -364,6 +382,69 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 	if len(rows) == 0 {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Нет заказов за указанный период"})
 		return
+	}
+
+	// --- Выгрузка по шаблону+маппингу (если поставщик настроил шаблон) ---
+	{
+		var tcfg models.SupplierExportConfig
+		_ = s.database.GORMWith(ctx).
+			Raw(`SELECT * FROM "SupplierExportConfig" WHERE "SupplierID" = CAST(? AS UUID) LIMIT 1`, sid).
+			Scan(&tcfg).Error
+		if tcfg.ColumnMapping != nil && strings.TrimSpace(*tcfg.ColumnMapping) != "" {
+			var mp []struct {
+				Column string `json:"column"`
+				Field  string `json:"field"`
+			}
+			if e := json.Unmarshal([]byte(*tcfg.ColumnMapping), &mp); e == nil && len(mp) > 0 {
+				cols := make([]orderexport.ExportColumn, 0, len(mp))
+				for _, m := range mp {
+					f := m.Field
+					if f == "none" {
+						f = ""
+					}
+					cols = append(cols, orderexport.ExportColumn{Header: m.Column, Field: f})
+				}
+				exportRows := make([]map[string]string, 0, len(rows))
+				for _, rw := range rows {
+					fm := map[string]string{
+						"global_sign":      nullStr(rw.GlobalSign),
+						"order_date":       rw.OrderDate.Format("02.01.2006"),
+						"supplier_code":    nullStr(rw.SupCode),
+						"supplier_name":    nullStr(rw.SuppName),
+						"buyer_name":       rw.Buyer,
+						"location_address": rw.Address,
+						"item_name":        nullStr(rw.Name),
+						"item_code":        nullStr(rw.Code),
+						"barcode":          nullStr(rw.Barcode),
+						"qty":              strconv.FormatFloat(rw.Qty, 'f', 3, 64),
+						"unit_price":       strconv.FormatFloat(rw.Price, 'f', 2, 64),
+						"sum":              strconv.FormatFloat(rw.Qty*rw.Price, 'f', 2, 64),
+						"manufacturer":     nullStr(rw.Manufacturer),
+						"series":           nullStr(rw.Series),
+						"expiry":           "",
+					}
+					if rw.Expiry.Valid {
+						fm["expiry"] = rw.Expiry.Time.Format("02.01.2006")
+					}
+					exportRows = append(exportRows, fm)
+				}
+				sub := ""
+				if tcfg.OneCSubFormat != nil {
+					sub = *tcfg.OneCSubFormat
+				}
+				data, ext, gerr := orderexport.BuildExport(tcfg.Format, sub, cols, exportRows)
+				if gerr != nil {
+					writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Ошибка формирования выгрузки: " + gerr.Error()})
+					return
+				}
+				fname := fmt.Sprintf("nakladnaya_%s.%s", time.Now().UTC().Format("20060102_150405"), ext)
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Header().Set("Content-Disposition", "attachment; filename=\""+fname+"\"")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(data)
+				return
+			}
+		}
 	}
 
 	byOrder := map[string][]orderexport.OrderLine{}
