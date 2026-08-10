@@ -877,6 +877,16 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	// Фильтр по конкретному прайс-листу (выбор «Мои прайсы» в десктопе).
+	priceListScope := ""
+	if plID := strings.TrimSpace(r.URL.Query().Get("price_list_id")); plID != "" {
+		if _, err := uuid.Parse(plID); err != nil {
+			s.writeError(w, http.StatusBadRequest, "Недопустимый формат price_list_id")
+			return
+		}
+		priceListScope = " AND sp.PriceListID = CAST('" + plID + "' AS UUID)"
+	}
+
 	if supplierID != "" {
 		// Валидация UUID для защиты от SQL injection
 		if _, err := uuid.Parse(supplierID); err != nil {
@@ -921,6 +931,7 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 		`
 		args = []interface{}{sql.Named("supplierID", supplierID)}
 		query += supplierScope
+		query += priceListScope
 
 		query += `
 			)
@@ -1002,6 +1013,7 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 		`
 		args = []interface{}{}
 		query += supplierScope
+		query += priceListScope
 
 		query += `
 			)

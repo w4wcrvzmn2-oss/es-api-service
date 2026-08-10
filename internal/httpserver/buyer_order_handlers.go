@@ -106,6 +106,15 @@ func (s *Server) handleBuyerOrdersRouter(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if strings.HasPrefix(path, "price-lists") {
+		if r.Method == http.MethodGet {
+			s.handleBuyerGetMyPriceLists(w, r)
+		} else {
+			s.writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
+		}
+		return
+	}
+
 	if strings.HasPrefix(path, "global-sign") || strings.HasPrefix(path, "order-numbers") {
 		if r.Method == http.MethodPost || r.Method == http.MethodGet {
 			s.handleBuyerNextGlobalSign(w, r)

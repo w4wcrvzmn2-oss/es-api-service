@@ -52,6 +52,19 @@ func (s *Server) handleGetBuyerPriceLists(w http.ResponseWriter, r *http.Request
 	s.writeJSON(w, http.StatusOK, rows)
 }
 
+// handleBuyerGetMyPriceLists — GET /api/buyer/price-lists (self, по JWT).
+// Прайс-листы, подключённые текущему покупателю — для выбора «Мои прайсы» в десктопе.
+func (s *Server) handleBuyerGetMyPriceLists(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	pc := s.resolvePricingContext(ctx, r)
+	if pc.BuyerID == "" {
+		s.writeError(w, http.StatusForbidden, "Покупатель не определён")
+		return
+	}
+	s.handleGetBuyerPriceLists(w, r, pc.BuyerID)
+}
+
 // handleSetBuyerPriceLists — PUT /api/buyers/{id}/price-lists
 // Body: {"price_list_ids": ["uuid", ...]}. Полностью заменяет набор назначений.
 func (s *Server) handleSetBuyerPriceLists(w http.ResponseWriter, r *http.Request, buyerID string) {
