@@ -193,15 +193,28 @@ func (s *Server) handleSCExportTemplate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Собираем до 8 РАЗНЫХ непустых значений на колонку, просматривая до 60 строк,
+	// — чтобы ИИ видел реальное содержимое (GUID'ы, даты, цены, штрихкоды), а не
+	// первые пустые/одинаковые ячейки, и точнее понимал, что это за поле.
+	const (
+		maxScanRows   = 60
+		maxSamplesCol = 8
+	)
 	cols := make([]aiMapColumn, 0, len(headers))
 	for _, h := range headers {
-		samples := []string{}
-		for ri := 0; ri < len(records) && ri < 3; ri++ {
-			if v, ok := records[ri][h]; ok {
-				if sv := strings.TrimSpace(fmt.Sprintf("%v", v)); sv != "" {
-					samples = append(samples, sv)
-				}
+		samples := make([]string, 0, maxSamplesCol)
+		seen := make(map[string]bool)
+		for ri := 0; ri < len(records) && ri < maxScanRows && len(samples) < maxSamplesCol; ri++ {
+			v, ok := records[ri][h]
+			if !ok {
+				continue
 			}
+			sv := strings.TrimSpace(fmt.Sprintf("%v", v))
+			if sv == "" || seen[sv] {
+				continue
+			}
+			seen[sv] = true
+			samples = append(samples, sv)
 		}
 		cols = append(cols, aiMapColumn{Name: h, Samples: samples})
 	}
