@@ -1,15 +1,58 @@
 package dbfimport
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/LindsayBradford/go-dbf/godbf"
 	"github.com/xuri/excelize/v2"
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/transform"
 )
+
+var dbfExpectedRe = regexp.MustCompile(`header expected (\d+)`)
+
+// openDBFTolerant открывает DBF (CP866). Если файл на несколько байт короче, чем
+// ждёт заголовок (частая беда выгрузок — обрезан завершающий EOF-байт), дописывает
+// недостающие байты во временную копию и повторяет. Иначе строгая go-dbf падает.
+func openDBFTolerant(filePath string) (*godbf.DbfTable, error) {
+	t, err := godbf.NewFromFile(filePath, "CP866")
+	if err == nil {
+		return t, nil
+	}
+	m := dbfExpectedRe.FindStringSubmatch(err.Error())
+	if m == nil {
+		return nil, err
+	}
+	want, _ := strconv.Atoi(m[1])
+	raw, e := os.ReadFile(filePath)
+	if e != nil {
+		return nil, err
+	}
+	// Дописываем только если не хватает немного (иначе файл реально битый).
+	if want <= len(raw) || want-len(raw) > 64 {
+		return nil, err
+	}
+	padded := make([]byte, want)
+	copy(padded, raw)
+	for i := len(raw); i < want; i++ {
+		padded[i] = 0x20
+	}
+	tmp := filePath + ".padded"
+	if e := os.WriteFile(tmp, padded, 0644); e != nil {
+		return nil, err
+	}
+	defer os.Remove(tmp)
+	return godbf.NewFromFile(tmp, "CP866")
+}
 
 var supportedDataFileExts = []string{".dbf", ".xlsx", ".xlsm", ".xls", ".xml", ".sst"}
 
@@ -62,90 +105,105 @@ func ReadTabularFile(filePath string) ([]string, []map[string]interface{}, error
 }
 
 func readDBFRecords(filePath string) (fieldNames []string, records []map[string]interface{}, err error) {
-	// go-dbf иногда паникует на нестандартных DBF (мемо-поля, непонятные типы,
-	// битый заголовок). Не роняем сервер: если успели прочитать имена колонок —
-	// этого достаточно для распознавания/маппинга; иначе отдаём понятную ошибку.
+	// Нативный толерантный dBase III читатель. go-dbf слишком строг — падает/паникует
+	// на реальных файлах (обрезанный EOF-байт, нестандартный «footer», мемо-поля).
 	defer func() {
 		if rec := recover(); rec != nil {
 			if len(fieldNames) > 0 {
 				err = nil
 			} else {
 				fieldNames, records = nil, nil
-				err = fmt.Errorf("не удалось разобрать DBF (нестандартный формат): %v", rec)
+				err = fmt.Errorf("не удалось разобрать DBF: %v", rec)
 			}
 		}
 	}()
+	return readDBFNative(filePath)
+}
 
-	dbfTable, openErr := godbf.NewFromFile(filePath, "CP866")
-	if openErr != nil {
-		return nil, nil, fmt.Errorf("не удалось открыть DBF файл: %w", openErr)
+// readDBFNative разбирает dBase III DBF вручную (CP866), терпимо к обрезанному
+// хвосту/EOF: читает столько записей, сколько реально есть в файле.
+func readDBFNative(filePath string) ([]string, []map[string]interface{}, error) {
+	f, e := os.Open(filePath)
+	if e != nil {
+		return nil, nil, fmt.Errorf("не удалось открыть DBF файл: %w", e)
+	}
+	defer f.Close()
+
+	hdr := make([]byte, 32)
+	if _, e := io.ReadFull(f, hdr); e != nil {
+		return nil, nil, fmt.Errorf("DBF: не прочитан заголовок: %w", e)
+	}
+	numRecords := int(binary.LittleEndian.Uint32(hdr[4:8]))
+	headerLen := int(binary.LittleEndian.Uint16(hdr[8:10]))
+	recLen := int(binary.LittleEndian.Uint16(hdr[10:12]))
+	if headerLen < 33 || recLen < 1 || headerLen > 1<<20 {
+		return nil, nil, fmt.Errorf("DBF: битый заголовок (headerLen=%d recLen=%d)", headerLen, recLen)
 	}
 
-	fieldNames = dbfTable.FieldNames()
-	headerRecordCount := dbfTable.NumberOfRecords()
-	records = make([]map[string]interface{}, 0, headerRecordCount)
-	maxAttempts := headerRecordCount * 2
-	if maxAttempts < 1 {
-		maxAttempts = 1
+	fd := make([]byte, headerLen-32)
+	if _, e := io.ReadFull(f, fd); e != nil {
+		return nil, nil, fmt.Errorf("DBF: не прочитаны описания полей: %w", e)
 	}
-	consecutiveErrors := 0
-	maxConsecutiveErrors := 10
-
-	for i := 0; i < maxAttempts; i++ {
-		record := make(map[string]interface{})
-		recordHasError := false
-		allFieldsError := true
-
-		for _, fieldName := range fieldNames {
-			fieldValue, err := dbfTable.FieldValueByName(i, fieldName)
-			if err != nil {
-				recordHasError = true
-				if fieldName == fieldNames[0] {
-					errMsg := err.Error()
-					if errMsg == "index out of range" ||
-						strings.Contains(errMsg, "out of range") ||
-						strings.Contains(errMsg, "EOF") ||
-						strings.Contains(errMsg, "index") {
-						consecutiveErrors++
-						if consecutiveErrors >= maxConsecutiveErrors {
-							return fieldNames, records, nil
-						}
-						break
-					}
-				}
-				fieldValue = ""
-			} else {
-				allFieldsError = false
-				record[fieldName] = fieldValue
-			}
+	type fld struct {
+		name   string
+		off    int
+		length int
+	}
+	var fields []fld
+	pos := 1 // байт 0 записи — флаг удаления
+	seen := map[string]int{}
+	for off := 0; off+32 <= len(fd); off += 32 {
+		if fd[off] == 0x0D { // терминатор описаний полей
+			break
 		}
+		base := strings.TrimRight(string(fd[off:off+11]), "\x00 ")
+		name := base
+		if name == "" {
+			name = fmt.Sprintf("F%d", len(fields)+1)
+		}
+		if n := seen[base]; n > 0 {
+			name = fmt.Sprintf("%s_%d", name, n+1)
+		}
+		seen[base]++
+		length := int(fd[off+16])
+		fields = append(fields, fld{name: name, off: pos, length: length})
+		pos += length
+	}
+	if len(fields) == 0 {
+		return nil, nil, fmt.Errorf("DBF: не найдено ни одного поля")
+	}
 
-		if allFieldsError && recordHasError {
-			consecutiveErrors++
-			if consecutiveErrors >= maxConsecutiveErrors {
-				return fieldNames, records, nil
-			}
+	names := make([]string, len(fields))
+	for i, fl := range fields {
+		names[i] = fl.name
+	}
+
+	dec := charmap.CodePage866.NewDecoder()
+	records := make([]map[string]interface{}, 0, numRecords)
+	rec := make([]byte, recLen)
+	for i := 0; numRecords <= 0 || i < numRecords; i++ {
+		n, e := io.ReadFull(f, rec)
+		if e != nil || n < recLen {
+			break // хвост обрезан — берём что успели прочитать
+		}
+		if rec[0] == 0x2A { // удалённая запись
 			continue
 		}
-
-		if !allFieldsError {
-			for _, fieldName := range fieldNames {
-				if _, exists := record[fieldName]; exists {
-					continue
-				}
-				fieldValue, err := dbfTable.FieldValueByName(i, fieldName)
-				if err != nil {
-					record[fieldName] = ""
-					continue
-				}
-				record[fieldName] = fieldValue
+		m := make(map[string]interface{}, len(fields))
+		for _, fl := range fields {
+			if fl.off+fl.length > len(rec) {
+				break
 			}
-			records = append(records, record)
-			consecutiveErrors = 0
+			raw := bytes.TrimRight(rec[fl.off:fl.off+fl.length], " \x00")
+			val, _, de := transform.Bytes(dec, raw)
+			if de != nil {
+				val = raw
+			}
+			m[fl.name] = strings.TrimSpace(string(val))
 		}
+		records = append(records, m)
 	}
-
-	return fieldNames, records, nil
+	return names, records, nil
 }
 
 func readExcelRecords(filePath string) ([]string, []map[string]interface{}, error) {

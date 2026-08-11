@@ -155,8 +155,11 @@ func (di *DBFImporter) ImportInvoice(ctx context.Context, importPointID, filePat
 		di.logger.Info("Запись об импорте создана: InvoiceImportID=%s", invoiceImport.InvoiceImportID)
 	}
 
-	// DBF (Katren ~75MB): не грузим весь файл в []map — иначе OOM и рестарт службы каждые ~40с.
-	if DetectDataFileFormat(filePath) == "dbf" {
+	// Гигантские DBF (Katren ~75MB) — потоковый путь через go-dbf, чтобы не грузить
+	// весь файл в память (иначе OOM). Обычные (≤30MB) — через нативный толерантный
+	// ридер (ReadTabularFile): он читает файлы, на которых строгая go-dbf падает
+	// (обрезанный EOF, нестандартный «footer»).
+	if DetectDataFileFormat(filePath) == "dbf" && fileInfo.Size() > 30*1024*1024 {
 		return di.importInvoiceDBFStream(ctx, invoiceImport, importPointID, filePath, mappings)
 	}
 
@@ -524,7 +527,7 @@ func (di *DBFImporter) importInvoiceDBFStream(ctx context.Context, invoiceImport
 		di.logger.Info("Потоковое чтение DBF: %s", filePath)
 	}
 
-	dbfTable, errOpen := godbf.NewFromFile(filePath, "CP866")
+	dbfTable, errOpen := openDBFTolerant(filePath)
 	if errOpen != nil {
 		errMsg := fmt.Sprintf("не удалось открыть DBF файл: %v", errOpen)
 		invoiceImport.ImportStatus = "FAILED"
