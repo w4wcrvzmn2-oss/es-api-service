@@ -1313,9 +1313,43 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 		s.logger.Info("Успешно получено позиций в сводном прайсе: %d", len(summary))
 	}
 
+	// Реальный итог позиций во всём (отфильтрованном) прайсе — чтобы десктоп
+	// корректно догружал постранично, а не останавливался на первой странице.
+	totalDrugs := len(summary)
+	{
+		supplierFilter, join, nameFilter := "", "", ""
+		countArgs := []interface{}{}
+		if supplierID != "" {
+			supplierFilter = " AND sp.SupplierID = CAST(@supplierID AS UUID)"
+			countArgs = append(countArgs, sql.Named("supplierID", supplierID))
+		}
+		if qLike != "" {
+			join = " LEFT JOIN es_ef2 ef2 ON sp.GUID_ES = ef2.GUID_ES"
+			nameFilter = " AND ef2.NAME LIKE @q"
+			countArgs = append(countArgs, sql.Named("q", qLike))
+		}
+		countQuery := `SELECT COUNT(*) FROM (
+			SELECT 1 FROM SupplierPrice sp` + join + `
+			WHERE sp.IsActive = 1 AND sp.GUID_ES IS NOT NULL` + supplierFilter + supplierScope + priceListScope + nameFilter + `
+			GROUP BY sp.GUID_ES, sp.SupplierID,
+			         COALESCE(sp.BatchNumber, ''),
+			         COALESCE(CAST(sp.ExpiryDate AS TEXT), ''),
+			         COALESCE(sp.Manufacturer, ''),
+			         COALESCE(sp.Country, '')
+		) t`
+		var cnt int64
+		if e := s.database.GORMWith(ctx).Raw(countQuery, countArgs...).Scan(&cnt).Error; e != nil {
+			if s.logger != nil {
+				s.logger.Warn("Сводный прайс: не удалось посчитать total_drugs: %v", e)
+			}
+		} else if int(cnt) > totalDrugs {
+			totalDrugs = int(cnt)
+		}
+	}
+
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"supplier_id": supplierID,
-		"total_drugs": len(summary),
+		"total_drugs": totalDrugs,
 		"summary":     summary,
 	})
 }
