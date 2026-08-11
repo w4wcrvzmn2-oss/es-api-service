@@ -61,15 +61,29 @@ func ReadTabularFile(filePath string) ([]string, []map[string]interface{}, error
 	}
 }
 
-func readDBFRecords(filePath string) ([]string, []map[string]interface{}, error) {
-	dbfTable, err := godbf.NewFromFile(filePath, "CP866")
-	if err != nil {
-		return nil, nil, fmt.Errorf("не удалось открыть DBF файл: %w", err)
+func readDBFRecords(filePath string) (fieldNames []string, records []map[string]interface{}, err error) {
+	// go-dbf иногда паникует на нестандартных DBF (мемо-поля, непонятные типы,
+	// битый заголовок). Не роняем сервер: если успели прочитать имена колонок —
+	// этого достаточно для распознавания/маппинга; иначе отдаём понятную ошибку.
+	defer func() {
+		if rec := recover(); rec != nil {
+			if len(fieldNames) > 0 {
+				err = nil
+			} else {
+				fieldNames, records = nil, nil
+				err = fmt.Errorf("не удалось разобрать DBF (нестандартный формат): %v", rec)
+			}
+		}
+	}()
+
+	dbfTable, openErr := godbf.NewFromFile(filePath, "CP866")
+	if openErr != nil {
+		return nil, nil, fmt.Errorf("не удалось открыть DBF файл: %w", openErr)
 	}
 
-	fieldNames := dbfTable.FieldNames()
+	fieldNames = dbfTable.FieldNames()
 	headerRecordCount := dbfTable.NumberOfRecords()
-	records := make([]map[string]interface{}, 0, headerRecordCount)
+	records = make([]map[string]interface{}, 0, headerRecordCount)
 	maxAttempts := headerRecordCount * 2
 	if maxAttempts < 1 {
 		maxAttempts = 1
