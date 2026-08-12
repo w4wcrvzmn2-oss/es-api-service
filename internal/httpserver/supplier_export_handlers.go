@@ -438,10 +438,40 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				fname := fmt.Sprintf("nakladnaya_%s.%s", time.Now().UTC().Format("20060102_150405"), ext)
-				w.Header().Set("Content-Type", "application/octet-stream")
-				w.Header().Set("Content-Disposition", "attachment; filename=\""+fname+"\"")
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write(data)
+
+				// Фронт «Заказы» ждёт JSON с base64 (а не сырой файл) — иначе
+				// «Unexpected token» при разборе. Отдаём тот же формат, что старый путь.
+				orderSet := map[string]bool{}
+				for _, rw := range rows {
+					orderSet[rw.OrderID] = true
+				}
+				ftpStatus, emailStatus := "skip", "skip"
+				var ftpErr, emailErr string
+				if tcfg.Method == "ftp" || tcfg.Method == "both" {
+					if e := uploadOrdersFTP(tcfg, fname, data); e != nil {
+						ftpStatus, ftpErr = "error", e.Error()
+					} else {
+						ftpStatus = "ok"
+					}
+				}
+				if tcfg.Method == "email" || tcfg.Method == "both" {
+					if e := sendOrdersEmail(tcfg, fname, data, len(orderSet)); e != nil {
+						emailStatus, emailErr = "error", e.Error()
+					} else {
+						emailStatus = "ok"
+					}
+				}
+				writeJSON(w, http.StatusOK, map[string]interface{}{
+					"ok":           true,
+					"file_name":    fname,
+					"files":        []string{fname},
+					"orders_count": len(orderSet),
+					"lines_count":  len(exportRows),
+					"method":       tcfg.Method,
+					"ftp":          map[string]string{"status": ftpStatus, "error": ftpErr},
+					"email":        map[string]string{"status": emailStatus, "error": emailErr},
+					"file_base64":  base64.StdEncoding.EncodeToString(data),
+				})
 				return
 			}
 		}
