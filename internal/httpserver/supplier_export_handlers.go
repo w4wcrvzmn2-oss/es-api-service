@@ -301,6 +301,9 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 		GlobalSign   sql.NullString `gorm:"column:global_sign"`
 		OrderDate    time.Time      `gorm:"column:order_date"`
 		Buyer        string         `gorm:"column:buyer"`
+		BuyerCode    sql.NullString `gorm:"column:buyer_code"`
+		BuyerINN     sql.NullString `gorm:"column:buyer_inn"`
+		ItemID       string         `gorm:"column:order_item_id"`
 		Address      string         `gorm:"column:address"`
 		Code         sql.NullString `gorm:"column:code"`
 		Name         sql.NullString `gorm:"column:name"`
@@ -322,6 +325,9 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 			o."GlobalSign" AS global_sign,
 			o."CreatedAt" AS order_date,
 			b."Name" AS buyer,
+			b."Code" AS buyer_code,
+			b."INN" AS buyer_inn,
+			CAST(oi."OrderLineID" AS TEXT) AS order_item_id,
 			COALESCE(bl."Address", '') AS address,
 			COALESCE(NULLIF(TRIM(oi."ItemCode"), ''), sp."ItemCode", spfb."ItemCode") AS code,
 			COALESCE(
@@ -408,18 +414,25 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 				for _, rw := range rows {
 					fm := map[string]string{
 						"global_sign":      nullStr(rw.GlobalSign),
+						"order_id":         rw.OrderID,
+						"order_number":     nullStr(rw.GlobalSign),
 						"order_date":       rw.OrderDate.Format("02.01.2006"),
+						"order_item_id":    rw.ItemID,
 						"supplier_code":    nullStr(rw.SupCode),
 						"supplier_name":    nullStr(rw.SuppName),
+						"buyer_code":       nullStr(rw.BuyerCode),
 						"buyer_name":       rw.Buyer,
+						"buyer_inn":        nullStr(rw.BuyerINN),
 						"location_address": rw.Address,
 						"item_name":        nullStr(rw.Name),
 						"item_code":        nullStr(rw.Code),
+						"goods_guid":       nullStr(rw.Code),
 						"barcode":          nullStr(rw.Barcode),
 						"qty":              strconv.FormatFloat(rw.Qty, 'f', 3, 64),
 						"unit_price":       strconv.FormatFloat(rw.Price, 'f', 2, 64),
 						"sum":              strconv.FormatFloat(rw.Qty*rw.Price, 'f', 2, 64),
 						"manufacturer":     nullStr(rw.Manufacturer),
+						"country":          nullStr(rw.Country),
 						"series":           nullStr(rw.Series),
 						"expiry":           "",
 					}
