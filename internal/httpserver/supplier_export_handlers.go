@@ -412,8 +412,8 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 					}
 					cols = append(cols, orderexport.ExportColumn{Header: m.Column, Field: f})
 				}
-				exportRows := make([]map[string]string, 0, len(rows))
-				for _, rw := range rows {
+				// Одна строка выгрузки для позиции заказа.
+				buildFM := func(rw row) map[string]string {
 					fm := map[string]string{
 						"global_sign":      nullStr(rw.GlobalSign),
 						"order_id":         rw.OrderID,
@@ -442,51 +442,114 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 					if rw.Expiry.Valid {
 						fm["expiry"] = rw.Expiry.Time.Format("02.01.2006")
 					}
-					exportRows = append(exportRows, fm)
+					return fm
 				}
+
+				// Бьём по заявкам: одна заявка = один файл (не сливаем всё в одну).
+				rowsByOrder := map[string][]row{}
+				orderSeq := []string{}
+				for _, rw := range rows {
+					if _, ok := rowsByOrder[rw.OrderID]; !ok {
+						orderSeq = append(orderSeq, rw.OrderID)
+					}
+					rowsByOrder[rw.OrderID] = append(rowsByOrder[rw.OrderID], rw)
+				}
+
 				sub := ""
 				if tcfg.OneCSubFormat != nil {
 					sub = *tcfg.OneCSubFormat
 				}
-				data, ext, gerr := orderexport.BuildExport(tcfg.Format, sub, cols, exportRows)
-				if gerr != nil {
-					writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Ошибка формирования выгрузки: " + gerr.Error()})
-					return
+
+				orderFiles := make(map[string][]byte, len(orderSeq))
+				fileOrder := make([]string, 0, len(orderSeq))
+				usedBase := map[string]int{}
+				totalLines := 0
+				for _, oid := range orderSeq {
+					orows := rowsByOrder[oid]
+					exportRows := make([]map[string]string, 0, len(orows))
+					for _, rw := range orows {
+						exportRows = append(exportRows, buildFM(rw))
+					}
+					data, ext, gerr := orderexport.BuildExport(tcfg.Format, sub, cols, exportRows)
+					if gerr != nil {
+						writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Ошибка формирования выгрузки: " + gerr.Error()})
+						return
+					}
+					// Имя файла — по номеру заказа (GlobalSign), иначе по id.
+					base := "nakladnaya_" + oid[:8]
+					if len(orows) > 0 && orows[0].GlobalSign.Valid {
+						if sign := sanitizeFileToken(orows[0].GlobalSign.String); sign != "" {
+							base = "nakladnaya_" + sign
+						}
+					}
+					name := base + "." + ext
+					if n := usedBase[base]; n > 0 {
+						name = fmt.Sprintf("%s_%d.%s", base, n+1, ext)
+					}
+					usedBase[base]++
+					orderFiles[name] = data
+					fileOrder = append(fileOrder, name)
+					totalLines += len(exportRows)
 				}
-				fname := fmt.Sprintf("nakladnaya_%s.%s", time.Now().UTC().Format("20060102_150405"), ext)
+
+				// Один заказ — файл как есть; несколько — упаковываем в ZIP.
+				var payload []byte
+				var fname string
+				if len(orderFiles) == 1 {
+					fname = fileOrder[0]
+					payload = orderFiles[fname]
+				} else {
+					zipBytes, zerr := orderexport.BuildZip(orderFiles)
+					if zerr != nil {
+						writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Ошибка формирования ZIP"})
+						return
+					}
+					fname = fmt.Sprintf("nakladnye_%s.zip", time.Now().UTC().Format("20060102_150405"))
+					payload = zipBytes
+				}
 
 				// Фронт «Заказы» ждёт JSON с base64 (а не сырой файл) — иначе
 				// «Unexpected token» при разборе. Отдаём тот же формат, что старый путь.
-				orderSet := map[string]bool{}
-				for _, rw := range rows {
-					orderSet[rw.OrderID] = true
-				}
 				ftpStatus, emailStatus := "skip", "skip"
 				var ftpErr, emailErr string
 				if tcfg.Method == "ftp" || tcfg.Method == "both" {
-					if e := uploadOrdersFTP(tcfg, fname, data); e != nil {
-						ftpStatus, ftpErr = "error", e.Error()
-					} else {
+					ok, fail := 0, 0
+					for name, data := range orderFiles {
+						if e := uploadOrdersFTP(tcfg, name, data); e != nil {
+							fail++
+							if ftpErr == "" {
+								ftpErr = name + ": " + e.Error()
+							}
+						} else {
+							ok++
+						}
+					}
+					if fail == 0 {
 						ftpStatus = "ok"
+					} else if ok > 0 {
+						ftpStatus = "partial"
+					} else {
+						ftpStatus = "error"
 					}
 				}
 				if tcfg.Method == "email" || tcfg.Method == "both" {
-					if e := sendOrdersEmail(tcfg, fname, data, len(orderSet)); e != nil {
+					if e := sendOrdersEmail(tcfg, fname, payload, len(orderFiles)); e != nil {
 						emailStatus, emailErr = "error", e.Error()
 					} else {
 						emailStatus = "ok"
 					}
 				}
+				sort.Strings(fileOrder)
 				writeJSON(w, http.StatusOK, map[string]interface{}{
 					"ok":           true,
 					"file_name":    fname,
-					"files":        []string{fname},
-					"orders_count": len(orderSet),
-					"lines_count":  len(exportRows),
+					"files":        fileOrder,
+					"orders_count": len(orderFiles),
+					"lines_count":  totalLines,
 					"method":       tcfg.Method,
 					"ftp":          map[string]string{"status": ftpStatus, "error": ftpErr},
 					"email":        map[string]string{"status": emailStatus, "error": emailErr},
-					"file_base64":  base64.StdEncoding.EncodeToString(data),
+					"file_base64":  base64.StdEncoding.EncodeToString(payload),
 				})
 				return
 			}
@@ -670,6 +733,25 @@ func nullStr(ns sql.NullString) string {
 		return ns.String
 	}
 	return ""
+}
+
+// sanitizeFileToken оставляет в токене имени файла только буквы/цифры/-/_,
+// остальное заменяет на '_' (чтобы номер заказа не ломал путь).
+func sanitizeFileToken(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
 }
 
 func uploadOrdersFTP(cfg models.SupplierExportConfig, fileName string, data []byte) error {
