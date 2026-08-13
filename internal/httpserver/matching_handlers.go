@@ -1315,8 +1315,11 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 
 	// Реальный итог позиций во всём (отфильтрованном) прайсе — чтобы десктоп
 	// корректно догружал постранично, а не останавливался на первой странице.
-	totalDrugs := len(summary)
-	{
+	// total = offset + отдано. Тяжёлый GROUP BY-COUNT гоняем ТОЛЬКО если вернули полную
+	// страницу (возможно есть ещё). Неполная страница → total точно известен, COUNT не нужен
+	// (раньше COUNT дублировал дедупликацию на КАЖДЫЙ запрос — сводный прайс «висел»).
+	totalDrugs := offsetVal + len(summary)
+	if len(summary) == limitVal {
 		supplierFilter, join, nameFilter := "", "", ""
 		countArgs := []interface{}{}
 		if supplierID != "" {
