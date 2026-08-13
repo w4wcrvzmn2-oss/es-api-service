@@ -9,12 +9,15 @@ let _linksMatchFilter = 'all';
 let _linksSortKey = null;
 let _linksSortDir = 'asc';
 let _linksColFilters = {};
+// Кеш загруженных прайсов по поставщику: не тянуть с сервера заново при
+// повторном выборе того же поставщика и после точечных правок сопоставления.
+let _linksCache = {};
 
 document.addEventListener('DOMContentLoaded', async () => {
     await loadSuppliers();
 
     document.getElementById('filterSupplier')?.addEventListener('change', () => loadPrices());
-    document.getElementById('refreshBtn')?.addEventListener('click', () => loadPrices());
+    document.getElementById('refreshBtn')?.addEventListener('click', () => loadPrices(true));
     document.getElementById('saveMatchBtn')?.addEventListener('click', saveMatch);
     document.getElementById('clearMatchBtn')?.addEventListener('click', clearMatch);
     document.getElementById('searchDrugBtn')?.addEventListener('click', searchDrugs);
@@ -271,7 +274,7 @@ function updateLinksPagInfo(from, to, total) {
     if (next) next.disabled = to >= total;
 }
 
-async function loadPrices() {
+async function loadPrices(force = false) {
     const gen = ++_linksLoadGen;
     const supplierId = document.getElementById('filterSupplier')?.value || '';
     const tbody = document.getElementById('pricesTableBody');
@@ -284,6 +287,18 @@ async function loadPrices() {
         if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="empty-row">Выберите поставщика</td></tr>';
         [matchedEl, unmatchedEl, totalEl].forEach(el => { if (el) el.textContent = '-'; });
         if (info) info.textContent = '';
+        return;
+    }
+
+    // Есть полностью загруженный кеш и не форсируем обновление — берём из памяти.
+    if (!force && _linksCache[supplierId] && _linksCache[supplierId].fullyLoaded) {
+        const c = _linksCache[supplierId];
+        currentPrices = c.prices;
+        if (matchedEl) matchedEl.textContent = c.matched;
+        if (unmatchedEl) unmatchedEl.textContent = c.unmatched;
+        if (totalEl) totalEl.textContent = c.total;
+        rebuildLinksTable();
+        if (info) info.textContent = `Всего ${c.total.toLocaleString('ru-RU')} позиций`;
         return;
     }
 
@@ -317,6 +332,8 @@ async function loadPrices() {
 
         if (currentPrices.length < totalDB) {
             loadPricesRemaining(gen, supplierId, currentPrices.length, totalDB);
+        } else {
+            _cacheLinks(supplierId);
         }
     } catch (error) {
         if (gen !== _linksLoadGen) return;
@@ -347,11 +364,40 @@ async function loadPricesRemaining(gen, supplierId, loaded, totalDB) {
         if (gen !== _linksLoadGen) return;
         rebuildLinksTable();
         if (info) info.textContent = `Всего ${currentPrices.length.toLocaleString('ru-RU')} позиций`;
+        _cacheLinks(supplierId);
     } catch (e) {
         if (gen !== _linksLoadGen) return;
         console.error('Ошибка фоновой дозагрузки:', e);
         if (info) info.textContent = `Загружено ${currentPrices.length.toLocaleString('ru-RU')} позиций (ошибка загрузки)`;
     }
+}
+
+// Кладём текущий полностью загруженный прайс в кеш поставщика.
+function _cacheLinks(supplierId) {
+    let matched = 0;
+    for (const p of currentPrices) if (p.guid_es && p.guid_es.trim()) matched++;
+    const total = currentPrices.length;
+    _linksCache[supplierId] = {
+        prices: currentPrices,
+        matched,
+        unmatched: total - matched,
+        total,
+        fullyLoaded: true
+    };
+}
+
+// Пересчитывает счётчики «сопоставлено/не сопоставлено» из памяти после
+// точечной правки — без обращения к серверу.
+function refreshLinksCounts() {
+    let matched = 0;
+    for (const p of currentPrices) if (p.guid_es && p.guid_es.trim()) matched++;
+    const total = currentPrices.length;
+    const matchedEl = document.getElementById('matchedCount');
+    const unmatchedEl = document.getElementById('unmatchedCount');
+    if (matchedEl) matchedEl.textContent = matched;
+    if (unmatchedEl) unmatchedEl.textContent = total - matched;
+    const sid = document.getElementById('filterSupplier')?.value || '';
+    if (_linksCache[sid]) { _linksCache[sid].matched = matched; _linksCache[sid].unmatched = total - matched; }
 }
 
 function editMatch(priceID) {
@@ -481,9 +527,19 @@ async function saveMatch() {
         });
 
         if (response) {
+            // Точечно обновляем строку в памяти — без полной перезагрузки прайса.
+            const p = currentPrices.find(x => x.supplier_price_id === priceID);
+            if (p) {
+                p.guid_es = guidES;
+                p.match_method = matchMethod;
+                p.match_confidence = matchConfidence;
+                const sd = currentEditingPrice.selectedDrug;
+                if (sd) { p.drug_name = sd.name; p.inn = sd.inn; p.cure_form = sd.cure_form; }
+            }
             Toast.success('Сохранено', 'Сопоставление сохранено');
             closeMatchModal();
-            await loadPrices();
+            refreshLinksCounts();
+            renderLinksPage();
         } else {
             throw new Error('Ошибка сохранения');
         }
@@ -506,9 +562,12 @@ async function clearMatch() {
             guid_es: '', match_method: null, match_confidence: null
         });
         if (response) {
+            const p = currentPrices.find(x => x.supplier_price_id === priceID);
+            if (p) { p.guid_es = ''; p.drug_name = ''; p.inn = ''; p.cure_form = ''; p.match_method = ''; p.match_confidence = null; }
             Toast.success('Очищено', 'Сопоставление очищено');
             closeMatchModal();
-            await loadPrices();
+            refreshLinksCounts();
+            renderLinksPage();
         }
     } catch (error) {
         console.error('Ошибка очистки:', error);
