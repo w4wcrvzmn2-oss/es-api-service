@@ -304,8 +304,10 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 		BuyerCode    sql.NullString `gorm:"column:buyer_code"`
 		BuyerDelivery sql.NullString `gorm:"column:buyer_delivery_code"`
 		BuyerINN     sql.NullString `gorm:"column:buyer_inn"`
+		BuyerPhone   sql.NullString `gorm:"column:buyer_phone"`
 		ItemID       string         `gorm:"column:order_item_id"`
 		Address      string         `gorm:"column:address"`
+		AddressID    sql.NullString `gorm:"column:address_id"`
 		Code         sql.NullString `gorm:"column:code"`
 		Name         sql.NullString `gorm:"column:name"`
 		SuppName     sql.NullString `gorm:"column:supp_name"`
@@ -329,8 +331,10 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 			b."Code" AS buyer_code,
 			b."DeliveryCode" AS buyer_delivery_code,
 			b."INN" AS buyer_inn,
+			b."Phone" AS buyer_phone,
 			CAST(oi."OrderLineID" AS TEXT) AS order_item_id,
 			COALESCE(bl."Address", '') AS address,
+			CAST(o."BuyerLocationID" AS TEXT) AS address_id,
 			COALESCE(NULLIF(TRIM(oi."ItemCode"), ''), sp."ItemCode", spfb."ItemCode") AS code,
 			COALESCE(
 				NULLIF(TRIM(oi."ItemName"), ''),
@@ -419,6 +423,7 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 						"order_id":         rw.OrderID,
 						"order_number":     nullStr(rw.GlobalSign),
 						"order_date":       rw.OrderDate.Format("02.01.2006"),
+						"order_time":       rw.OrderDate.Format("15:04:05"),
 						"order_item_id":    rw.ItemID,
 						"supplier_code":    nullStr(rw.SupCode),
 						"supplier_name":    nullStr(rw.SuppName),
@@ -426,7 +431,9 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 						"delivery_code":    nullStr(rw.BuyerDelivery),
 						"buyer_name":       rw.Buyer,
 						"buyer_inn":        nullStr(rw.BuyerINN),
+						"buyer_phone":      nullStr(rw.BuyerPhone),
 						"location_address": rw.Address,
+						"address_id":       nullStr(rw.AddressID),
 						"item_name":        nullStr(rw.Name),
 						"item_code":        nullStr(rw.Code),
 						"goods_guid":       nullStr(rw.Code),
@@ -466,9 +473,19 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 				totalLines := 0
 				for _, oid := range orderSeq {
 					orows := rowsByOrder[oid]
+					// row_count/order_total — на весь заказ, одинаковы во всех строках заявки.
+					rowCount := strconv.Itoa(len(orows))
+					var orderTotal float64
+					for _, rw := range orows {
+						orderTotal += rw.Qty * rw.Price
+					}
+					orderTotalStr := strconv.FormatFloat(orderTotal, 'f', 2, 64)
 					exportRows := make([]map[string]string, 0, len(orows))
 					for _, rw := range orows {
-						exportRows = append(exportRows, buildFM(rw))
+						fm := buildFM(rw)
+						fm["row_count"] = rowCount
+						fm["order_total"] = orderTotalStr
+						exportRows = append(exportRows, fm)
 					}
 					data, ext, gerr := orderexport.BuildExport(tcfg.Format, sub, cols, exportRows)
 					if gerr != nil {
