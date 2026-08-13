@@ -152,13 +152,14 @@ type Buyer struct {
 	BuyerID   string    `json:"buyer_id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	Name      string    `json:"name"`
 	INN       *string   `json:"inn,omitempty"`
-	RegionID  *string   `json:"region_id,omitempty" gorm:"type:uuid"`
-	Code      *string   `json:"code,omitempty"`
-	Phone     *string   `json:"phone,omitempty"`
-	Address   *string   `json:"address,omitempty"`
-	Email     *string   `json:"email,omitempty"`
-	IsActive  bool      `json:"is_active"`
-	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
+	RegionID     *string   `json:"region_id,omitempty" gorm:"type:uuid"`
+	Code         *string   `json:"code,omitempty"`
+	DeliveryCode *string   `json:"delivery_code,omitempty"`
+	Phone        *string   `json:"phone,omitempty"`
+	Address      *string   `json:"address,omitempty"`
+	Email        *string   `json:"email,omitempty"`
+	IsActive     bool      `json:"is_active"`
+	CreatedAt    time.Time `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
 }
 
 // BuyerLocation представляет адрес покупателя
@@ -186,14 +187,15 @@ type BuyerUser struct {
 
 // BuyerRequest представляет запрос на создание/обновление покупателя
 type BuyerRequest struct {
-	Name     string  `json:"name"`
-	INN      *string `json:"inn,omitempty"`
-	RegionID *string `json:"region_id,omitempty"`
-	Code     *string `json:"code,omitempty"`
-	Phone    *string `json:"phone,omitempty"`
-	Address  *string `json:"address,omitempty"`
-	Email    *string `json:"email,omitempty"`
-	IsActive bool    `json:"is_active"`
+	Name         string  `json:"name"`
+	INN          *string `json:"inn,omitempty"`
+	RegionID     *string `json:"region_id,omitempty"`
+	Code         *string `json:"code,omitempty"`
+	DeliveryCode *string `json:"delivery_code,omitempty"`
+	Phone        *string `json:"phone,omitempty"`
+	Address      *string `json:"address,omitempty"`
+	Email        *string `json:"email,omitempty"`
+	IsActive     bool    `json:"is_active"`
 }
 
 // BuyerUserRequest представляет запрос на создание пользователя покупателя

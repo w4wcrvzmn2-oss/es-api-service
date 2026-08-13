@@ -302,6 +302,7 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 		OrderDate    time.Time      `gorm:"column:order_date"`
 		Buyer        string         `gorm:"column:buyer"`
 		BuyerCode    sql.NullString `gorm:"column:buyer_code"`
+		BuyerDelivery sql.NullString `gorm:"column:buyer_delivery_code"`
 		BuyerINN     sql.NullString `gorm:"column:buyer_inn"`
 		ItemID       string         `gorm:"column:order_item_id"`
 		Address      string         `gorm:"column:address"`
@@ -326,6 +327,7 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 			o."CreatedAt" AS order_date,
 			b."Name" AS buyer,
 			b."Code" AS buyer_code,
+			b."DeliveryCode" AS buyer_delivery_code,
 			b."INN" AS buyer_inn,
 			CAST(oi."OrderLineID" AS TEXT) AS order_item_id,
 			COALESCE(bl."Address", '') AS address,
@@ -421,6 +423,7 @@ func (s *Server) handleSCOrdersExport(w http.ResponseWriter, r *http.Request) {
 						"supplier_code":    nullStr(rw.SupCode),
 						"supplier_name":    nullStr(rw.SuppName),
 						"buyer_code":       nullStr(rw.BuyerCode),
+						"delivery_code":    nullStr(rw.BuyerDelivery),
 						"buyer_name":       rw.Buyer,
 						"buyer_inn":        nullStr(rw.BuyerINN),
 						"location_address": rw.Address,

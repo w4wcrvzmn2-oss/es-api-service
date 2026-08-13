@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS "Buyer" (
     "IsActive" BOOLEAN NOT NULL,
     "CreatedAt" TIMESTAMPTZ NOT NULL,
     "Code" TEXT,
+    "DeliveryCode" TEXT,
     "Phone" TEXT,
     "Address" TEXT,
     "Email" TEXT

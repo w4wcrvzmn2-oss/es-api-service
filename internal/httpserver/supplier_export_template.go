@@ -55,6 +55,7 @@ func exportFieldCatalog() []exportField {
 
 		// — клиент/покупатель —
 		{"buyer_code", "Код клиента", "Код покупателя в системе. Теги: ID_CODE_C, CLIENTID"},
+		{"delivery_code", "Код доставки", "Код доставки покупателя (для маршрута/логистики поставщика). Теги: DELIVERYCODE, DOSTAVKA, ROUTE"},
 		{"buyer_name", "Покупатель", "Название аптеки/покупателя. Теги: CLIENT, CNAME"},
 		{"buyer_inn", "ИНН клиента", "ИНН покупателя. Теги: CLINN, ИНН"},
 		{"buyer_phone", "Телефон клиента", "Телефон покупателя. Теги: CPHONE"},

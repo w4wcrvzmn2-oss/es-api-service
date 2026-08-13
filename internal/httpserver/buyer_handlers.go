@@ -97,7 +97,7 @@ func (s *Server) handleGetBuyers(w http.ResponseWriter, r *http.Request) {
 		Select(`CAST(b."BuyerID" AS TEXT) AS "BuyerID",
 			b."Name", b."INN",
 			CAST(b."RegionID" AS TEXT) AS "RegionID",
-			b."Code", b."Phone", b."Address", b."Email",
+			b."Code", b."DeliveryCode", b."Phone", b."Address", b."Email",
 			b."IsActive", b."CreatedAt",
 			r."Name" AS "RegionName"`).
 		Joins(`LEFT JOIN "Region" r ON b."RegionID" = r."RegionID"`).
@@ -131,7 +131,7 @@ func (s *Server) handleGetBuyerByID(w http.ResponseWriter, r *http.Request, buye
 		Select(`CAST(b."BuyerID" AS TEXT) AS "BuyerID",
 			b."Name", b."INN",
 			CAST(b."RegionID" AS TEXT) AS "RegionID",
-			b."Code", b."Phone", b."Address", b."Email",
+			b."Code", b."DeliveryCode", b."Phone", b."Address", b."Email",
 			b."IsActive", b."CreatedAt",
 			r."Name" AS "RegionName"`).
 		Joins(`LEFT JOIN "Region" r ON b."RegionID" = r."RegionID"`).
@@ -178,11 +178,11 @@ func (s *Server) handleCreateBuyer(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err := s.database.ExecContext(ctx, `
 		INSERT INTO "Buyer" (
-			"BuyerID", "Name", "INN", "RegionID", "Code", "Phone", "Address", "Email", "IsActive", "CreatedAt"
+			"BuyerID", "Name", "INN", "RegionID", "Code", "DeliveryCode", "Phone", "Address", "Email", "IsActive", "CreatedAt"
 		) VALUES (
 			CAST(@buyerID AS UUID), @name, @inn,
 			CAST(NULLIF(CAST(@regionID AS TEXT), '') AS UUID),
-			@code, @phone, @address, @email, @isActive, (NOW() AT TIME ZONE 'utc')
+			@code, @deliveryCode, @phone, @address, @email, @isActive, (NOW() AT TIME ZONE 'utc')
 		)
 	`,
 		sql.Named("buyerID", buyerID),
@@ -190,6 +190,7 @@ func (s *Server) handleCreateBuyer(w http.ResponseWriter, r *http.Request) {
 		sql.Named("inn", nilIfEmpty(req.INN)),
 		sql.Named("regionID", regionID),
 		sql.Named("code", nilIfEmpty(req.Code)),
+		sql.Named("deliveryCode", nilIfEmpty(req.DeliveryCode)),
 		sql.Named("phone", nilIfEmpty(req.Phone)),
 		sql.Named("address", nilIfEmpty(req.Address)),
 		sql.Named("email", nilIfEmpty(req.Email)),
@@ -266,6 +267,7 @@ func (s *Server) handleUpdateBuyer(w http.ResponseWriter, r *http.Request, buyer
 			"INN" = @inn,
 			"RegionID" = CAST(NULLIF(CAST(@regionID AS TEXT), '') AS UUID),
 			"Code" = @code,
+			"DeliveryCode" = @deliveryCode,
 			"Phone" = @phone,
 			"Address" = @address,
 			"Email" = @email,
@@ -277,6 +279,7 @@ func (s *Server) handleUpdateBuyer(w http.ResponseWriter, r *http.Request, buyer
 		sql.Named("inn", nilIfEmpty(req.INN)),
 		sql.Named("regionID", regionID),
 		sql.Named("code", nilIfEmpty(req.Code)),
+		sql.Named("deliveryCode", nilIfEmpty(req.DeliveryCode)),
 		sql.Named("phone", nilIfEmpty(req.Phone)),
 		sql.Named("address", nilIfEmpty(req.Address)),
 		sql.Named("email", nilIfEmpty(req.Email)),

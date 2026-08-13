@@ -53,6 +53,7 @@ async function loadBuyer(id) {
             document.getElementById('name').value = data.name || '';
             document.getElementById('inn').value = data.inn || '';
             document.getElementById('code').value = data.code || '';
+            document.getElementById('deliveryCode').value = data.delivery_code || '';
             document.getElementById('phone').value = data.phone ? formatPhone(data.phone) : '';
             document.getElementById('address').value = data.address || '';
             document.getElementById('email').value = data.email || '';
@@ -97,6 +98,7 @@ async function handleSubmit(e) {
         inn: document.getElementById('inn').value || null,
         region_id: regionId || null,
         code: document.getElementById('code').value || null,
+        delivery_code: document.getElementById('deliveryCode').value || null,
         phone: document.getElementById('phone').value || null,
         address: address,
         email: document.getElementById('email').value || null,
