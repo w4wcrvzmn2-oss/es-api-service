@@ -973,7 +973,7 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				GROUP BY KOD_PRODUCER
 			) ep ON ep.KOD_PRODUCER = ef2.PRODUCER_COD
 			WHERE lp.rn = 1
-			  AND (@q = '' OR ef2.NAME LIKE @q)
+			  AND (@q = '' OR ef2.NAME ILIKE @q)
 			ORDER BY COALESCE(ef2.NAME, ''), ef2.NAME, COALESCE(lp.BatchNumber, ''), lp.ExpiryDate
 			OFFSET @offset LIMIT @limit
 		`
@@ -1056,7 +1056,7 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 				GROUP BY KOD_PRODUCER
 			) ep ON ep.KOD_PRODUCER = ef2.PRODUCER_COD
 			WHERE lp.rn = 1
-			  AND (@q = '' OR ef2.NAME LIKE @q)
+			  AND (@q = '' OR ef2.NAME ILIKE @q)
 			ORDER BY COALESCE(ef2.NAME, ''), ef2.NAME, s.Name, COALESCE(lp.BatchNumber, ''), lp.ExpiryDate, lp.FinalPrice
 			OFFSET @offset LIMIT @limit
 		`
@@ -1328,7 +1328,7 @@ func (s *Server) handleGetSupplierPriceSummary(w http.ResponseWriter, r *http.Re
 		}
 		if qLike != "" {
 			join = " LEFT JOIN es_ef2 ef2 ON sp.GUID_ES = ef2.GUID_ES"
-			nameFilter = " AND ef2.NAME LIKE @q"
+			nameFilter = " AND ef2.NAME ILIKE @q"
 			countArgs = append(countArgs, sql.Named("q", qLike))
 		}
 		countQuery := `SELECT COUNT(*) FROM (
