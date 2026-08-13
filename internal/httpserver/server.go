@@ -192,13 +192,16 @@ func (s *Server) setupStaticFiles(mux *http.ServeMux) {
 			return
 		}
 
-		// Настраиваем заголовки кеширования — no-cache для всех файлов (dev)
-		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		w.Header().Set("Pragma", "no-cache")
-		w.Header().Set("Expires", "0")
+		// Кэш: vendor-библиотеки и шрифты не меняются — кэшируем надолго; HTML и наши
+		// css/js — no-cache (ревалидация → 304 без тела). Раньше no-store тянул всё заново.
+		ext := strings.ToLower(filepath.Ext(requestPath))
+		if strings.Contains(requestPath, "/vendor/") || ext == ".woff" || ext == ".woff2" || ext == ".ttf" || ext == ".eot" {
+			w.Header().Set("Cache-Control", "public, max-age=2592000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
 
 		// Определяем Content-Type
-		ext := strings.ToLower(filepath.Ext(requestPath))
 		switch ext {
 		case ".html":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -216,8 +219,10 @@ func (s *Server) setupStaticFiles(mux *http.ServeMux) {
 			w.Header().Set("Content-Type", "image/gif")
 		case ".svg":
 			w.Header().Set("Content-Type", "image/svg+xml")
-		default:
-			w.Header().Set("Content-Type", "application/octet-stream")
+		case ".woff":
+			w.Header().Set("Content-Type", "font/woff")
+		case ".woff2":
+			w.Header().Set("Content-Type", "font/woff2")
 		}
 
 		// Открываем и отдаем файл
@@ -227,12 +232,8 @@ func (s *Server) setupStaticFiles(mux *http.ServeMux) {
 			return
 		}
 		defer file.Close()
-
-		// Устанавливаем размер файла
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
-
-		// Копируем содержимое файла в ответ
-		io.Copy(w, file)
+		// ServeContent сам ставит Last-Modified и отвечает 304 на If-Modified-Since.
+		http.ServeContent(w, r, filepath.Base(filePath), fileInfo.ModTime(), file)
 	}
 
 	// Регистрируем обработчик для всех путей (должен быть последним)
@@ -468,13 +469,16 @@ func (s *Server) setupStaticFiles2(mux *http.ServeMux) {
 			return
 		}
 
-		// Настраиваем заголовки кеширования — no-cache для всех файлов (dev)
-		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		w.Header().Set("Pragma", "no-cache")
-		w.Header().Set("Expires", "0")
+		// Кэш: vendor-библиотеки и шрифты не меняются — кэшируем надолго; HTML и наши
+		// css/js — no-cache (ревалидация → 304 без тела). Раньше no-store тянул всё заново.
+		ext := strings.ToLower(filepath.Ext(requestPath))
+		if strings.Contains(requestPath, "/vendor/") || ext == ".woff" || ext == ".woff2" || ext == ".ttf" || ext == ".eot" {
+			w.Header().Set("Cache-Control", "public, max-age=2592000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
 
 		// Определяем Content-Type
-		ext := strings.ToLower(filepath.Ext(requestPath))
 		switch ext {
 		case ".html":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -492,8 +496,10 @@ func (s *Server) setupStaticFiles2(mux *http.ServeMux) {
 			w.Header().Set("Content-Type", "image/gif")
 		case ".svg":
 			w.Header().Set("Content-Type", "image/svg+xml")
-		default:
-			w.Header().Set("Content-Type", "application/octet-stream")
+		case ".woff":
+			w.Header().Set("Content-Type", "font/woff")
+		case ".woff2":
+			w.Header().Set("Content-Type", "font/woff2")
 		}
 
 		// Открываем и отдаем файл
@@ -503,12 +509,8 @@ func (s *Server) setupStaticFiles2(mux *http.ServeMux) {
 			return
 		}
 		defer file.Close()
-
-		// Устанавливаем размер файла
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
-
-		// Копируем содержимое файла в ответ
-		io.Copy(w, file)
+		// ServeContent сам ставит Last-Modified и отвечает 304 на If-Modified-Since.
+		http.ServeContent(w, r, filepath.Base(filePath), fileInfo.ModTime(), file)
 	}
 
 	// Регистрируем обработчик для всех путей (должен быть последним)
@@ -552,11 +554,18 @@ func (s *Server) setupSupplierStaticFiles(mux *http.ServeMux) {
 			reqPath = "/index.html"
 		}
 
-		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		w.Header().Set("Pragma", "no-cache")
-		w.Header().Set("Expires", "0")
-
 		ext := strings.ToLower(filepath.Ext(reqPath))
+
+		// Кэш: vendor-библиотеки и шрифты не меняются — кэшируем надолго (без запроса к серверу).
+		// HTML и наши css/js — no-cache: браузер кэширует, но ревалидирует, сервер отдаёт
+		// 304 без тела если файл не изменился. Раньше стоял no-store → всё качалось заново каждый раз.
+		isVendor := strings.Contains(reqPath, "/vendor/")
+		if isVendor || ext == ".woff" || ext == ".woff2" || ext == ".ttf" || ext == ".eot" {
+			w.Header().Set("Cache-Control", "public, max-age=2592000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+
 		switch ext {
 		case ".html":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -572,10 +581,10 @@ func (s *Server) setupSupplierStaticFiles(mux *http.ServeMux) {
 			w.Header().Set("Content-Type", "image/jpeg")
 		case ".svg":
 			w.Header().Set("Content-Type", "image/svg+xml")
-		case ".woff", ".woff2", ".ttf", ".eot":
-			w.Header().Set("Content-Type", "application/octet-stream")
-		default:
-			w.Header().Set("Content-Type", "application/octet-stream")
+		case ".woff":
+			w.Header().Set("Content-Type", "font/woff")
+		case ".woff2":
+			w.Header().Set("Content-Type", "font/woff2")
 		}
 
 		file, err := os.Open(filePath)
@@ -584,8 +593,8 @@ func (s *Server) setupSupplierStaticFiles(mux *http.ServeMux) {
 			return
 		}
 		defer file.Close()
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
-		io.Copy(w, file)
+		// ServeContent сам ставит Last-Modified и отвечает 304 на If-Modified-Since.
+		http.ServeContent(w, r, filepath.Base(filePath), fileInfo.ModTime(), file)
 	}
 	mux.HandleFunc("/supplier/", supplierHandler)
 }
