@@ -13,7 +13,8 @@
         { href: p + 'price-lists.html',    icon: 'bi-list-check',   text: '\u041f\u0440\u0430\u0439\u0441\u044b',       file: 'price-lists.html' },
         { href: p + 'orders.html',         icon: 'bi-cart3',        text: '\u0417\u0430\u043a\u0430\u0437\u044b',       file: 'orders.html' },
         { href: p + 'links.html',          icon: 'bi-link-45deg',   text: '\u0421\u0432\u044f\u0437\u043a\u0438',       file: 'links.html' },
-        { href: p + 'buyers.html',         icon: 'bi-people',       text: '\u041f\u043e\u043a\u0443\u043f\u0430\u0442\u0435\u043b\u0438',   file: 'buyers.html' }
+        { href: p + 'buyers.html',         icon: 'bi-people',       text: '\u041f\u043e\u043a\u0443\u043f\u0430\u0442\u0435\u043b\u0438',   file: 'buyers.html' },
+        { href: p + 'chat.html',           icon: 'bi-robot',        text: '\u0427\u0430\u0442 ExestAI', file: 'chat.html' }
     ];
 
     const parentMap = {

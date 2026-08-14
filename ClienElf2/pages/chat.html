@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Чат с ExestAI - PharmData</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%232b6cab'/><rect x='42' y='22' width='16' height='56' rx='5' fill='%23fff'/><rect x='22' y='42' width='56' height='16' rx='5' fill='%23fff'/></svg>">
+    <link href="../vendor/bootstrap.min.css" rel="stylesheet">
+    <link href="../vendor/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/custom.css">
+    <style>
+        .chat-card { max-width: 900px; margin: 0 auto; }
+        #chatLog { height: calc(100vh - 320px); min-height: 320px; overflow-y: auto; padding: 16px; }
+        .msg { display: flex; margin-bottom: 12px; }
+        .msg .bubble { max-width: 78%; padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; word-wrap: break-word; line-height: 1.4; }
+        .msg.user { justify-content: flex-end; }
+        .msg.user .bubble { background: #2b6cab; color: #fff; border-bottom-right-radius: 4px; }
+        .msg.ai .bubble { background: #f1f4f8; color: #1f2933; border-bottom-left-radius: 4px; }
+        .msg.ai.err .bubble { background: #fdecec; color: #a1352f; }
+        .typing .bubble { color: #8a97a6; font-style: italic; }
+    </style>
+</head>
+<body class="bg-light">
+    <script src="../js/auth.js"></script>
+    <script>if (!AuthManager.isAuthenticated()) window.location.href = '../login.html';</script>
+    <script src="../js/nav-component.js"></script>
+
+    <div class="container-fluid py-4 px-3 px-lg-5">
+        <div class="d-flex justify-content-between align-items-center mb-3 chat-card">
+            <div>
+                <h1 class="mb-0"><i class="bi bi-robot"></i> Чат с ExestAI</h1>
+                <span class="text-muted fs-6">Ассистент платформы ЭльФиСА — спросите что угодно по работе кабинета</span>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" id="btnClear" title="Очистить"><i class="bi bi-trash"></i> Очистить</button>
+        </div>
+
+        <div class="card shadow-sm chat-card">
+            <div id="chatLog"></div>
+            <div class="card-footer bg-white">
+                <div class="input-group">
+                    <textarea id="chatInput" class="form-control" rows="1" placeholder="Напишите сообщение… (Enter — отправить, Shift+Enter — перенос)" style="resize:none;max-height:140px"></textarea>
+                    <button class="btn btn-primary" id="btnSend"><i class="bi bi-send"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/toast.js"></script>
+    <script src="../js/api.js"></script>
+    <script src="../js/chat.js"></script>
+</body>
+</html>

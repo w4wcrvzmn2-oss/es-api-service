@@ -271,6 +271,7 @@ func (s *Server) setupAPIRoutes(mux *http.ServeMux) {
 	tableRoute("/api/region", "Region")
 	mux.HandleFunc("/api/region/create", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleCreateRegion)).ServeHTTP)))
 	mux.HandleFunc("/api/region/", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleRegionRouter)).ServeHTTP)))
+	mux.HandleFunc("/api/ai/chat", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleAIChat)).ServeHTTP)))
 	tableRoute("/api/es_atc", "es_atc")
 	tableRoute("/api/es_country", "es_country")
 	tableRoute("/api/es_ef2", "es_ef2")

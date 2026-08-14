@@ -22,6 +22,7 @@ from typing import Optional, List, Dict, Any
 import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from docx import Document
@@ -35,6 +36,16 @@ API_BASE = os.environ.get("ELF_API_BASE", "https://24pharmdata.ru").rstrip("/")
 HTTP_TIMEOUT = int(os.environ.get("ELF_HTTP_TIMEOUT", "60"))
 
 app = FastAPI(title="Elfisa AI Reports", version="1.0")
+
+# CORS — чтобы кабинет phd (phd.24pharmdata.ru) мог звать /ai/chat кросс-доменно
+# из браузера. На проксируемые (Caddy) POST-запросы не влияет: 400 «error parsing
+# the body» ловил curl с Expect:100-continue, а не CORS — браузер/десктоп его не шлют.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 REPORT_TYPES = {"orders", "orders_items", "by_supplier", "by_item", "by_pharmacy"}
 
@@ -58,6 +69,32 @@ class MapReq(BaseModel):
     # fields:  [{"key": str, "description": str}]
     columns: List[Dict[str, Any]]
     fields: List[Dict[str, Any]]
+
+
+class ChatReq(BaseModel):
+    message: str
+    history: Optional[List[Dict[str, str]]] = None  # [{"role": "...", "content": "..."}]
+
+
+# Персона чат-ассистента ExestAI (раздел «Чат» в кабинете).
+EXEST_AI_SYSTEM = (
+    "Ты — ExestAI, дружелюбный ассистент платформы «ЭльФиСА» (Электронная Фармация) — "
+    "сервиса заказа лекарств для аптек и кабинета поставщика. Помогаешь пользователю: "
+    "объясняешь как работать с прайсами, заказами, поставщиками, выгрузками, отчётами; "
+    "отвечаешь на общие вопросы. Кратко, вежливо и по делу. "
+    "Если чего-то не знаешь наверняка — честно скажи об этом. "
+    "ВАЖНО: отвечай СТРОГО на русском языке. Никогда не используй китайские иероглифы "
+    "или другие языки — только русский (латиница допустима лишь для названий и терминов)."
+)
+
+# Запрос «почему мы круче / сравни с конкурентом / реклама» — это НЕ отчёт по данным,
+# а маркетинговый текст. Такие промты уводим в рекламный режим (честно помечаем).
+MARKETING_KEYWORDS = (
+    "круче", "сравни", "сравнени", "по сравнению", "реклам", "преимуществ",
+    "конкурент", "аналит", "чем хорош", "чем лучш", "почему выбрать",
+    "почему мы", "почему эта программа", "программа класс", "класс по",
+    "лучше всех", "лучше конкурент", "достоинств",
+)
 
 
 def _today() -> dt.date:
@@ -328,6 +365,63 @@ def build_xlsx(meta, cols, rows) -> bytes:
     return buf.getvalue()
 
 
+def is_marketing_prompt(prompt: str) -> bool:
+    p = (prompt or "").lower()
+    return any(k in p for k in MARKETING_KEYWORDS)
+
+
+def marketing_text(prompt: str) -> str:
+    """Рекламный текст про ЭльФиСА (не из данных). Best-effort через Ollama."""
+    system = (
+        "Ты — маркетолог платформы «ЭльФиСА» (Электронная Фармация): сервис заказа "
+        "лекарств для аптек. Возможности: единый прайс от многих поставщиков в одном окне, "
+        "быстрый поиск по названию, заказ в пару кликов, кросс-платформенный клиент "
+        "(Windows/Mac/Linux) с авто-обновлением, ИИ-отчёты, выгрузка заказов поставщикам "
+        "по их шаблонам (DBF/Excel/XML), справочники и регионы. "
+        "Напиши бодрый, но правдоподобный рекламный текст (6-9 предложений) о том, почему "
+        "ЭльФиСА — отличный выбор для аптеки. НЕ выдумывай конкретные цифры и статистику, "
+        "не приписывай конкурентам ложных фактов. Пиши по-русски."
+    )
+    try:
+        payload = {"model": OLLAMA_MODEL, "stream": False, "options": {"temperature": 0.8},
+                   "messages": [{"role": "system", "content": system},
+                                {"role": "user", "content": prompt}]}
+        r = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=HTTP_TIMEOUT)
+        r.raise_for_status()
+        return r.json().get("message", {}).get("content", "").strip()
+    except Exception:
+        return (
+            "ЭльФиСА собирает прайсы многих поставщиков в одном окне — не нужно держать "
+            "десяток программ и сайтов. Поиск по названию находит препарат за секунды, "
+            "а заказ оформляется в пару кликов. Клиент работает на Windows, Mac и Linux и "
+            "обновляется сам. ИИ-отчёты и удобная выгрузка заказов экономят время каждый день. "
+            "Это простой и современный инструмент для ежедневной работы аптеки."
+        )
+
+
+def build_marketing_docx(prompt: str, text: str) -> bytes:
+    doc = Document()
+    h = doc.add_heading("Почему ЭльФиСА — отличный выбор", level=1)
+    h.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    note = doc.add_paragraph(
+        "Рекламный текст, сгенерирован ИИ по вашему запросу. Это не аналитика и не "
+        "основано на данных ваших заказов.")
+    note.runs[0].italic = True
+    note.runs[0].font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+    for para in (text or "").split("\n"):
+        para = para.strip()
+        if para:
+            doc.add_paragraph(para)
+    foot = doc.add_paragraph(
+        f'Сформировано ИИ {dt.datetime.now().strftime("%d.%m.%Y %H:%M")} · Электронная Фармация')
+    foot.runs[0].italic = True
+    foot.runs[0].font.size = Pt(8)
+    foot.runs[0].font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
 @app.get("/health")
 def health():
     ok_ollama = False
@@ -344,6 +438,21 @@ def generate(req: GenReq):
         raise HTTPException(status_code=400, detail="Нет токена")
     if not req.prompt or not req.prompt.strip():
         raise HTTPException(status_code=400, detail="Пустой запрос")
+
+    # Маркетинговый/сравнительный запрос — не отчёт по данным, а рекламный текст.
+    if is_marketing_prompt(req.prompt):
+        text = marketing_text(req.prompt)
+        data = build_marketing_docx(req.prompt, text)
+        from urllib.parse import quote
+        fname = "Почему ЭльФиСА.docx"
+        headers = {
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(fname)}",
+            "X-Report-Type": "marketing",
+        }
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers=headers)
 
     raw = extract_intent(req.prompt)
     meta = normalize_intent(raw, req.format)
@@ -373,6 +482,29 @@ def generate(req: GenReq):
         "X-Report-Rows": str(len(rows)),
     }
     return StreamingResponse(io.BytesIO(data), media_type=media, headers=headers)
+
+
+@app.post("/chat")
+def chat(req: ChatReq):
+    """Чат с ExestAI — общий ассистент кабинета (раздел «Чат»)."""
+    if not req.message or not req.message.strip():
+        raise HTTPException(status_code=400, detail="Пустое сообщение")
+    messages = [{"role": "system", "content": EXEST_AI_SYSTEM}]
+    for m in (req.history or [])[-10:]:
+        role = m.get("role")
+        content = (m.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": req.message.strip()})
+    payload = {"model": OLLAMA_MODEL, "stream": False,
+               "options": {"temperature": 0.4}, "messages": messages}
+    try:
+        r = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=HTTP_TIMEOUT)
+        r.raise_for_status()
+        reply = r.json().get("message", {}).get("content", "").strip()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"ИИ недоступен: {e}")
+    return JSONResponse({"reply": reply or "Извините, не смог сформировать ответ."})
 
 
 @app.post("/map-template")
