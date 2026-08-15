@@ -254,6 +254,13 @@ func writeRateLimited(w http.ResponseWriter, retryAfter time.Duration) {
 
 func (s *Server) securityMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Security-заголовки на ВСЕ ответы (TLS терминирует Caddy → клиент по HTTPS).
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")               // не угадывать MIME
+		h.Set("X-Frame-Options", "SAMEORIGIN")                   // защита от кликджекинга
+		h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains") // только HTTPS
+		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+
 		if s.limiter == nil {
 			next.ServeHTTP(w, r)
 			return

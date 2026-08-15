@@ -739,15 +739,27 @@ func (s *Server) gzipMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// allowedCORSOrigin — белый список доменов для кросс-доменных запросов из браузера.
+func allowedCORSOrigin(origin string) bool {
+	switch origin {
+	case "https://24pharmdata.ru", "https://www.24pharmdata.ru",
+		"https://phd.24pharmdata.ru", "https://cdn.24pharmdata.ru":
+		return true
+	}
+	// Локальная разработка.
+	return strings.HasPrefix(origin, "http://localhost") ||
+		strings.HasPrefix(origin, "http://127.0.0.1")
+}
+
 // corsMiddleware добавляет CORS заголовки
 func (s *Server) corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// CORS только для наших доменов. Куки не используем (auth по Bearer-токену),
+		// поэтому Allow-Credentials убран, а origin не отражаем «в лоб» для любого сайта.
 		origin := r.Header.Get("Origin")
-		if origin != "" && origin != "null" {
+		if origin != "" && allowedCORSOrigin(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-		} else {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Add("Vary", "Origin")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-Requested-With, If-None-Match, Accept-Encoding")
