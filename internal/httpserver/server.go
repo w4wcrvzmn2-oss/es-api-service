@@ -262,15 +262,27 @@ func (s *Server) setupRoutes2(mux *http.ServeMux) {
 
 // setupAPIRoutes настраивает API маршруты (общие для обоих серверов)
 func (s *Server) setupAPIRoutes(mux *http.ServeMux) {
+	// mgr — обёртка для менеджерских ручек: валидный токен + роль admin/manager.
+	// Раньше стоял только JWTMiddleware (любая роль) — покупатель мог читать/писать
+	// всё менеджерское (обход контроля доступа). RequireRole закрывает это.
+	mgr := func(h http.HandlerFunc) func(http.ResponseWriter, *http.Request) {
+		return s.corsMiddleware(s.loggingMiddleware(
+			s.authService.JWTMiddleware(
+				s.authService.RequireRole("admin", "manager")(http.HandlerFunc(h)),
+			).ServeHTTP,
+		))
+	}
+
 	tableRoute := func(path, table string) {
-		mux.HandleFunc(path, s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc(path, mgr(func(w http.ResponseWriter, r *http.Request) {
 			s.handleTableData(w, r, table)
-		})).ServeHTTP)))
+		}))
 	}
 
 	tableRoute("/api/region", "Region")
-	mux.HandleFunc("/api/region/create", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleCreateRegion)).ServeHTTP)))
-	mux.HandleFunc("/api/region/", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleRegionRouter)).ServeHTTP)))
+	mux.HandleFunc("/api/region/create", mgr(s.handleCreateRegion))
+	mux.HandleFunc("/api/region/", mgr(s.handleRegionRouter))
+	// Чат ExestAI — любому авторизованному (buyer/supplier/manager).
 	mux.HandleFunc("/api/ai/chat", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleAIChat)).ServeHTTP)))
 	tableRoute("/api/es_atc", "es_atc")
 	tableRoute("/api/es_country", "es_country")
@@ -288,7 +300,7 @@ func (s *Server) setupAPIRoutes(mux *http.ServeMux) {
 	tableRoute("/api/es_supplier", "es_supplier")
 
 	// Информация о полях таблиц
-	mux.HandleFunc("/api/fields/", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleFieldsInfo)).ServeHTTP)))
+	mux.HandleFunc("/api/fields/", mgr(s.handleFieldsInfo))
 
 	// Синхронизация справочника препаратов
 	mux.HandleFunc("/api/sync/drugs", s.corsMiddleware(s.loggingMiddleware(
@@ -298,30 +310,30 @@ func (s *Server) setupAPIRoutes(mux *http.ServeMux) {
 	)))
 
 	// Поставщики
-	mux.HandleFunc("/api/suppliers", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetSuppliers)).ServeHTTP)))
-	mux.HandleFunc("/api/suppliers/", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleSuppliersRouter)).ServeHTTP)))
-	mux.HandleFunc("/api/suppliers/create", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleCreateSupplier)).ServeHTTP)))
-	mux.HandleFunc("/api/supplier-markup-policies", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleSupplierMarkupPoliciesRouter)).ServeHTTP)))
-	mux.HandleFunc("/api/supplier-markup-policies/", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleSupplierMarkupPoliciesRouter)).ServeHTTP)))
+	mux.HandleFunc("/api/suppliers", mgr(s.handleGetSuppliers))
+	mux.HandleFunc("/api/suppliers/", mgr(s.handleSuppliersRouter))
+	mux.HandleFunc("/api/suppliers/create", mgr(s.handleCreateSupplier))
+	mux.HandleFunc("/api/supplier-markup-policies", mgr(s.handleSupplierMarkupPoliciesRouter))
+	mux.HandleFunc("/api/supplier-markup-policies/", mgr(s.handleSupplierMarkupPoliciesRouter))
 
 	// Точки импорта
-	mux.HandleFunc("/api/import-points", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetImportPoints)).ServeHTTP)))
-	mux.HandleFunc("/api/import-points/", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleImportPointsRouter)).ServeHTTP)))
-	mux.HandleFunc("/api/import-points/create", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleCreateImportPoint)).ServeHTTP)))
-	mux.HandleFunc("/api/ftp/test", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleFTPTest)).ServeHTTP)))
+	mux.HandleFunc("/api/import-points", mgr(s.handleGetImportPoints))
+	mux.HandleFunc("/api/import-points/", mgr(s.handleImportPointsRouter))
+	mux.HandleFunc("/api/import-points/create", mgr(s.handleCreateImportPoint))
+	mux.HandleFunc("/api/ftp/test", mgr(s.handleFTPTest))
 
 	// Маппинги полей
-	mux.HandleFunc("/api/field-mappings", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetFieldMappings)).ServeHTTP)))
-	mux.HandleFunc("/api/field-mappings/save", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleSaveFieldMapping)).ServeHTTP)))
-	mux.HandleFunc("/api/field-mappings/save-all", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleSaveAllFieldMappings)).ServeHTTP)))
+	mux.HandleFunc("/api/field-mappings", mgr(s.handleGetFieldMappings))
+	mux.HandleFunc("/api/field-mappings/save", mgr(s.handleSaveFieldMapping))
+	mux.HandleFunc("/api/field-mappings/save-all", mgr(s.handleSaveAllFieldMappings))
 
 	// DBF анализ и загрузка
-	mux.HandleFunc("/api/dbf/analyze", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleAnalyzeDBF)).ServeHTTP)))
-	mux.HandleFunc("/api/dbf/upload", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleUploadDBF)).ServeHTTP)))
-	mux.HandleFunc("/api/target-fields", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetTargetFields)).ServeHTTP)))
+	mux.HandleFunc("/api/dbf/analyze", mgr(s.handleAnalyzeDBF))
+	mux.HandleFunc("/api/dbf/upload", mgr(s.handleUploadDBF))
+	mux.HandleFunc("/api/target-fields", mgr(s.handleGetTargetFields))
 
 	// Импорт файлов
-	mux.HandleFunc("/api/import/file", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleImportFile)).ServeHTTP)))
+	mux.HandleFunc("/api/import/file", mgr(s.handleImportFile))
 	mux.HandleFunc("/api/invoice-imports", s.corsMiddleware(s.loggingMiddleware(
 		s.authService.JWTMiddleware(
 			s.authService.RequireRole("admin", "manager")(http.HandlerFunc(s.handleInvoiceImportsRouter)),
@@ -333,34 +345,35 @@ func (s *Server) setupAPIRoutes(mux *http.ServeMux) {
 		).ServeHTTP,
 	)))
 
-	// Сопоставление прайсов
-	mux.HandleFunc("/api/match/invoice-data", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleMatchInvoiceData)).ServeHTTP)))
-	mux.HandleFunc("/api/supplier-prices", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleSupplierPricesRouter)).ServeHTTP)))
-	mux.HandleFunc("/api/supplier-prices/", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleSupplierPricesRouter)).ServeHTTP)))
+	// Сопоставление прайсов (менеджерское). Кроме /summary — его читает десктоп покупателя.
+	mux.HandleFunc("/api/match/invoice-data", mgr(s.handleMatchInvoiceData))
+	mux.HandleFunc("/api/supplier-prices", mgr(s.handleSupplierPricesRouter))
+	mux.HandleFunc("/api/supplier-prices/", mgr(s.handleSupplierPricesRouter))
+	// /summary — сводный прайс для покупателя (десктоп): любому авторизованному.
 	mux.HandleFunc("/api/supplier-prices/summary", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetSupplierPriceSummary)).ServeHTTP)))
-	mux.HandleFunc("/api/supplier-prices/create", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleCreateSupplierPrice)).ServeHTTP)))
+	mux.HandleFunc("/api/supplier-prices/create", mgr(s.handleCreateSupplierPrice))
 
 	// Глобальная статистика
-	mux.HandleFunc("/api/stats/global", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGlobalStats)).ServeHTTP)))
-	mux.HandleFunc("/api/monitoring", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleMonitoring)).ServeHTTP)))
+	mux.HandleFunc("/api/stats/global", mgr(s.handleGlobalStats))
+	mux.HandleFunc("/api/monitoring", mgr(s.handleMonitoring))
 
-	// Поиск препаратов
-	mux.HandleFunc("/api/drugs/search", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleSearchDrugs)).ServeHTTP)))
+	// Поиск препаратов (менеджерский матчинг)
+	mux.HandleFunc("/api/drugs/search", mgr(s.handleSearchDrugs))
 
 	// Аналоги и синонимы препарата
 	mux.HandleFunc("/api/drug/analogs-synonyms", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetDrugAnalogsAndSynonyms)).ServeHTTP)))
 
 	// Инструкции по применению
-	mux.HandleFunc("/api/instruction", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetInstruction)).ServeHTTP)))
+	mux.HandleFunc("/api/instruction", mgr(s.handleGetInstruction))
 
-	// Прайс-листы
-	mux.HandleFunc("/api/price-lists", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handlePriceListsRouter)).ServeHTTP)))
-	mux.HandleFunc("/api/price-lists/", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handlePriceListsRouter)).ServeHTTP)))
-	mux.HandleFunc("/api/price-lists/create", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleCreatePriceList)).ServeHTTP)))
+	// Прайс-листы (менеджерские; десктоп покупателя использует /api/buyer/price-lists)
+	mux.HandleFunc("/api/price-lists", mgr(s.handlePriceListsRouter))
+	mux.HandleFunc("/api/price-lists/", mgr(s.handlePriceListsRouter))
+	mux.HandleFunc("/api/price-lists/create", mgr(s.handleCreatePriceList))
 
 	// Логи аудита
-	mux.HandleFunc("/api/audit-logs", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetAuditLogs)).ServeHTTP)))
-	mux.HandleFunc("/api/audit-logs/stats", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetAuditLogStats)).ServeHTTP)))
+	mux.HandleFunc("/api/audit-logs", mgr(s.handleGetAuditLogs))
+	mux.HandleFunc("/api/audit-logs/stats", mgr(s.handleGetAuditLogStats))
 
 	// Кабинет менеджера: поиск препарата с ценами поставщиков
 	mux.HandleFunc("/api/manager/drug-offers", s.corsMiddleware(s.loggingMiddleware(
@@ -385,15 +398,15 @@ func (s *Server) setupAPIRoutes(mux *http.ServeMux) {
 			s.authService.RequireRole("admin", "manager")(http.HandlerFunc(s.handleOrdersRouter)),
 		).ServeHTTP,
 	)))
-	mux.HandleFunc("/api/order-statuses", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleGetOrderStatuses)).ServeHTTP)))
+	mux.HandleFunc("/api/order-statuses", mgr(s.handleGetOrderStatuses))
 
-	// Покупатели
-	mux.HandleFunc("/api/buyers", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleBuyersRouter)).ServeHTTP)))
-	mux.HandleFunc("/api/buyers/", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleBuyersRouter)).ServeHTTP)))
-	mux.HandleFunc("/api/buyer-users", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleBuyerUsersRouter)).ServeHTTP)))
-	mux.HandleFunc("/api/buyer-users/", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleBuyerUsersRouter)).ServeHTTP)))
-	mux.HandleFunc("/api/buyer-locations", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleBuyerLocationsRouter)).ServeHTTP)))
-	mux.HandleFunc("/api/buyer-locations/", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleBuyerLocationsRouter)).ServeHTTP)))
+	// Покупатели (менеджерское управление; PII — было доступно любому токену)
+	mux.HandleFunc("/api/buyers", mgr(s.handleBuyersRouter))
+	mux.HandleFunc("/api/buyers/", mgr(s.handleBuyersRouter))
+	mux.HandleFunc("/api/buyer-users", mgr(s.handleBuyerUsersRouter))
+	mux.HandleFunc("/api/buyer-users/", mgr(s.handleBuyerUsersRouter))
+	mux.HandleFunc("/api/buyer-locations", mgr(s.handleBuyerLocationsRouter))
+	mux.HandleFunc("/api/buyer-locations/", mgr(s.handleBuyerLocationsRouter))
 
 	// Внешний API для покупателей
 	mux.HandleFunc("/api/buyer/", s.corsMiddleware(s.loggingMiddleware(s.authService.JWTMiddleware(http.HandlerFunc(s.handleBuyerOrdersRouter)).ServeHTTP)))
