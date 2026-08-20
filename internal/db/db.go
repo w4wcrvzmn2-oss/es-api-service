@@ -97,11 +97,23 @@ func openPostgres(dsn string, maxOpen, maxIdle int) (*Database, error) {
 	db.SetConnMaxLifetime(30 * time.Minute)
 	db.SetConnMaxIdleTime(10 * time.Minute)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
+	// Ретрай пинга: после перезагрузки сервера PostgreSQL может подниматься
+	// дольше, чем стартует наш сервис (даже с зависимостью службы «Running» у PG
+	// ≠ «принимает коннекты»). Ждём готовности БД до ~90с, иначе сервис остаётся
+	// без базы и отдаёт 503 на все данные.
+	var pingErr error
+	for attempt := 0; attempt < 30; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		pingErr = db.PingContext(ctx)
+		cancel()
+		if pingErr == nil {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if pingErr != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("не удалось подключиться к PostgreSQL: %w", err)
+		return nil, fmt.Errorf("не удалось подключиться к PostgreSQL за 30 попыток: %w", pingErr)
 	}
 
 	gdb, err := wrapGorm(db)
